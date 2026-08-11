@@ -1,0 +1,6 @@
+set(__QT_DEPLOY_TARGET_heidr_term_FILE /home/daphen/personal/heidr/libghostty-spike/build-vendored/libheidr_term.so)
+set(__QT_DEPLOY_TARGET_heidr_term_TYPE SHARED_LIBRARY)
+set(__QT_DEPLOY_TARGET_heidr_termplugin_FILE /home/daphen/personal/heidr/libghostty-spike/build-vendored/qml/Heidr/libheidr_termplugin.so)
+set(__QT_DEPLOY_TARGET_heidr_termplugin_TYPE MODULE_LIBRARY)
+set(__QT_DEPLOY_TARGET_heidr-term-spike_FILE /home/daphen/personal/heidr/libghostty-spike/build-vendored/heidr-term-spike)
+set(__QT_DEPLOY_TARGET_heidr-term-spike_TYPE EXECUTABLE)

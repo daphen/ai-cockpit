@@ -1,0 +1,7 @@
+
+set(target "heidr-term-spike")
+set(working_dir "/home/daphen/personal/heidr/libghostty-spike")
+set(src_and_dest_list
+
+)
+set(timestamp_file "/home/daphen/personal/heidr/libghostty-spike/build-vendored/.qt/heidr-term-spike_res.txt")

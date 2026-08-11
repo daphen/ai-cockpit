@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/qt/qml/HeidrApp">
+    <file alias="qmldir">/home/daphen/personal/heidr/libghostty-spike/build-vendored/HeidrApp/qmldir</file>
+  </qresource>
+</RCC>
+

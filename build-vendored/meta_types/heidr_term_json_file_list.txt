@@ -1,0 +1,1 @@
+/home/daphen/personal/heidr/libghostty-spike/build-vendored/heidr_term_autogen/include/../EWIEGA46WW/moc_TermView.cpp.json

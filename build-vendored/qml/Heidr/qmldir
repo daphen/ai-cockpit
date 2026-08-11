@@ -1,0 +1,8 @@
+module Heidr
+linktarget heidr_termplugin
+optional plugin heidr_termplugin
+classname HeidrPlugin
+typeinfo heidr_term.qmltypes
+prefer :/qt/qml/Heidr/
+depends QtQuick
+
