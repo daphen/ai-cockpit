@@ -20,6 +20,24 @@ Item {
   property int feedGen: 0
   readonly property int feedCap: 200
 
+  // Pending ask_user questions (extension_ui_request): sid -> request obj
+  // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
+  property var asks: ({})
+  property int askGen: 0
+  function askFor(sid) { return asks[sid] || null }
+  function answerAsk(sid, payload) {
+    var a = asks[sid]; if (!a) return
+    var msg = { type: "extension_ui_response", session: sid, id: a.id }
+    for (var k in payload) msg[k] = payload[k]
+    send(msg)
+    // Echo the reply into the feed so there's a record of what you answered.
+    var label = payload.cancelled ? "cancelled"
+              : (payload.confirmed !== undefined ? (payload.confirmed ? "approved" : "declined")
+              : (payload.value !== undefined ? String(payload.value) : ""))
+    if (label) _push(sid, { kind: "user", text: "↳ " + label })
+    var na = asks; delete na[sid]; asks = na; askGen++
+  }
+
   // Per-session changed-files (from the daemon's `changes` diff broadcast).
   property var changes: ({})       // sid -> [{path, add, del}]
   property var changesCwd: ({})    // sid -> cwd (to resolve absolute paths)
@@ -246,6 +264,14 @@ Item {
     const sid = m.session
     if (!sid) return
 
+    if (t === "extension_ui_request") {
+      var mm = m.method
+      if (mm === "confirm" || mm === "select" || mm === "input" || mm === "editor") {
+        var na = asks; na[sid] = m; asks = na; askGen++
+      }
+      // notify / setStatus / setWidget etc. are UI directives, not questions.
+      return
+    }
     if (t === "changes") {
       changes[sid] = _parseChanges(m.diff || "")
       changesCwd[sid] = m.cwd || ""

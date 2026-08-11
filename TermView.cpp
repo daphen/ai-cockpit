@@ -145,6 +145,7 @@ void TermView::spawnPty() {
     const char *sh = getenv("SHELL");
     if (!sh || !*sh) sh = "/bin/bash";
     setenv("TERM", "xterm-256color", 1);
+    setenv("COLORTERM", "truecolor", 1);  // let nvim enable termguicolors → full theme
     setenv("HEIDR_COCKPIT", "1", 1);  // nvim uses this to enable rail-crossing keymaps
     // Fixed nvim RPC socket so the rail can open files in the running nvim
     // (nvim-follow). nvim reads NVIM_LISTEN_ADDRESS on startup to set --listen.

@@ -77,6 +77,12 @@ Item {
   }
   // Prose blocks of an agent turn (the headline answer).
   function turnProse(items) { return (items || []).filter(x => x.kind === "text") }
+  // The pi turn-recap line ("✧ … ; next question/action: …") — coloured sky so
+  // the recap reads apart from the body (matches the nvim rail's summary hue).
+  function isSummaryLine(l) {
+    var s = String(l || "")
+    return /^\s*[✦✧⟢⟣✤◆❉]/.test(s) || /\bnext\s+(question|action)\s*:/i.test(s)
+  }
   // Thinking blocks — shown inline (the visible thought-process trail).
   function turnThinks(items) { return (items || []).filter(x => x.kind === "think") }
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
@@ -113,6 +119,20 @@ Item {
   readonly property int fsName:   Theme.fontSize + 2
   readonly property int fsBody:   Theme.fontSize + 1
   readonly property int fsMeta:   Theme.fontSize
+
+  // Turn-recap summary hue — electric, brightened + desaturated, with the hue
+  // nudged off electric's blue-violet toward sky's blue so it doesn't read pink.
+  //   summaryHueMix 0 = electric hue (violet), 1 = sky hue (blue)
+  //   summarySat    <1 desaturates (calmer)
+  //   summaryLight  >1 brightens toward white
+  readonly property real summaryHueMix: 0.6
+  readonly property real summarySat: 0.5
+  readonly property real summaryLight: 1.3
+  readonly property color summaryColor: Qt.hsla(
+    Theme.electric.hslHue * (1 - summaryHueMix) + Theme.sky.hslHue * summaryHueMix,
+    Math.max(0, Math.min(1, Theme.electric.hslSaturation * summarySat)),
+    Math.max(0, Math.min(1, Theme.electric.hslLightness * summaryLight)),
+    1.0)
 
   // HEIDR_DEMO=1 forces the mock showcase (working session + orb, every feed
   // kind, changed files) so all states are visible without a live session.
@@ -177,6 +197,15 @@ Item {
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
 
+  // Pending ask_user question (extension_ui_request) for the selected session.
+  // Reactive to agentd.askGen so it clears the instant we answer.
+  readonly property var pendingAsk: {
+    if (!agentd || !selectedRaw) return null
+    agentd.askGen   // reactive dependency
+    return agentd.askFor(selectedRaw)
+  }
+  function answerAsk(payload) { if (agentd && pendingAsk) agentd.answerAsk(selectedRaw, payload) }
+
   readonly property var featured: {
     if (!live) return mockFeatured
     var arr = liveSessions.filter(s => s.name === selectedRaw)
@@ -216,7 +245,9 @@ Item {
     pinBottom = true
     _wantBottom = true
     if (agentd) agentd.select(selectedRaw)
-    if (!_landed && selectedRaw) { _landed = true; landTimer.n = 0; landTimer.restart() }  // land nvim once, on open
+    // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
+    // every switch, so the editor always tracks the session you're viewing.
+    if (selectedRaw) { _landed = true; landTimer.n = 0; landTimer.restart() }
   }
 
   // Changed files for the selected session (agentd working-tree diff).
@@ -300,6 +331,21 @@ Item {
 
   Keys.onPressed: (e) => {
     if (insert) return
+    // A pending question owns the keyboard: y/n (confirm), 1–9 (select),
+    // i (type a reply for input/editor), esc (cancel). j/k still scroll.
+    if (pendingAsk) {
+      var pm = pendingAsk.method
+      if (e.key === Qt.Key_Escape) { answerAsk({ cancelled: true }); e.accepted = true; return }
+      if (pm === "confirm") {
+        if (e.key === Qt.Key_Y) { answerAsk({ confirmed: true });  e.accepted = true; return }
+        if (e.key === Qt.Key_N) { answerAsk({ confirmed: false }); e.accepted = true; return }
+      } else if (pm === "select" && pendingAsk.options) {
+        var d = e.key - Qt.Key_0
+        if (d >= 1 && d <= Math.min(9, pendingAsk.options.length)) { answerAsk({ value: pendingAsk.options[d - 1] }); e.accepted = true; return }
+      } else if (pm === "input" || pm === "editor") {
+        if (e.key === Qt.Key_I) { enterInsert(); e.accepted = true; return }
+      }
+    }
     var ctrl = (e.modifiers & Qt.ControlModifier)
     // Ctrl+j → jump into the main view (chat/files); Ctrl+k → back to roster top.
     if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); e.accepted = true; return }
@@ -487,7 +533,7 @@ Item {
                 Layout.alignment: Qt.AlignVCenter
               }
               Icon {
-                name: "nodes"; width: 14; height: 14
+                name: "filters"; width: 14; height: 14
                 Layout.preferredWidth: 14; Layout.preferredHeight: 14
                 Layout.alignment: Qt.AlignVCenter
                 color: sessRow.cursor ? Theme.bg : rail.dotColor(modelData.status)
@@ -562,7 +608,7 @@ Item {
         RowLayout {
           anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
           spacing: 8
-          Icon { name: "pen-3"; width: 12; height: 12; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
+          Icon { name: "paintbrush"; width: 12; height: 12; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
           Text { text: modelData.path; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; elide: Text.ElideMiddle; Layout.fillWidth: true }
           Text { text: "+" + modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
           Text { text: "-" + modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
@@ -588,8 +634,17 @@ Item {
         anchors { left: parent.left; right: parent.right; top: parent.top }
         height: 1; color: Theme.hairline; z: 2
       }
-      // Follow new content while streaming (message grows without a count change).
-      onContentHeightChanged: if (rail.view === "chat" && rail.pinBottom) positionViewAtEnd()
+      // Follow new content. Positioning synchronously on contentHeightChanged
+      // re-triggers async delegate incubation → contentHeight changes → fires
+      // again → a 100%-CPU refill loop under qs 0.3.0's render-loop incubation.
+      // Instead: throttle-follow at ~30fps ONLY while streaming (bounded, can't
+      // spin), and snap once when a message is added/removed (countChanged).
+      Timer {
+        id: pinTimer; interval: 33; repeat: true
+        running: rail.view === "chat" && rail.pinBottom && rail.featured.status === "streaming"
+        onTriggered: feedView.positionViewAtEnd()
+      }
+      onCountChanged: if (rail.view === "chat" && rail.pinBottom) Qt.callLater(feedView.positionViewAtEnd)
       delegate: Item {
         id: turnDel
         width: feedView.width
@@ -619,7 +674,8 @@ Item {
             Row {
               spacing: 8
               Icon {
-                name: turnDel.isUser ? "user" : "sparkle-3"
+                name: turnDel.isUser ? "paper-plane-2" : "sparkle-3"
+                variantSize: turnDel.isUser ? 12 : 0   // paper-plane-2--glyph--12 for "you"
                 width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter
                 color: turnDel.isUser ? Theme.orange : Theme.electric
               }
@@ -681,6 +737,92 @@ Item {
 
   }
 
+  // ask_user card — mirrors the nvim rail's "needs your input" approval: a
+  // bordered card pinned above the composer. confirm → y/n; select → 1–9;
+  // input/editor → i to type. Answered via the rail's Keys / the composer.
+  Rectangle {
+    id: askCard
+    readonly property var ask: rail.pendingAsk
+    visible: ask !== null && rail.view === "chat"
+    anchors { left: parent.left; right: parent.right; bottom: chin.top
+              leftMargin: 20; rightMargin: 20; bottomMargin: 8 }
+    implicitHeight: askCol.implicitHeight + 28
+    height: implicitHeight
+    radius: 14
+    color: Theme.surface
+    border.width: 1
+    border.color: Theme.orange
+    z: 12
+
+    Rectangle {   // left attention accent
+      anchors { left: parent.left; top: parent.top; bottom: parent.bottom; topMargin: 12; bottomMargin: 12 }
+      width: 2; radius: 1; color: Theme.orange
+    }
+
+    Column {
+      id: askCol
+      anchors { left: parent.left; right: parent.right; top: parent.top
+                leftMargin: 18; rightMargin: 16; topMargin: 14 }
+      spacing: 9
+
+      Text {
+        text: "needs your input"
+        color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+      }
+      Text {
+        visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
+        text: askCard.ask ? (askCard.ask.title || "") : ""
+        color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+      }
+      Text {
+        visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
+        text: askCard.ask ? (askCard.ask.message || "") : ""
+        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+      }
+
+      // select → one keycap-numbered row per option
+      Column {
+        spacing: 6
+        visible: askCard.ask && askCard.ask.method === "select"
+        Repeater {
+          model: (askCard.ask && askCard.ask.method === "select") ? askCard.ask.options : []
+          Row {
+            spacing: 9
+            KeyCap { text: String(index + 1); anchors.verticalCenter: parent.verticalCenter }
+            Text {
+              text: modelData; color: Theme.fg; width: askCol.width - 40; wrapMode: Text.Wrap
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+              anchors.verticalCenter: parent.verticalCenter
+            }
+          }
+        }
+      }
+
+      // confirm → y / n
+      Row {
+        spacing: 20
+        visible: askCard.ask && askCard.ask.method === "confirm"
+        Row { spacing: 8; KeyCap { text: "y"; anchors.verticalCenter: parent.verticalCenter }
+          Text { text: "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+        Row { spacing: 8; KeyCap { text: "n"; anchors.verticalCenter: parent.verticalCenter }
+          Text { text: "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+      }
+
+      // input/editor → i to type
+      Row {
+        spacing: 8
+        visible: askCard.ask && (askCard.ask.method === "input" || askCard.ask.method === "editor")
+        KeyCap { text: "i"; anchors.verticalCenter: parent.verticalCenter }
+        Text { text: "type a reply"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+      }
+
+      Text {
+        text: (askCard.ask && askCard.ask.method === "select") ? "press a number · esc cancels" : "esc cancels"
+        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+      }
+    }
+  }
+
   // Chin: an opaque bottom bar (composer + hints) anchored to the rail bottom,
   // like the sibling apps' statusbar. The feed is bounded to chin.top, so chat
   // rows can never bleed under the input/hints.
@@ -715,7 +857,12 @@ Item {
             clip: true
             verticalAlignment: TextInput.AlignVCenter
             onAccepted: {
-              if (text.trim().length && rail.agentd) rail.agentd.sendPrompt(rail.selectedRaw, text)
+              var pa = rail.pendingAsk
+              if (pa && (pa.method === "input" || pa.method === "editor")) {
+                if (text.trim().length) rail.answerAsk({ value: text })
+              } else if (text.trim().length && rail.agentd) {
+                rail.agentd.sendPrompt(rail.selectedRaw, text)
+              }
               text = ""; rail.exitInsert()
             }
             Keys.onPressed: (e) => {
@@ -733,7 +880,9 @@ Item {
               anchors.fill: parent
               verticalAlignment: Text.AlignVCenter
               visible: !composerInput.text && !composerInput.activeFocus
-              text: "message " + rail.featured.name + "…   (i to type, / for commands)"
+              text: (rail.pendingAsk && (rail.pendingAsk.method === "input" || rail.pendingAsk.method === "editor"))
+                    ? "type your reply…   (⏎ to send · esc cancels)"
+                    : "message " + rail.featured.name + "…   (i to type, / for commands)"
               color: Theme.fg_muted; font: composerInput.font
             }
           }
@@ -770,8 +919,10 @@ Item {
   // sitting just above the chin, so messages dissolve behind the floating pill.
   Rectangle {
     id: feedFade
-    // Always soften the feed's bottom into the chin (no sharp cutoff).
-    opacity: rail.view === "chat" ? 1 : 0
+    // Soften the feed's bottom into the chin only when content actually runs
+    // under it — at the bottom (atYEnd) the last message already clears the
+    // chin, so the fade would just dim it for no reason.
+    opacity: (rail.view === "chat" && !feedView.atYEnd) ? 1 : 0
     visible: opacity > 0.01
     Behavior on opacity { NumberAnimation { duration: 350; easing.type: Easing.InOutQuad } }
     anchors { left: parent.left; right: parent.right; bottom: chin.top; leftMargin: 3 }  // clear the focus accent
@@ -894,11 +1045,18 @@ Item {
     id: thinkRow
     RowLayout {
       spacing: 8
-      Icon { name: "sparkle-3"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignTop; Layout.topMargin: 3 }
+      // A small dim dot — a reasoning sub-bullet, distinct from the agent's sparkle avatar.
+      // Slot is one line tall and top-aligned, so the dot centres on the first line.
+      Item {
+        Layout.preferredWidth: 13
+        Layout.preferredHeight: Math.round(rail.fsBody * 1.3)
+        Layout.alignment: Qt.AlignTop
+        Rectangle { width: 4; height: 4; radius: 2; color: Theme.fg_muted; anchors.centerIn: parent }
+      }
       Text {
         text: (typeof expanded !== "undefined" && expanded && entry.full) ? entry.full : entry.text
         color: Theme.fg_muted
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.italic: true
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: Text.WordWrap; lineHeight: 1.3; Layout.fillWidth: true
         elide: (typeof expanded !== "undefined" && expanded) ? Text.ElideNone : Text.ElideRight
         maximumLineCount: (typeof expanded !== "undefined" && expanded) ? 9999 : 1
@@ -909,21 +1067,39 @@ Item {
   Component {
     id: proseRow
     // Agent prose inside the turn card — borderless markdown, the card provides
-    // the surface. No inner box/accent (that double-boxing looked heavy).
-    Text {
-      text: entry.text; color: Theme.fg
-      font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-      wrapMode: Text.WordWrap
-      lineHeight: 1.35   // airier prose
-      textFormat: Text.MarkdownText   // **bold**, `code`, lists — like the old rail
-      onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
+    // the surface. The trailing ✧ recap line(s) split out into sky so the
+    // "what I did / next question" summary reads apart from the body.
+    Column {
+      id: proseCol
+      width: parent ? parent.width : 400
+      spacing: 14   // clear gap between the body and the ✧ recap line
+      readonly property var _lines: String(entry.text || "").split("\n")
+      readonly property string _body: _lines.filter(l => !rail.isSummaryLine(l)).join("\n").trim()
+      readonly property string _summary: _lines.filter(l => rail.isSummaryLine(l)).join("\n").trim()
+      Text {
+        visible: proseCol._body.length > 0
+        width: parent.width
+        text: proseCol._body; color: Theme.fg
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        wrapMode: Text.WordWrap; lineHeight: 1.35
+        textFormat: Text.MarkdownText   // **bold**, `code`, lists — like the old rail
+        onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
+      }
+      Text {
+        visible: proseCol._summary.length > 0
+        width: parent.width
+        text: proseCol._summary; color: rail.summaryColor
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        wrapMode: Text.WordWrap; lineHeight: 1.35
+        textFormat: Text.MarkdownText
+      }
     }
   }
   Component {
     id: editRow
     RowLayout {
       spacing: 8
-      Icon { name: "pen-3"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
+      Icon { name: "paintbrush"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
       Text { text: entry.file; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.bold: true; elide: Text.ElideMiddle; Layout.fillWidth: true }
       // Diff stats only when known (live edits); transcript edits carry none.
       Text { visible: (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }

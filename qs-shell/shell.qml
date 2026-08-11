@@ -11,8 +11,11 @@ ShellRoot {
   FloatingWindow {
     id: win
     title: "heidr-qs"   // unique — the old nvim cockpit window title contains "heidr"
+    visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
     implicitWidth: 1600
     implicitHeight: 950
+    minimumSize: Qt.size(640, 400)   // let niri's set-column-width actually shrink it
+    onClosed: Qt.quit()              // niri close-window quits (FloatingWindow ignores it otherwise)
 
     property string pane: "nvim"   // "nvim" | "rail"
 
@@ -53,9 +56,14 @@ ShellRoot {
           id: term
           width: Math.round(parent.width * 0.6)
           height: parent.height
-          focus: win.pane === "nvim"
-          active: win.pane === "nvim"   // hide the terminal cursor when the rail has focus
+          // Focus is managed IMPERATIVELY (onPaneChanged + click). A `focus:`
+          // binding here fights forceActiveFocus and leaves the terminal unable
+          // to hold keyboard focus — same lesson the rail notes for itself.
+          active: activeFocus   // show the block cursor only while the terminal truly holds focus
           Component.onCompleted: forceActiveFocus()
+          // Keep pane in sync when focus is grabbed by a click (not just Ctrl+h/l),
+          // else tryFocus() sees a stale pane and the C-l/C-h cross no-ops.
+          onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
         }
 
         Rectangle { width: 1; height: parent.height; color: Theme.hairline }
@@ -68,6 +76,7 @@ ShellRoot {
           focused: win.pane === "rail"
           onFocusNvim: win.pane = "nvim"
           onRequestFocus: win.pane = "rail"
+          onActiveFocusChanged: if (activeFocus) win.pane = "rail"
         }
       }
     }
