@@ -55,11 +55,12 @@ Item {
     if (!cwd) return
     var m = String(sid).match(/every-(\d+)/i)
     var plan = m ? (Quickshell.env("HOME") + "/personal/notes/storage/plans/EVERY-" + m[1] + ".md") : ""
-    // Open the plan if it exists; otherwise open the worktree dir (file
-    // explorer) so it's session context, never the default splash.
+    // Open the plan if it exists; otherwise just cd into the worktree and leave
+    // an empty buffer — never `edit` the dir (that opens netrw, which reads as
+    // broken for a plan-less session like the orchestrator).
     var expr = plan
-      ? ('execute(filereadable("' + plan + '") ? "cd ' + cwd + ' | edit ' + plan + '" : "cd ' + cwd + ' | edit ' + cwd + '")')
-      : ('execute("cd ' + cwd + ' | edit ' + cwd + '")')
+      ? ('execute(filereadable("' + plan + '") ? "cd ' + cwd + ' | edit ' + plan + '" : "cd ' + cwd + '")')
+      : ('execute("cd ' + cwd + '")')
     var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
     Quickshell.execDetached(["nvim", "--server", sock, "--remote-expr", expr])
   }
