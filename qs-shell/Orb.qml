@@ -1,0 +1,76 @@
+import QtQuick
+import QsLib
+
+// "Thinking" orb — a slowly revolving wireframe network sphere: an orthographic
+// projection of points on a unit sphere, rotated around Y each frame (real 3D
+// globe spin). The feed-update debounce keeps the main thread free enough that
+// this Canvas animation stays smooth during streaming.
+Item {
+  id: orb
+  property bool running: true
+  property color glow: Theme.fg
+  implicitWidth: 26
+  implicitHeight: 26
+  visible: running
+
+  property var _pts: []
+  property real rot: 0
+
+  Component.onCompleted: _build()
+  function _build() {
+    var n = 26, pts = [], off = 2 / n, inc = Math.PI * (3 - Math.sqrt(5))  // fibonacci sphere
+    for (var i = 0; i < n; i++) {
+      var y = i * off - 1 + off / 2
+      var r = Math.sqrt(Math.max(0, 1 - y * y))
+      var phi = i * inc
+      pts.push([Math.cos(phi) * r, y, Math.sin(phi) * r])
+    }
+    _pts = pts
+    canvas.requestPaint()
+  }
+
+  NumberAnimation on rot {
+    running: orb.running; loops: Animation.Infinite
+    from: 0; to: 2 * Math.PI; duration: 7000
+  }
+  onRotChanged: canvas.requestPaint()
+  onGlowChanged: canvas.requestPaint()
+
+  Canvas {
+    id: canvas
+    anchors.fill: parent
+    onPaint: {
+      var ctx = getContext("2d")
+      ctx.reset()
+      var w = width, h = height, cx = w / 2, cy = h / 2
+      var R = Math.min(w, h) / 2 - 1.5
+      var ca = Math.cos(orb.rot), sa = Math.sin(orb.rot)
+      var tilt = 0.45, ct = Math.cos(tilt), st = Math.sin(tilt)
+      var proj = []
+      for (var i = 0; i < orb._pts.length; i++) {
+        var p = orb._pts[i]
+        var x = p[0] * ca - p[2] * sa
+        var z = p[0] * sa + p[2] * ca
+        var y = p[1] * ct - z * st
+        var zz = p[1] * st + z * ct               // depth, -1 (back) … 1 (front)
+        proj.push([cx + x * R, cy - y * R, zz])
+      }
+      var g = orb.glow
+      for (var e = 0; e < orb._pts.length; e++)
+        for (var f = e + 1; f < orb._pts.length; f++) {
+          var dx = proj[e][0] - proj[f][0], dy = proj[e][1] - proj[f][1]
+          if (dx * dx + dy * dy < (R * 0.72) * (R * 0.72)) {
+            var d = (proj[e][2] + proj[f][2]) / 2
+            ctx.strokeStyle = Qt.rgba(g.r, g.g, g.b, 0.10 + (d + 1) / 2 * 0.30)
+            ctx.lineWidth = 0.8
+            ctx.beginPath(); ctx.moveTo(proj[e][0], proj[e][1]); ctx.lineTo(proj[f][0], proj[f][1]); ctx.stroke()
+          }
+        }
+      for (var j = 0; j < proj.length; j++) {
+        var dd = proj[j][2]
+        ctx.fillStyle = Qt.rgba(g.r, g.g, g.b, 0.35 + (dd + 1) / 2 * 0.6)
+        ctx.beginPath(); ctx.arc(proj[j][0], proj[j][1], 0.7 + (dd + 1) / 2 * 1.4, 0, 2 * Math.PI); ctx.fill()
+      }
+    }
+  }
+}
