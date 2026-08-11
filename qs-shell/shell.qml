@@ -10,7 +10,7 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
-    title: "Heidr"
+    title: "heidr-qs"   // unique — the old nvim cockpit window title contains "heidr"
     implicitWidth: 1600
     implicitHeight: 950
 
