@@ -2,11 +2,17 @@
   description = "Heidr — cockpit: nvim (libghostty terminal) + agentd rail in one Quickshell window";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  # Same quickshell the system runs (v0.3.0). When consumed from ~/nixos both
+  # inputs `follows` the system's, so the plugin's Qt == the running qs's Qt.
+  inputs.quickshell = {
+    url = "github:quickshell-mirror/quickshell/v0.3.0";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, quickshell }:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      pkgs = import nixpkgs { inherit system; overlays = [ quickshell.overlays.default ]; };
       qt = pkgs.qt6;
 
       # The C++ QML plugin (the libghostty terminal). Built against the vendored
