@@ -39,7 +39,7 @@
       };
 
       heidr = pkgs.writeShellApplication {
-        name = "heidr";
+        name = "heidr-qs";   # distinct from the old nvim-rail `heidr` script (coexist)
         runtimeInputs = [ pkgs.quickshell pkgs.procps pkgs.coreutils pkgs.util-linux ];
         text = ''
           # QsLib (the live dotfiles design system) wins; the Heidr plugin module
@@ -65,8 +65,8 @@
         '';
       };
     in {
-      packages.${system} = { inherit plugin heidr; default = heidr; };
-      apps.${system}.default = { type = "app"; program = "${heidr}/bin/heidr"; };
+      packages.${system} = { inherit plugin; heidr-qs = heidr; default = heidr; };
+      apps.${system}.default = { type = "app"; program = "${heidr}/bin/heidr-qs"; };
       devShells.${system}.default = import ./shell.nix { inherit pkgs; };
     };
 }
