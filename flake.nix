@@ -22,7 +22,14 @@
       plugin = pkgs.stdenv.mkDerivation {
         pname = "heidr-termplugin";
         version = "0.1.0";
-        src = ./.;
+        # Exclude local build dirs — a stale build/CMakeCache.txt (absolute paths
+        # from the dev tree) makes nix's cmake abort with a source-mismatch.
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            let b = baseNameOf (toString path); in
+            !(type == "directory" && (b == "build" || b == "build-vendored" || b == "result"));
+        };
         nativeBuildInputs = [ pkgs.cmake pkgs.ninja qt.wrapQtAppsHook qt.qtdeclarative pkgs.patchelf ];
         buildInputs = [ qt.qtbase qt.qtdeclarative qt.qtwayland ];
         dontWrapQtApps = true;   # we ship a .so module, not an executable
