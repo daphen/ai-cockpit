@@ -80,7 +80,7 @@ private:
   int cellW_ = 9, cellH_ = 18, ascent_ = 14;
   int cols_ = 110, rows_ = 30;   // initial; reflows on window resize
   // kitty window_padding_width 10 16 10 10 (top right bottom left)
-  const int padT_ = 10, padR_ = 16, padB_ = 0, padL_ = 10;
+  const int padT_ = 18, padR_ = 16, padB_ = 0, padL_ = 10;  // top matches the rail's 18px window inset
   GhosttyColorRgb palette_[256];
   GhosttyColorRgb defFg_{0xdd, 0xdd, 0xdd};
   GhosttyColorRgb defBg_{0x1e, 0x1e, 0x2e};

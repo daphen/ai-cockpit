@@ -30,10 +30,10 @@ Item {
   property bool insert: false
   property bool pinBottom: true   // chat follows new messages unless you scroll up
   property string activeRaw: ""
-  // Roster collapses when the rail isn't focused (like the old nvim rail): it
-  // shows just the active session's row; focusing it expands to the full list.
-  // Ctrl+t overrides the auto behavior (sticky until toggled again or refocus).
-  property var rosterOverride: null   // null = auto (follow focus); true/false = forced
+  // Roster starts expanded and stays however you leave it — Ctrl+t toggles the
+  // full list vs the single-row glance, and the choice persists across focus
+  // changes (no auto-collapse on blur).
+  property var rosterOverride: true   // true = expanded (default), false = collapsed glance
   readonly property bool rosterExpanded: rosterOverride !== null ? rosterOverride : focused
 
   function copyText(s) { if (s && s.length) Quickshell.execDetached(["wl-copy", "--", String(s)]) }
@@ -112,7 +112,16 @@ Item {
 
   // Manage focus imperatively — a `focus:` binding fights forceActiveFocus and
   // wedges the rail after the first composer round-trip.
-  onFocusedChanged: { rosterOverride = null; if (focused) { insert = false; forceActiveFocus() } }
+  onFocusedChanged: {
+    if (focused) {
+      insert = false
+      // A collapsed roster shows only a glance (no per-row cursor). If the
+      // cursor was parked in the roster range, entering the rail would leave
+      // nothing highlighted — land it on the latest chat message instead.
+      if (!rosterExpanded && cur < rSize && navTotal > rSize) cur = navTotal - 1
+      forceActiveFocus()
+    }
+  }
 
   // Font scale anchored to the design system's base (Theme.fontSize = 14).
   readonly property int fsHeader: Theme.fontSize + 3
@@ -304,11 +313,27 @@ Item {
       copyText(feedCopyTarget(it))   // Enter on a turn copies its text
     }
   }
-  // j/k: if the focused card is taller than the viewport, scroll WITHIN it first;
-  // only move to the next/prev card once it's fully scrolled into view.
+  // Is the cursor'd feed card at least partly in the viewport?
+  function _curFeedVisible() {
+    if (view !== "chat" || cur < rSize) return true
+    var it = feedView.itemAtIndex(cur - rSize)
+    if (!it) return false   // off-screen items aren't realized
+    var top = it.y - feedView.contentY
+    return (top + it.height) > 0 && top < feedView.height
+  }
+  // Feed index at the top (or bottom) visible edge, or -1.
+  function _feedEdgeIdx(atTop) {
+    var y = atTop ? (feedView.contentY + feedView.spacing + 2)
+                  : (feedView.contentY + feedView.height - 40)
+    return feedView.indexAt(feedView.width / 2, y)
+  }
+  // j/k: if the cursor scrolled out of view (mouse scroll), snap it back onto a
+  // visible card first; if the focused card is taller than the viewport, scroll
+  // WITHIN it; otherwise move to the next/prev card.
   function moveDown() {
     if (cur < rSize) { cur = Math.min(cur + 1, rSize - 1); return }   // stay in roster
     if (view === "chat") {
+      if (!_curFeedVisible()) { var t = _feedEdgeIdx(true); if (t >= 0) { cur = rSize + t; Qt.callLater(rail._scrollToCur); return } }
       var it = feedView.itemAtIndex(cur - rSize)
       if (it && it.height > feedView.height - 8 && feedView.contentY + feedView.height < it.y + it.height - 4) {
         feedView.contentY = Math.min(it.y + it.height - feedView.height, feedView.contentY + feedView.height * 0.85)
@@ -316,10 +341,12 @@ Item {
       }
     }
     cur = Math.min(cur + 1, navTotal - 1)
+    Qt.callLater(rail._scrollToCur)   // ensure the (possibly unchanged, last) item lands with a bottom margin
   }
   function moveUp() {
     if (cur < rSize) { cur = Math.max(cur - 1, 0); return }           // stay in roster
     if (view === "chat") {
+      if (!_curFeedVisible()) { var b = _feedEdgeIdx(false); if (b >= 0) { cur = rSize + b; Qt.callLater(rail._scrollToCur); return } }
       var it = feedView.itemAtIndex(cur - rSize)
       if (it && it.height > feedView.height - 8 && feedView.contentY > it.y + 4) {
         feedView.contentY = Math.max(it.y, feedView.contentY - feedView.height * 0.85)
@@ -327,6 +354,7 @@ Item {
       }
     }
     cur = Math.max(cur - 1, rSize)   // stay in the chat/files view (Ctrl+k returns to roster)
+    Qt.callLater(rail._scrollToCur)
   }
 
   Keys.onPressed: (e) => {
@@ -359,12 +387,40 @@ Item {
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { activateCur(); e.accepted = true }
   }
+  // A feed refresh (stream update / reload) can shrink navTotal below cur, so
+  // the cursor points past the last message and nothing highlights. Re-clamp.
+  onNavTotalChanged: if (cur > navTotal - 1) cur = Math.max(0, navTotal - 1)
+
   // Keep the cursor visible as it moves into the main-area list.
   onCurChanged: {
     pinBottom = (cur >= navTotal - 1)   // at the last item → follow new messages
     if (cur < rSize) return
-    if (view === "files") changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
-    else feedView.positionViewAtIndex(cur - rSize, ListView.Contain)
+    if (view === "files") { changesView.positionViewAtIndex(cur - rSize, ListView.Contain); return }
+    Qt.callLater(rail._scrollToCur)   // deferred so item geometry is settled (no race)
+  }
+  // Bring the cursor'd chat message fully into view with a consistent gap:
+  // above/at-top → top margin; below the fold → scroll in with a bottom margin
+  // (or show the top for a card taller than the viewport). Idempotent — leaves
+  // an already-visible card alone, so re-runs can't drift the offset.
+  function _scrollToCur() {
+    if (view !== "chat" || cur < rSize) return
+    var idx = cur - rSize
+    var it = feedView.itemAtIndex(idx)
+    if (!it) { feedView.positionViewAtIndex(idx, ListView.Contain); Qt.callLater(rail._scrollToCur); return }  // realize, then place
+    var gap = feedView.spacing
+    var vh  = feedView.height
+    var maxY = Math.max(0, feedView.contentHeight - vh)
+    var isLast    = (idx >= rail.fSize - 1)
+    var botMargin = isLast ? 56 : gap              // last card clears the composer by the footer pad (matches the pinned-bottom rest)
+    var top    = it.y - feedView.contentY          // item top relative to the viewport
+    var bottom = top + it.height
+    if (top < gap)                                 // above / too close to the top edge
+      feedView.contentY = Math.max(0, Math.min(maxY, it.y - gap))
+    else if (bottom > vh - botMargin) {            // its bottom (+ margin) runs past the viewport bottom
+      if (it.height <= vh - botMargin - gap) feedView.contentY = Math.min(maxY, it.y + it.height + botMargin - vh)  // fits → bottom margin
+      else feedView.contentY = Math.max(0, Math.min(maxY, it.y - gap))                                             // taller than view → show top
+    }
+    // else: already fully visible → don't move
   }
   // subtle focus accent on the left edge (no full ring)
   Rectangle {
@@ -434,23 +490,9 @@ Item {
   ColumnLayout {
     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: chin.top }
     anchors.margins: 20
+    anchors.topMargin: 18     // just the inter-message gap above the roster card (no ROSTER header)
     anchors.bottomMargin: 0   // feed clips at chin.top (under the fade's full-opacity edge), no hard cut
     spacing: 18
-
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: 8
-      Icon { name: "bolt"; width: rail.fsHeader; height: rail.fsHeader; color: Theme.orange }
-      Text {
-        text: "ROSTER"
-        color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsHeader; font.bold: true
-      }
-      Text {
-        text: "· lovable"
-        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsHeader
-      }
-      Item { Layout.fillWidth: true }
-    }
 
     // Roster — all sessions in one discrete card. Rows are full-bleed within it;
     // the cursor row is an inverted ink pill, the selected session a faint tint.
@@ -598,7 +640,7 @@ Item {
         width: changesView.width
         implicitHeight: 26
         radius: Theme.radiusSm
-        readonly property bool cursor: rail.focused && rail.cur === rail.rSize + index
+        readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + index
         color: cursor ? Qt.rgba(Theme.selection.r, Theme.selection.g, Theme.selection.b, 0.6)
              : chov.hovered ? Qt.rgba(Theme.selection.r, Theme.selection.g, Theme.selection.b, 0.4) : "transparent"
         border.width: cursor ? 1 : 0
@@ -610,8 +652,11 @@ Item {
           spacing: 8
           Icon { name: "paintbrush"; width: 12; height: 12; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
           Text { text: modelData.path; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; elide: Text.ElideMiddle; Layout.fillWidth: true }
-          Text { text: "+" + modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
-          Text { text: "-" + modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+          // Fixed right-aligned slots so the +/- columns line up across every row.
+          Text { text: "+" + modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                 Layout.preferredWidth: 46; horizontalAlignment: Text.AlignRight }
+          Text { text: "-" + modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                 Layout.preferredWidth: 40; horizontalAlignment: Text.AlignRight }
         }
       }
     }
@@ -627,6 +672,7 @@ Item {
       model: rail.groupedFeed
       boundsBehavior: Flickable.StopAtBounds
       ScrollFeel { flick: feedView }
+      header: Item { width: feedView.width; height: feedView.spacing }   // top gap == inter-message gap, so the first card clears the chat-title hairline
       footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
       // Hairline pinned to the feed's top edge (fixed overlay, not a scrolling
       // delegate) — marks where the chat clips, no layout-spacing hacks.
@@ -651,16 +697,18 @@ Item {
         implicitHeight: card.implicitHeight
         property int rowIndex: index
         readonly property bool isUser: modelData.kind === "user"
-        readonly property bool cursor: rail.focused && rail.cur === rail.rSize + rowIndex
+        readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
 
         Rectangle {
           id: card
           anchors { left: parent.left; right: parent.right }
           implicitHeight: cardCol.implicitHeight + 36
           radius: 14
-          color: turnDel.isUser ? Theme.surface0 : Theme.surface
+          // Cursor gets a pronounced fill (surface2 pops in both light+dark) plus
+          // a strong fg-alpha hairpin — the dsqrd message-cursor grammar.
+          color: turnDel.cursor ? Theme.surface2 : (turnDel.isUser ? Theme.surface0 : Theme.surface)
           border.width: 1   // always outline the card (surface≈bg, so fill alone is invisible)
-          border.color: turnDel.cursor ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.30) : Theme.hairline
+          border.color: turnDel.cursor ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45) : Theme.hairline
           HoverHandler { id: fhov }
           TapHandler { onTapped: rail.clickAt(rail.rSize + turnDel.rowIndex) }
 
@@ -856,6 +904,8 @@ Item {
             font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
             clip: true
             verticalAlignment: TextInput.AlignVCenter
+            // Orange blinking caret, matching the sibling apps (Theme.cursor).
+            cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible ? 1 : 0 }
             onAccepted: {
               var pa = rail.pendingAsk
               if (pa && (pa.method === "input" || pa.method === "editor")) {
@@ -922,7 +972,9 @@ Item {
     // Soften the feed's bottom into the chin only when content actually runs
     // under it — at the bottom (atYEnd) the last message already clears the
     // chin, so the fade would just dim it for no reason.
-    opacity: (rail.view === "chat" && !feedView.atYEnd) ? 1 : 0
+    // Hidden at the end AND when the cursor is on the last message — the 56px
+    // footer means atYEnd isn't reached even when the last card is fully shown.
+    opacity: (rail.view === "chat" && !feedView.atYEnd && rail.cur < rail.navTotal - 1) ? 1 : 0
     visible: opacity > 0.01
     Behavior on opacity { NumberAnimation { duration: 350; easing.type: Easing.InOutQuad } }
     anchors { left: parent.left; right: parent.right; bottom: chin.top; leftMargin: 3 }  // clear the focus accent
@@ -1080,6 +1132,7 @@ Item {
         visible: proseCol._body.length > 0
         width: parent.width
         text: proseCol._body; color: Theme.fg
+        linkColor: Theme.sky   // legible link blue (default markdown blue sinks into the card)
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: Text.WordWrap; lineHeight: 1.35
         textFormat: Text.MarkdownText   // **bold**, `code`, lists — like the old rail
