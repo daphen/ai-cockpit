@@ -44,6 +44,10 @@
         text = ''
           # QsLib (the live dotfiles design system) wins; the Heidr plugin module
           # is appended so `import Heidr` resolves.
+          # Native Wayland — otherwise Qt falls back to XWayland (xcb), which
+          # renders differently AND lets the window hold an X11 keyboard grab that
+          # swallows the compositor's keybinds.
+          export QT_QPA_PLATFORM=wayland
           export QML2_IMPORT_PATH="$HOME/.local/share/qml:${plugin}/qml''${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
 
           # Dev: HEIDR_DEV=/path/to/repo runs the working-tree rail (hot-reload)
