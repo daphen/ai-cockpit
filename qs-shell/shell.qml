@@ -41,6 +41,7 @@ ShellRoot {
       function focusLeft(): string  { return win.tryFocus("left") }
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
+      function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
     }
 
     AgentdState { id: agentd; scope: "lovable" }

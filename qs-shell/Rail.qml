@@ -16,6 +16,8 @@ Item {
 
   // Click a row: focus the rail, move the cursor there, and act on it.
   function clickAt(idx) { requestFocus(); cur = idx; activateCur() }
+  // Pull focus to the rail and land on the roster (Super+T from the desktop).
+  function focusRoster() { if (rosterOverride === false) rosterOverride = true; cur = 0; requestFocus() }
 
   // Cursor flows: roster (always) → the main area, whose view Tab toggles.
   property int cur: 0
@@ -55,12 +57,13 @@ Item {
     if (!cwd) return
     var m = String(sid).match(/every-(\d+)/i)
     var plan = m ? (Quickshell.env("HOME") + "/personal/notes/storage/plans/EVERY-" + m[1] + ".md") : ""
-    // Open the plan if it exists; otherwise just cd into the worktree and leave
-    // an empty buffer — never `edit` the dir (that opens netrw, which reads as
-    // broken for a plan-less session like the orchestrator).
+    // cd into the worktree, then: open the plan if it exists, else show the
+    // heidr session dashboard (require("heidr").dashboard(cwd)) — matching the
+    // nvim rail's reflect_context, never an empty buffer / netrw.
+    var dash = 'execute(\'lua require("heidr").dashboard("' + cwd + '")\')'
     var expr = plan
-      ? ('execute(filereadable("' + plan + '") ? "cd ' + cwd + ' | edit ' + plan + '" : "cd ' + cwd + '")')
-      : ('execute("cd ' + cwd + '")')
+      ? ('execute("cd ' + cwd + '") . (filereadable("' + plan + '") ? execute("edit ' + plan + '") : ' + dash + ')')
+      : ('execute("cd ' + cwd + '") . ' + dash)
     var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
     Quickshell.execDetached(["nvim", "--server", sock, "--remote-expr", expr])
   }
