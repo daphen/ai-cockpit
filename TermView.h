@@ -1,7 +1,12 @@
 #pragma once
 #include <QQuickPaintedItem>
 #include <QFont>
+#include <QImage>
 #include <QtQmlIntegration>
+#include <thread>
+#include <mutex>
+#include <atomic>
+#include <deque>
 
 // libghostty-vt headers use struct fields named `emit`/`signals`/`slots`, which
 // collide with Qt's keyword macros. Undef them just around the include.
@@ -33,7 +38,7 @@ public:
 
   // false when focus is in the rail → hide the terminal cursor.
   Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
-  bool active() const { return active_; }
+  bool active() const { return active_.load(); }
   void setActive(bool a);
 
 signals:
@@ -44,13 +49,16 @@ protected:
   void mousePressEvent(QMouseEvent *e) override;
   void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
 
-private slots:
-  void onPtyReadable();
-
 private:
   void spawnPty();
-  void writePty(const char *data, int len);
+  void writePty(const char *data, int len);  // worker-thread only (PTY fd owner)
   void pasteText(const QString &t);
+  // The worker thread owns the PTY + ghostty state and does ALL rasterization,
+  // publishing finished frames back to the GUI thread; paint() only blits them.
+  void workerLoop();          // blocking poll() on the PTY + wake-pipe
+  QImage renderFrame();       // worker-thread: rasterize the grid into a DPR image
+  void wakeWorker();          // GUI-thread: nudge the worker's poll()
+  void enqueuePty(const QByteArray &bytes);  // GUI-thread: queue input for the PTY
   // Load default fg/bg/cursor + palette 0-15 from the theme generator's output
   // (kitty dark-theme.auto.conf), so the terminal matches the rest of the desktop.
   void loadThemeColors();       // read fg/bg/cursor/palette for the CURRENT theme mode
@@ -73,17 +81,30 @@ private:
   GhosttyTerminal term_ = nullptr;
   GhosttyRenderState renderState_ = nullptr;  // for the cursor's visual shape (DECSCUSR)
   int cursorShape_ = 1;          // GhosttyRenderStateCursorVisualStyle; 1 = BLOCK
-  int master_ = -1;              // PTY master fd
-  QSocketNotifier *notifier_ = nullptr;
+  int master_ = -1;              // PTY master fd (worker-thread owner)
   QFileSystemWatcher *themeWatcher_ = nullptr;  // ~/.config/theme_mode → live light/dark flip
   QFont font_;
-  int cellW_ = 9, cellH_ = 18, ascent_ = 14;
-  int cols_ = 110, rows_ = 30;   // initial; reflows on window resize
+  int cellW_ = 9, cellH_ = 18, ascent_ = 14;   // immutable after ctor (fixed font)
+  int cols_ = 110, rows_ = 30;   // worker-thread only after start; reflows on resize
   // kitty window_padding_width 10 16 10 10 (top right bottom left)
   const int padT_ = 18, padR_ = 16, padB_ = 0, padL_ = 10;  // top matches the rail's 18px window inset
   GhosttyColorRgb palette_[256];
   GhosttyColorRgb defFg_{0xdd, 0xdd, 0xdd};
   GhosttyColorRgb defBg_{0x1e, 0x1e, 0x2e};
   GhosttyColorRgb defCursor_{0xdd, 0xdd, 0xdd};
-  bool active_ = true;   // rail-focus state; hides the cursor when false
+  std::atomic<bool> active_{true};   // rail-focus state; hides the cursor when false
+
+  // --- worker thread + GUI/worker handoff ---
+  std::thread worker_;
+  std::atomic<bool> quit_{false};
+  int wakePipe_[2] = {-1, -1};        // GUI writes a byte to break the worker's poll()
+  std::mutex cmdMtx_;                  // guards the command queue below
+  std::deque<QByteArray> ptyOut_;     // input bytes bound for the PTY
+  bool themeReload_ = false;          // theme_mode changed → reload colours on the worker
+  bool repaintReq_ = false;           // active/focus toggled → re-render with no new data
+  struct { bool pending = false; int cols, rows, viewW, viewH; qreal dpr; } resize_;
+  std::mutex frameMtx_;               // guards frame_ (worker publishes, paint blits)
+  QImage frame_;
+  // worker-thread-local geometry (seeded in ctor, updated via resize_ commands)
+  int wViewW_ = 0, wViewH_ = 0; qreal wDpr_ = 1.0;
 };

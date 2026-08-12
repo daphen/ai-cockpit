@@ -1,5 +1,0 @@
---resource
-/home/daphen/personal/heidr/libghostty-spike/build-vendored/.qt/rcc/qmake_HeidrApp.qrc
---resource
-/home/daphen/personal/heidr/libghostty-spike/build-vendored/.qt/rcc/heidr-term-spike_raw_qml_0.qrc
-/qt/qml/HeidrApp/Main.qml

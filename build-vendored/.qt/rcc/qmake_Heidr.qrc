@@ -1,6 +1,0 @@
-<RCC>
-  <qresource prefix="/qt/qml/Heidr">
-    <file alias="qmldir">/home/daphen/personal/heidr/libghostty-spike/build-vendored/qml/Heidr/qmldir</file>
-  </qresource>
-</RCC>
-

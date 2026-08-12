@@ -1,6 +1,0 @@
-module HeidrApp
-typeinfo heidr-term-spike.qmltypes
-prefer :/qt/qml/HeidrApp/
-Main 1.0 Main.qml
-depends QtQuick
-

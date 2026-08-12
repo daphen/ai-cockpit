@@ -224,6 +224,15 @@ Item {
     var f = arr.length ? arr[0] : liveSessions[0]
     return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
   }
+  // The ONE bool the thinking pill + orb depend on. Being a bool, its binding only
+  // notifies consumers when it actually flips (stream start/stop) — decoupled from
+  // `featured`, which allocates a fresh object on every roster tick.
+  readonly property bool featuredStreaming: {
+    if (!live) return mockFeatured.status === "streaming"
+    var arr = liveSessions
+    for (var i = 0; i < arr.length; i++) if (arr[i].name === selectedRaw) return arr[i].status === "streaming"
+    return false
+  }
   // Depth-ordered roster: children (spawned subagents) nest under their parent
   // session. `parent` is the parent's NAME; roots are top-level sessions.
   readonly property var rosterList: {
@@ -444,8 +453,20 @@ Item {
         rail.cur = Math.max(0, rail.navTotal - 1)
         feedView.positionViewAtEnd()
         rail.pinBottom = true
+        if (rail._wantBottom) bottomSettle.restart()   // initial load: re-pin as async delegates size up
         rail._wantBottom = false
       }
+    }
+  }
+  // On the first feed load the ListView's delegates aren't realized yet, so a
+  // single positionViewAtEnd lands mid-feed (contentHeight is an estimate).
+  // Re-pin a few times over ~500ms until the geometry settles at the true bottom.
+  Timer {
+    id: bottomSettle; interval: 60; repeat: true
+    property int n: 0
+    onTriggered: {
+      if (rail.view === "chat" && rail.pinBottom) feedView.positionViewAtEnd()
+      n++; if (n >= 9) { running = false; n = 0 }
     }
   }
   Connections {
@@ -690,7 +711,7 @@ Item {
       // spin), and snap once when a message is added/removed (countChanged).
       Timer {
         id: pinTimer; interval: 33; repeat: true
-        running: rail.view === "chat" && rail.pinBottom && rail.featured.status === "streaming"
+        running: rail.view === "chat" && rail.pinBottom && rail.featuredStreaming
         onTriggered: feedView.positionViewAtEnd()
       }
       onCountChanged: if (rail.view === "chat" && rail.pinBottom) Qt.callLater(feedView.positionViewAtEnd)
@@ -993,7 +1014,7 @@ Item {
   // (does NOT scroll with it). The feed's bottom spacer keeps messages clear of it.
   Rectangle {
     id: thinkPill
-    opacity: (rail.view === "chat" && rail.featured.status === "streaming") ? 1 : 0
+    opacity: (rail.view === "chat" && rail.featuredStreaming) ? 1 : 0
     visible: opacity > 0.01
     Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.InOutQuad } }
     anchors { horizontalCenter: parent.horizontalCenter; bottom: chin.top; bottomMargin: 14 }

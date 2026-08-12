@@ -16,13 +16,69 @@
 #include <pty.h>       // forkpty
 #include <sys/ioctl.h> // TIOCSWINSZ
 #include <unistd.h>
+#include <poll.h>
+#include <fcntl.h>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
+#include <cerrno>
+
+// Kitty graphics needs a PNG decoder installed process-wide. Decode via QImage
+// into tight RGBA, allocated through the library's allocator (it takes ownership
+// and frees with the same allocator).
+static bool heidrDecodePng(void *, const GhosttyAllocator *alloc,
+                           const uint8_t *data, size_t len, GhosttySysImage *out) {
+  QImage img;
+  if (!img.loadFromData(data, (int)len, "PNG")) return false;
+  img = img.convertToFormat(QImage::Format_RGBA8888);
+  const size_t w = (size_t)img.width(), h = (size_t)img.height();
+  const size_t n = w * h * 4;
+  uint8_t *buf = ghostty_alloc(alloc, n);
+  if (!buf) return false;
+  for (size_t y = 0; y < h; y++)
+    memcpy(buf + y * w * 4, img.constScanLine((int)y), w * 4);
+  out->width = (uint32_t)w; out->height = (uint32_t)h;
+  out->data = buf; out->data_len = n;
+  return true;
+}
+
+// Kitty unicode-placeholder row/column diacritics (kitty's canonical 297-entry
+// table). The Nth combining mark on a U+10EEEE placeholder cell encodes the
+// number N — 1st = image row, 2nd = image column, 3rd = high byte of image id.
+static const uint32_t kKittyDiacritics[] = {
+#include "kitty_diacritics.inc"
+};
+static int kittyDiacriticIndex(uint32_t cp) {
+  for (size_t i = 0; i < sizeof(kKittyDiacritics) / sizeof(uint32_t); ++i)
+    if (kKittyDiacritics[i] == cp) return (int)i;
+  return -1;
+}
+
+// Borrowed kitty image pixels (RGBA/RGB, uncompressed) → a QImage view. Returns
+// a null image for anything we can't map. No copy: valid only within paint().
+static QImage kittyImageView(GhosttyKittyGraphicsImage im) {
+  uint32_t iw = 0, ih = 0;
+  GhosttyKittyImageFormat fmt = GHOSTTY_KITTY_IMAGE_FORMAT_RGBA;
+  GhosttyKittyImageCompression comp = GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE;
+  const uint8_t *pix = nullptr; size_t plen = 0;
+  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_WIDTH, &iw);
+  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_HEIGHT, &ih);
+  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_FORMAT, &fmt);
+  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION, &comp);
+  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR, &pix);
+  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN, &plen);
+  if (!pix || !iw || !ih || comp != GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE) return QImage();
+  QImage::Format qfmt;
+  if (fmt == GHOSTTY_KITTY_IMAGE_FORMAT_RGBA) qfmt = QImage::Format_RGBA8888;
+  else if (fmt == GHOSTTY_KITTY_IMAGE_FORMAT_RGB) qfmt = QImage::Format_RGB888;
+  else return QImage();
+  return QImage(pix, (int)iw, (int)ih, qfmt);
+}
 
 TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setFlag(ItemHasContents, true);
@@ -46,6 +102,16 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   if (r != GHOSTTY_SUCCESS) qFatal("ghostty_terminal_new failed: %d", r);
 
   ghostty_render_state_new(nullptr, &renderState_);  // cursor shape (DECSCUSR) lives here
+  // Kitty graphics: install the PNG decoder once (process-wide) and give this
+  // terminal a storage budget so it accepts + stores images (dashboard banner, etc.).
+  static bool s_pngInstalled = false;
+  if (!s_pngInstalled) {
+    GhosttySysDecodePngFn png = &heidrDecodePng;
+    ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, &png);
+    s_pngInstalled = true;
+  }
+  size_t kittyLimit = (size_t)320 * 1024 * 1024;
+  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kittyLimit);
   loadThemeColors();  // fg/bg/cursor + palette 0-15 for the current theme mode
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_USERDATA, this);
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_WRITE_PTY,
@@ -59,27 +125,43 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     QString tm = QString::fromStdString(std::string(home ? home : "") + "/.config/theme_mode");
     themeWatcher_->addPath(tm);
     connect(themeWatcher_, &QFileSystemWatcher::fileChanged, this, [this, tm](const QString &) {
-      loadThemeColors();
-      applyThemeColors();
+      { std::lock_guard<std::mutex> lk(cmdMtx_); themeReload_ = true; }
+      wakeWorker();   // colours (palette_/term_) are worker-owned → reload there
       if (!themeWatcher_->files().contains(tm)) themeWatcher_->addPath(tm);  // re-arm after rewrite
     });
   }
 
   spawnPty();
+
+  // Worker thread owns the PTY read loop + ghostty + rasterization. A self-pipe
+  // lets the GUI thread break the worker's blocking poll() to deliver commands.
+  if (pipe(wakePipe_) != 0) qFatal("wake pipe failed");
+  for (int i = 0; i < 2; ++i) {
+    fcntl(wakePipe_[i], F_SETFL, fcntl(wakePipe_[i], F_GETFL) | O_NONBLOCK);
+    fcntl(wakePipe_[i], F_SETFD, fcntl(wakePipe_[i], F_GETFD) | FD_CLOEXEC);
+  }
+  wViewW_ = (int)(cols_ * cellW_ + padL_ + padR_);
+  wViewH_ = (int)(rows_ * cellH_ + padT_ + padB_);
+  worker_ = std::thread(&TermView::workerLoop, this);
 }
 
 TermView::~TermView() {
-  if (notifier_) notifier_->setEnabled(false);
+  quit_.store(true);
+  wakeWorker();
+  if (worker_.joinable()) worker_.join();
+  if (wakePipe_[0] >= 0) ::close(wakePipe_[0]);
+  if (wakePipe_[1] >= 0) ::close(wakePipe_[1]);
   if (master_ >= 0) ::close(master_);
   if (renderState_) ghostty_render_state_free(renderState_);
   if (term_) ghostty_terminal_free(term_);
 }
 
 void TermView::setActive(bool a) {
-  if (a == active_) return;
-  active_ = a;
+  if (a == active_.load()) return;
+  active_.store(a);
   emit activeChanged();
-  update();   // repaint so the cursor shows/hides immediately
+  { std::lock_guard<std::mutex> lk(cmdMtx_); repaintReq_ = true; }
+  wakeWorker();   // worker re-renders so the cursor shows/hides immediately
 }
 
 static bool parseHex(const std::string &s, GhosttyColorRgb &out) {
@@ -131,7 +213,6 @@ void TermView::applyThemeColors() {
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &defBg_);
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &defCursor_);
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, palette_);
-  update();
 }
 
 void TermView::spawnPty() {
@@ -164,9 +245,7 @@ void TermView::spawnPty() {
     execl(sh, sh, "-l", "-c", cmd, (char *)nullptr);
     _exit(127);
   }
-  // parent: watch the master fd for output
-  notifier_ = new QSocketNotifier(master_, QSocketNotifier::Read, this);
-  connect(notifier_, &QSocketNotifier::activated, this, &TermView::onPtyReadable);
+  // parent: the worker thread's poll() loop reads master_ (see workerLoop).
 }
 
 void TermView::geometryChange(const QRectF &n, const QRectF &o) {
@@ -174,41 +253,119 @@ void TermView::geometryChange(const QRectF &n, const QRectF &o) {
   if (n.size() == o.size() || cellW_ <= 0 || cellH_ <= 0) return;
   const int c = std::max(1, (int(n.width()) - padL_ - padR_) / cellW_);
   const int r = std::max(1, (int(n.height()) - padT_ - padB_) / cellH_);
-  if (c == cols_ && r == rows_) return;
-  cols_ = c;
-  rows_ = r;
-  ghostty_terminal_resize(term_, (uint16_t)cols_, (uint16_t)rows_,
-                          (uint32_t)cellW_, (uint32_t)cellH_);
-  if (master_ >= 0) {
-    struct winsize ws = {};
-    ws.ws_col = (unsigned short)cols_;
-    ws.ws_row = (unsigned short)rows_;
-    ws.ws_xpixel = (unsigned short)(cols_ * cellW_);
-    ws.ws_ypixel = (unsigned short)(rows_ * cellH_);
-    ioctl(master_, TIOCSWINSZ, &ws);  // delivers SIGWINCH → shell/nvim reflow
+  const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  {
+    std::lock_guard<std::mutex> lk(cmdMtx_);
+    resize_ = { true, c, r, (int)n.width(), (int)n.height(), dpr };
   }
-  update();
+  wakeWorker();   // worker applies ghostty_terminal_resize + TIOCSWINSZ + re-renders
 }
 
-void TermView::onPtyReadable() {
-  uint8_t buf[8192];
-  ssize_t n = ::read(master_, buf, sizeof(buf));
-  if (n <= 0) { notifier_->setEnabled(false); return; }
-  ghostty_terminal_vt_write(term_, buf, (size_t)n);
-  // Refresh the cursor's visual shape (block/bar/underline) from the render
-  // state — DECSCUSR (nvim's mode-based cursor) updates it here.
-  if (renderState_ && ghostty_render_state_update(renderState_, term_) == GHOSTTY_SUCCESS) {
-    GhosttyRenderStateCursorVisualStyle sh = GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK;
-    if (ghostty_render_state_get(renderState_, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE, &sh) == GHOSTTY_SUCCESS)
-      cursorShape_ = (int)sh;
+void TermView::wakeWorker() {
+  if (wakePipe_[1] >= 0) { char b = 1; ssize_t w = ::write(wakePipe_[1], &b, 1); (void)w; }
+}
+
+void TermView::enqueuePty(const QByteArray &bytes) {
+  if (bytes.isEmpty()) return;
+  { std::lock_guard<std::mutex> lk(cmdMtx_); ptyOut_.push_back(bytes); }
+  wakeWorker();
+}
+
+void TermView::workerLoop() {
+  int lastCols = cols_, lastRows = rows_;
+  bool dirty = false;
+
+  while (!quit_.load()) {
+    struct pollfd fds[2];
+    fds[0].fd = master_;      fds[0].events = POLLIN; fds[0].revents = 0;
+    fds[1].fd = wakePipe_[0]; fds[1].events = POLLIN; fds[1].revents = 0;
+    int pr = ::poll(fds, 2, -1);
+    if (pr < 0) { if (errno == EINTR) continue; break; }
+    if (quit_.load()) break;
+
+    if (fds[1].revents & POLLIN) {
+      char drain[256]; while (::read(wakePipe_[0], drain, sizeof(drain)) > 0) {}
+    }
+
+    std::deque<QByteArray> outs;
+    bool doResize = false, doTheme = false, doRepaint = false;
+    decltype(resize_) rz{};
+    {
+      std::lock_guard<std::mutex> lk(cmdMtx_);
+      outs.swap(ptyOut_);
+      if (resize_.pending) { rz = resize_; resize_.pending = false; doResize = true; }
+      doTheme = themeReload_;   themeReload_ = false;
+      doRepaint = repaintReq_;  repaintReq_ = false;
+    }
+    for (auto &b : outs) writePty(b.constData(), b.size());
+    if (doTheme)   { loadThemeColors(); applyThemeColors(); dirty = true; }
+    if (doResize) {
+      if (rz.cols != lastCols || rz.rows != lastRows) {
+        cols_ = rz.cols; rows_ = rz.rows;
+        ghostty_terminal_resize(term_, (uint16_t)cols_, (uint16_t)rows_,
+                                (uint32_t)cellW_, (uint32_t)cellH_);
+        if (master_ >= 0) {
+          struct winsize ws = {};
+          ws.ws_col = (unsigned short)cols_;   ws.ws_row = (unsigned short)rows_;
+          ws.ws_xpixel = (unsigned short)(cols_ * cellW_);
+          ws.ws_ypixel = (unsigned short)(rows_ * cellH_);
+          ioctl(master_, TIOCSWINSZ, &ws);  // SIGWINCH → shell/nvim reflow
+        }
+        lastCols = cols_; lastRows = rows_;
+      }
+      wViewW_ = rz.viewW; wViewH_ = rz.viewH; wDpr_ = rz.dpr;
+      dirty = true;
+    }
+    if (doRepaint) dirty = true;
+
+    bool ptyClosed = false;
+    if (fds[0].revents & POLLIN) {
+      // Drain the whole burst before rendering — one nvim redraw can span many
+      // reads; rendering per-chunk would emit redundant mid-burst frames (the
+      // big-file-open stutter). Inner poll(0) gates extra reads on a blocking fd.
+      uint8_t buf[65536];
+      for (;;) {
+        ssize_t n = ::read(master_, buf, sizeof(buf));
+        if (n > 0) {
+          ghostty_terminal_vt_write(term_, buf, (size_t)n);
+          dirty = true;
+          struct pollfd more; more.fd = master_; more.events = POLLIN; more.revents = 0;
+          if (::poll(&more, 1, 0) > 0 && (more.revents & POLLIN)) continue;
+          break;
+        }
+        if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) ptyClosed = true;
+        break;
+      }
+      // Cursor visual shape (block/bar/underline) — nvim swaps it by mode.
+      if (dirty && renderState_ && ghostty_render_state_update(renderState_, term_) == GHOSTTY_SUCCESS) {
+        GhosttyRenderStateCursorVisualStyle sh = GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK;
+        if (ghostty_render_state_get(renderState_, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE, &sh) == GHOSTTY_SUCCESS)
+          cursorShape_ = (int)sh;
+      }
+    }
+    if (ptyClosed || (fds[0].revents & (POLLHUP | POLLERR))) {
+      if (dirty) {  // present nvim's final frame before we tear down
+        QImage f = renderFrame();
+        { std::lock_guard<std::mutex> lk(frameMtx_); frame_ = f; }
+        QMetaObject::invokeMethod(this, [this] { update(); }, Qt::QueuedConnection);
+      }
+      break;  // PTY closed (shell/nvim exited)
+    }
+
+    if (!dirty) continue;
+
+    // Synchronized output (mode 2026): don't present a half-drawn frame. Stay
+    // dirty and render once nvim ends the sync (next data burst wakes us).
+    GhosttyTerminalModeConfig mc;
+    mc.mode = GHOSTTY_MODE_SYNC_OUTPUT; mc.value = false;
+    ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_MODE, &mc);
+    if (mc.value) continue;
+
+    QImage f = renderFrame();
+    { std::lock_guard<std::mutex> lk(frameMtx_); frame_ = f; }
+    dirty = false;
+    QMetaObject::invokeMethod(this, [this] { update(); }, Qt::QueuedConnection);
   }
-  // Honor synchronized output (mode 2026): while nvim is mid-frame, don't
-  // present partial state — that's what made the cursor flicker across panels.
-  GhosttyTerminalModeConfig mc;
-  mc.mode = GHOSTTY_MODE_SYNC_OUTPUT;
-  mc.value = false;
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_MODE, &mc);
-  if (!mc.value) update();
 }
 
 void TermView::writePty(const char *data, int len) {
@@ -223,8 +380,7 @@ void TermView::onWritePty(GhosttyTerminal, void *userdata,
 
 void TermView::pasteText(const QString &t) {
   if (t.isEmpty()) return;
-  QByteArray b = t.toUtf8();
-  writePty(b.constData(), b.size());
+  enqueuePty(t.toUtf8());   // GUI thread → worker owns the PTY fd
 }
 
 static inline QColor toQ(const GhosttyColorRgb &c) { return QColor(c.r, c.g, c.b); }
@@ -344,13 +500,22 @@ bool TermView::drawPowerline(QPainter *p, int x, int y, uint32_t cp, const QColo
 }
 
 void TermView::paint(QPainter *outP) {
-  // QQuickPaintedItem scales the painter by a transform (device-pixel-ratio is
-  // left at 1), so drawText rasterizes glyphs at base size then stretches the
-  // bitmap → fuzzy/thick. Render into our own DPR-aware image (glyphs rasterize
-  // at the real density with an identity transform), then blit it 1:1.
-  const qreal ratio = window() ? window()->effectiveDevicePixelRatio() : 1.0;
-  QImage img(QSize(std::max(1, (int)std::ceil(width() * ratio)),
-                   std::max(1, (int)std::ceil(height() * ratio))),
+  // GUI/scene-graph thread: only blit the frame the worker rasterized. All the
+  // heavy work (VT parse + glyph raster) happens off this thread in workerLoop.
+  QImage f;
+  { std::lock_guard<std::mutex> lk(frameMtx_); f = frame_; }
+  if (f.isNull()) { outP->fillRect(boundingRect(), toQ(defBg_)); return; }
+  outP->setRenderHint(QPainter::SmoothPixmapTransform, false);
+  outP->drawImage(QPointF(0, 0), f);
+}
+
+QImage TermView::renderFrame() {
+  // Worker thread. Render into a DPR-aware image (glyphs rasterize at the real
+  // density with an identity transform), which paint() then blits 1:1.
+  const qreal ratio = wDpr_ > 0 ? wDpr_ : 1.0;
+  const int vw = std::max(1, wViewW_), vh = std::max(1, wViewH_);
+  QImage img(QSize(std::max(1, (int)std::ceil(vw * ratio)),
+                   std::max(1, (int)std::ceil(vh * ratio))),
              QImage::Format_ARGB32_Premultiplied);
   img.setDevicePixelRatio(ratio);
   img.fill(Qt::transparent);
@@ -364,7 +529,7 @@ void TermView::paint(QPainter *outP) {
   ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_COLOR_CURSOR, &curD);
   const QColor defFg = toQ(fgD), defBg = toQ(bgD), curColor = toQ(curD);
 
-  p->fillRect(boundingRect(), defBg);
+  p->fillRect(QRectF(0, 0, vw, vh), defBg);
 
   uint16_t cx = 0, cy = 0;
   bool cvis = true;
@@ -450,7 +615,7 @@ void TermView::paint(QPainter *outP) {
   }
 
   // Cursor: honor the app's requested shape (nvim swaps block/beam by mode).
-  if (cvis && active_ && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
+  if (cvis && active_.load() && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
     const int x = padL_ + cx * cellW_, y = padT_ + cy * cellH_;
     switch (cursorShape_) {
       case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR:
@@ -490,11 +655,125 @@ void TermView::paint(QPainter *outP) {
     }
   }
 
+  // Kitty graphics: blit stored image placements over the cells (dashboard
+  // banner, image.nvim, etc.). Pixel data is borrowed from the terminal and
+  // valid until the next mutating call — safe to read here inside paint().
+  {
+    GhosttyKittyGraphics kg = nullptr;
+    if (ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS, &kg) == GHOSTTY_SUCCESS && kg) {
+      // Virtual (unicode-placeholder) placements carry no viewport geometry —
+      // their cells live in the grid. Record imageId -> intended cell grid so
+      // the placeholder scan below can slice the image into per-cell tiles.
+      struct VGrid { uint32_t cols, rows; };
+      std::unordered_map<uint32_t, VGrid> virtualPl;
+
+      GhosttyKittyGraphicsPlacementIterator it = nullptr;
+      if (ghostty_kitty_graphics_placement_iterator_new(nullptr, &it) == GHOSTTY_SUCCESS && it) {
+        ghostty_kitty_graphics_get(kg, GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR, &it);
+        while (ghostty_kitty_graphics_placement_next(it)) {
+          uint32_t imgId = 0;
+          ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IMAGE_ID, &imgId);
+          GhosttyKittyGraphicsImage im = ghostty_kitty_graphics_image(kg, imgId);
+          if (!im) continue;
+
+          bool virt = false;
+          ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IS_VIRTUAL, &virt);
+          if (virt) {
+            uint32_t vc = 0, vr = 0;
+            ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_COLUMNS, &vc);
+            ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_ROWS, &vr);
+            if (!vc || !vr)
+              ghostty_kitty_graphics_placement_grid_size(it, im, term_, &vc, &vr);
+            if (vc && vr) virtualPl[imgId] = {vc, vr};
+            continue;
+          }
+
+          GhosttyKittyGraphicsPlacementRenderInfo ri = GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo);
+          if (ghostty_kitty_graphics_placement_render_info(it, im, term_, &ri) != GHOSTTY_SUCCESS) continue;
+          if (!ri.viewport_visible) continue;
+          QImage srcImg = kittyImageView(im);
+          if (srcImg.isNull()) continue;
+          QRectF srcR(ri.source_x, ri.source_y, ri.source_width, ri.source_height);
+          QRectF dstR(padL_ + (qreal)ri.viewport_col * cellW_,
+                      padT_ + (qreal)ri.viewport_row * cellH_,
+                      ri.pixel_width, ri.pixel_height);
+          p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+          p->drawImage(dstR, srcImg, srcR);
+        }
+        ghostty_kitty_graphics_placement_iterator_free(it);
+      }
+
+      static const bool kittyDbg = qEnvironmentVariableIsSet("HEIDR_KITTY_DEBUG");
+      if (kittyDbg) {
+        fprintf(stderr, "[kitty] virtualPl=%zu", virtualPl.size());
+        for (auto &kv : virtualPl) fprintf(stderr, " id=%u(%ux%u)", kv.first, kv.second.cols, kv.second.rows);
+        fprintf(stderr, "\n");
+      }
+      int dbgPh = 0, dbgBlit = 0;
+
+      // Unicode placeholders (snacks banner, image.nvim): scan the visible grid
+      // for U+10EEEE cells, decode the image cell (row,col) from the combining
+      // diacritics and the image id from the fg colour, blit the matching tile.
+      if (!virtualPl.empty()) {
+        p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+        for (uint16_t row = 0; row < rows_; ++row) {
+          int prevRow = 0, prevCol = -1;   // kitty auto-increment, reset per grid row
+          for (uint16_t col = 0; col < cols_; ++col) {
+            GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
+            GhosttyPoint pt; pt.tag = GHOSTTY_POINT_TAG_ACTIVE;
+            pt.value.coordinate.x = col; pt.value.coordinate.y = row;
+            if (ghostty_terminal_grid_ref(term_, pt, &ref) != GHOSTTY_SUCCESS) { prevCol = -1; continue; }
+
+            uint32_t g[16]; size_t gn = 0;
+            if (ghostty_grid_ref_graphemes(&ref, g, 16, &gn) != GHOSTTY_SUCCESS || gn == 0 ||
+                g[0] != 0x10EEEEu) { prevCol = -1; continue; }
+            dbgPh++;
+
+            int imgRow = -1, imgCol = -1, idHigh = -1, di = 0;
+            for (size_t k = 1; k < gn; ++k) {
+              int v = kittyDiacriticIndex(g[k]);
+              if (v < 0) continue;
+              if (di == 0) imgRow = v; else if (di == 1) imgCol = v; else if (di == 2) idHigh = v;
+              di++;
+            }
+            if (imgRow < 0) imgRow = prevRow;
+            if (imgCol < 0) imgCol = prevCol + 1;
+            prevRow = imgRow; prevCol = imgCol;
+
+            GhosttyStyle st = GHOSTTY_INIT_SIZED(GhosttyStyle);
+            ghostty_grid_ref_style(&ref, &st);
+            uint32_t id = 0;
+            if (st.fg_color.tag == GHOSTTY_STYLE_COLOR_RGB)
+              id = ((uint32_t)st.fg_color.value.rgb.r << 16) |
+                   ((uint32_t)st.fg_color.value.rgb.g << 8) |
+                    (uint32_t)st.fg_color.value.rgb.b;
+            else if (st.fg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE)
+              id = st.fg_color.value.palette;
+            if (idHigh > 0) id |= ((uint32_t)idHigh << 24);
+
+            auto vit = virtualPl.find(id);
+            if (vit == virtualPl.end()) continue;
+            GhosttyKittyGraphicsImage im = ghostty_kitty_graphics_image(kg, id);
+            if (!im) continue;
+            QImage srcImg = kittyImageView(im);
+            if (srcImg.isNull()) continue;
+            const uint32_t nc = vit->second.cols, nr = vit->second.rows;
+            if (!nc || !nr || (uint32_t)imgCol >= nc || (uint32_t)imgRow >= nr) continue;
+            const qreal sw = (qreal)srcImg.width() / nc, sh = (qreal)srcImg.height() / nr;
+            QRectF srcR(imgCol * sw, imgRow * sh, sw, sh);
+            QRectF dstR(padL_ + (qreal)col * cellW_, padT_ + (qreal)row * cellH_, cellW_, cellH_);
+            p->drawImage(dstR, srcImg, srcR);
+            dbgBlit++;
+          }
+        }
+      }
+      if (kittyDbg && (dbgPh || !virtualPl.empty()))
+        fprintf(stderr, "[kitty] placeholders=%d blitted=%d\n", dbgPh, dbgBlit);
+    }
+  }
+
   localPainter.end();
-  // Point-form blit of the DPR-tagged image → drawn 1:1 at its logical size with
-  // NO resampling. The rect form rescales+smooths even at 1:1, which softened it.
-  outP->setRenderHint(QPainter::SmoothPixmapTransform, false);
-  outP->drawImage(QPointF(0, 0), img);
+  return img;
 }
 
 void TermView::keyPressEvent(QKeyEvent *e) {
@@ -526,7 +805,7 @@ void TermView::keyPressEvent(QKeyEvent *e) {
         out = e->text().toUtf8();
       }
   }
-  if (!out.isEmpty()) writePty(out.constData(), out.size());
+  if (!out.isEmpty()) enqueuePty(out);
   else QQuickPaintedItem::keyPressEvent(e);
 }
 

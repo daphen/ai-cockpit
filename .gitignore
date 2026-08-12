@@ -1,4 +1,5 @@
 build/
+build-vendored/
 result
 result-*
 .direnv/
