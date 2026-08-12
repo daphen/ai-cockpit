@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
+import Quickshell.Io
 import QsLib
 
 // The agent rail: roster (from agentd) + activity feed + composer.
@@ -35,6 +36,12 @@ Item {
   // (pinTimer / bottomSettle / countChanged / feedDebounce) touches contentY.
   // Several of those fire on a 33-120ms cadence and were fighting the wheel, so
   // the feed felt locked. One guard makes the user's gesture always win.
+  // Exactly ONE thing may drive the viewport at a time:
+  //   followMode = true  → bottom-anchored stream follow (pinTimer), range OFF
+  //   followMode = false → the cursor drives it (native ApplyRange), no timers
+  // They contradict each other: ApplyRange pulls the CURRENT item's TOP into view,
+  // so on a tall growing last card it scrolled UP while the pin timer pulled DOWN.
+  readonly property bool followMode: view === "chat" && pinBottom && featuredStreaming
   readonly property bool scrollGuarded: scrollGuard.running
   Timer { id: scrollGuard; interval: 700 }
   function noteUserScroll() { scrollGuard.restart() }
@@ -46,6 +53,36 @@ Item {
   readonly property bool rosterExpanded: rosterOverride !== null ? rosterOverride : focused
 
   function copyText(s) { if (s && s.length) Quickshell.execDetached(["wl-copy", "--", String(s)]) }
+
+  // ── slash commands ─────────────────────────────────────────────────────────
+  // The composer advertised "/ for commands" with nothing behind it. pi's command
+  // set IS its prompts dir (~/.pi/agent/prompts/<name>.md), so list that once and
+  // filter it as you type. Typing the full command has always worked — pi treats a
+  // leading-slash prompt as a command — this just makes them discoverable.
+  property var commands: []
+  readonly property string composerText: composerInput.text
+  readonly property bool slashOpen: rail.insert && composerText.charAt(0) === "/" && commandMatches.length > 0
+  readonly property var commandMatches: {
+    var t = String(composerText || "")
+    if (t.charAt(0) !== "/") return []
+    var q = t.slice(1).split(/\s/)[0].toLowerCase()
+    if (t.indexOf(" ") >= 0) return []            // already past the command word
+    return commands.filter(c => c.toLowerCase().indexOf(q) === 0)
+  }
+  property int slashCur: 0
+  onCommandMatchesChanged: slashCur = 0
+  function acceptSlash() {
+    var c = commandMatches[Math.max(0, Math.min(slashCur, commandMatches.length - 1))]
+    if (c) composerInput.text = "/" + c + " "
+  }
+  Process {
+    id: cmdList
+    running: true
+    command: ["sh", "-c", "ls ~/.pi/agent/prompts 2>/dev/null | sed 's/\\.md$//' | sort"]
+    stdout: StdioCollector {
+      onStreamFinished: rail.commands = String(this.text || "").split("\n").filter(s => s.length > 0)
+    }
+  }
 
   // ── vimium-style link hints (mlqs `f` mode) ─────────────────────────────────
   // `f` labels every link in the FOCUSED message with a code-styled badge;
@@ -140,16 +177,23 @@ Item {
     for (var i = 0; i < agentd.sessions.length; i++)
       if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; break }
     if (!cwd) return
-    cwd = rail._localPath(cwd)   // box path → local SSHFS mount (no-op for local sessions)
+    cwd = rail._localPath(cwd)   // box path → local mutagen mirror (no-op for local sessions)
+    // Plan location depends on where the session lives: local work uses the vault,
+    // a lovbox session has no vault so plan-ticket writes <worktree>/.plans/.
+    // Build a vimscript chain that prefers the worktree plan, then the vault, then
+    // the session dashboard — filereadable() runs inside nvim, which is the only
+    // side that can actually test the paths.
     var m = String(sid).match(/every-(\d+)/i)
-    var plan = m ? (Quickshell.env("HOME") + "/personal/notes/storage/plans/EVERY-" + m[1] + ".md") : ""
-    // cd into the worktree, then: open the plan if it exists, else show the
-    // heidr session dashboard (require("heidr").dashboard(cwd)) — matching the
-    // nvim rail's reflect_context, never an empty buffer / netrw.
     var dash = 'execute(\'lua require("heidr").dashboard("' + cwd + '")\')'
-    var expr = plan
-      ? ('execute("cd ' + cwd + '") . (filereadable("' + plan + '") ? execute("edit ' + plan + '") : ' + dash + ')')
-      : ('execute("cd ' + cwd + '") . ' + dash)
+    var open = dash
+    if (m) {
+      var key = "EVERY-" + m[1]
+      var wtPlan    = cwd + "/.plans/" + key + ".md"
+      var vaultPlan = Quickshell.env("HOME") + "/personal/notes/storage/plans/" + key + ".md"
+      open = '(filereadable("' + wtPlan + '") ? execute("edit ' + wtPlan + '")'
+           + ' : (filereadable("' + vaultPlan + '") ? execute("edit ' + vaultPlan + '") : ' + dash + '))'
+    }
+    var expr = 'execute("cd ' + cwd + '") . ' + open
     var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
     Quickshell.execDetached(["nvim", "--server", sock, "--remote-expr", expr])
   }
@@ -202,15 +246,20 @@ Item {
 
   // Manage focus imperatively — a `focus:` binding fights forceActiveFocus and
   // wedges the rail after the first composer round-trip.
+  // Coming back from nvim should land where you LEFT (nvim-heidr behaviour): the
+  // cursor position survives on its own (it's just `cur`), but insert mode was
+  // being force-cleared on every return, so leaving from the composer dumped you
+  // back in the roster. Remember it across the blur instead.
+  property bool _wasInsert: false
   onFocusedChanged: {
-    if (focused) {
-      insert = false
-      // A collapsed roster shows only a glance (no per-row cursor). If the
-      // cursor was parked in the roster range, entering the rail would leave
-      // nothing highlighted — land it on the latest chat message instead.
-      if (!rosterExpanded && cur < rSize && navTotal > rSize) cur = navTotal - 1
-      forceActiveFocus()
-    }
+    if (!focused) { _wasInsert = insert; insert = false; return }
+    if (_wasInsert) { enterInsert(); return }   // was typing → back into the composer
+    insert = false
+    // A collapsed roster shows only a glance (no per-row cursor). If the
+    // cursor was parked in the roster range, entering the rail would leave
+    // nothing highlighted — land it on the latest chat message instead.
+    if (!rosterExpanded && cur < rSize && navTotal > rSize) cur = navTotal - 1
+    forceActiveFocus()
   }
 
   // Font scale anchored to the design system's base (Theme.fontSize = 14).
@@ -350,6 +399,8 @@ Item {
   }
   property bool _wantBottom: false   // scroll chat to bottom once the new session's feed loads
   onSelectedRawChanged: {
+    _feedReset = true
+    Qt.callLater(rail.syncFeedModel)
     pinBottom = true
     _wantBottom = true
     if (agentd) agentd.select(selectedRaw)
@@ -419,44 +470,16 @@ Item {
     }
   }
   // Is the cursor'd feed card at least partly in the viewport?
-  // j/k move the cursor; ListView's native highlight range does the scrolling.
-  // ONE exception needs geometry: a message TALLER than the panel. There j/k
-  // pages INSIDE it until its top/bottom edge shows, then moves on to the
-  // adjacent message. While paging inside, the highlight range steps aside
-  // (NoHighlightRange) so ListView doesn't yank the item back into range.
-  property bool inMsgScroll: false
-  readonly property real _msgPage: feedView.height * 0.85
-  function _curFeedItem() {
-    if (view !== "chat" || cur < rSize) return null
-    return feedView.itemAtIndex(cur - rSize)
-  }
-  function _isTall(it) { return it && it.height > feedView.height - 8 }
+  // j/k only move the cursor. ListView keeps it on screen via its native highlight
+  // range (currentIndex + ApplyRange + preferredHighlightBegin/End on feedView) —
+  // no contentY math anywhere. For a message taller than the panel, wheel-scroll to
+  // read the rest; j/k move card-to-card.
   function moveDown() {
     if (cur < rSize && rosterExpanded) { cur = Math.min(cur + 1, rSize - 1); return }   // stay in roster
-    var it = _curFeedItem()
-    if (_isTall(it)) {
-      var bottomEdge = it.y + it.height + 56               // its bottom + the footer margin
-      if (feedView.contentY + feedView.height < bottomEdge - 4) {
-        inMsgScroll = true
-        feedView.contentY = Math.min(bottomEdge - feedView.height, feedView.contentY + _msgPage)
-        return                                              // still inside the message
-      }
-    }
-    inMsgScroll = false
     cur = Math.min(cur + 1, navTotal - 1)
   }
   function moveUp() {
     if (cur < rSize) { cur = Math.max(cur - 1, 0); return }   // stay in roster
-    var it = _curFeedItem()
-    if (_isTall(it)) {
-      var topEdge = it.y - feedView.spacing                 // its top + the top gap
-      if (feedView.contentY > topEdge + 4) {
-        inMsgScroll = true
-        feedView.contentY = Math.max(topEdge, feedView.contentY - _msgPage)
-        return                                              // still inside the message
-      }
-    }
-    inMsgScroll = false
     cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
   }
 
@@ -514,6 +537,40 @@ Item {
     color: Theme.electric; opacity: rail.focused ? 0.5 : 0; z: 10
   }
 
+  // Incremental feed model. `groupedFeed` is a fresh JS ARRAY every time stream data
+  // lands, and ListView cannot diff arrays — assigning one destroys and rebuilds every
+  // delegate (re-parsing all the markdown), which at the 120ms debounce cadence is the
+  // ~8x/sec flicker during a long turn. So reconcile into a ListModel instead: rows are
+  // matched by a cheap signature, and only the row that actually changed is written, so
+  // the delegates persist and their bindings just update in place.
+  ListModel { id: feedModel; dynamicRoles: true }
+  property bool _feedReset: false     // session switch → rebuild rather than reconcile
+  function _turnSig(t) {
+    if (!t) return ""
+    if (t.kind !== "turn") return t.kind + "|" + String(t.text || t.command || "").length
+    var its = t.items || []
+    var last = its.length ? its[its.length - 1] : null
+    return "turn|" + its.length + "|" +
+      (last ? (String(last.kind) + String(last.text || last.command || "").length) : "")
+  }
+  function syncFeedModel() {
+    var arr = groupedFeed
+    if (_feedReset || arr.length < feedModel.count) {
+      _feedReset = false
+      feedModel.clear()
+      for (var a = 0; a < arr.length; a++) feedModel.append({ d: arr[a], sig: _turnSig(arr[a]) })
+      return
+    }
+    for (var i = 0; i < arr.length; i++) {
+      var sig = _turnSig(arr[i])
+      if (i < feedModel.count) {
+        if (feedModel.get(i).sig !== sig) feedModel.set(i, { d: arr[i], sig: sig })
+      } else {
+        feedModel.append({ d: arr[i], sig: sig })
+      }
+    }
+  }
+
   // --- Live feed for the selected session; mock when no daemon data yet ---
   // Debounced stream updates: rebuilding the whole feed model on every token
   // blocks the UI thread and stutters animations (the orb) + scrolling. Coalesce
@@ -523,8 +580,9 @@ Item {
     id: feedDebounce; interval: 120
     onTriggered: {
       rail.feedTick++
+      rail.syncFeedModel()
       if (rail.view === "chat" && !rail.scrollGuarded && (rail.pinBottom || rail._wantBottom)) {
-        rail.cur = Math.max(0, rail.navTotal - 1)
+        if (rail._wantBottom) rail.cur = Math.max(0, rail.navTotal - 1)   // initial load only
         feedView.positionViewAtEnd()
         rail.pinBottom = true
         if (rail._wantBottom) bottomSettle.restart()   // initial load: re-pin as async delegates size up
@@ -653,7 +711,10 @@ Item {
             Layout.fillWidth: true
             implicitHeight: 40
             radius: height / 2   // pill rows (as before)
-            readonly property bool cursor: rail.focused && rail.cur === index
+            // `!rail.insert` matters: the cursor fill means "keyboard is here", so
+            // it must clear while the composer owns input (the feed + files
+            // delegates already guard this way).
+            readonly property bool cursor: rail.focused && !rail.insert && rail.cur === index
             readonly property bool selected: (modelData.rawName || modelData.name) === rail.selectedRaw
             readonly property bool streaming: modelData.status === "streaming"
             color: cursor ? Theme.fg
@@ -767,7 +828,7 @@ Item {
       visible: rail.view === "chat"
       clip: true
       spacing: 18
-      model: rail.groupedFeed
+      model: feedModel
       boundsBehavior: Flickable.StopAtBounds
       // NATIVE cursor-follow: ListView keeps currentIndex inside the preferred
       // range, scrolling as needed. This replaces ~120 lines of hand-rolled
@@ -776,7 +837,7 @@ Item {
       // footer pad at the bottom.
       currentIndex: (rail.view === "chat" && rail.cur >= rail.rSize) ? (rail.cur - rail.rSize) : -1
       highlightFollowsCurrentItem: true
-      highlightRangeMode: rail.inMsgScroll ? ListView.NoHighlightRange : ListView.ApplyRange
+      highlightRangeMode: rail.followMode ? ListView.NoHighlightRange : ListView.ApplyRange
       preferredHighlightBegin: spacing
       preferredHighlightEnd: height - 56
       highlightMoveDuration: 0
@@ -812,8 +873,14 @@ Item {
       // Instead: throttle-follow at ~30fps ONLY while streaming (bounded, can't
       // spin), and snap once when a message is added/removed (countChanged).
       Timer {
-        id: pinTimer; interval: 100; repeat: true
-        running: rail.view === "chat" && rail.pinBottom && rail.featuredStreaming && !rail.scrollGuarded
+        id: pinTimer; interval: 250; repeat: true
+        running: rail.followMode && !rail.scrollGuarded
+        // Follow the bottom with the SUPPORTED api. Writing contentY directly (tried
+        // 2026-08-12) fights ListView's own layout bookkeeping while the streaming
+        // card resizes and the feed visibly blinks. A slower cadence also keeps the
+        // resize-chase from reading as a bounce. Continuously following a resizing
+        // list is inherently a little jumpy — the jitter-free fix is a BottomToTop
+        // layout with a reversed model, which is a bigger refactor.
         onTriggered: feedView.positionViewAtEnd()
       }
       onCountChanged: if (rail.view === "chat" && rail.pinBottom && !rail.scrollGuarded) Qt.callLater(feedView.positionViewAtEnd)
@@ -830,7 +897,10 @@ Item {
         width: feedView.width
         implicitHeight: card.implicitHeight
         property int rowIndex: index
-        readonly property bool isUser: modelData.kind === "user"
+        // Capture the row's turn once: nested Repeaters shadow `model` with their
+        // own model property, so model.d is only readable at the delegate root.
+        readonly property var turn: model.d
+        readonly property bool isUser: turnDel.turn.kind === "user"
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
 
         Rectangle {
@@ -873,7 +943,7 @@ Item {
             Text {
               visible: turnDel.isUser
               width: cardCol.width
-              text: turnDel.isUser ? rail.colorizeLinks(modelData.text) : ""
+              text: turnDel.isUser ? rail.colorizeLinks(turnDel.turn.text) : ""
               color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
               linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
               wrapMode: Text.WordWrap; textFormat: Text.MarkdownText
@@ -883,7 +953,7 @@ Item {
             // Thought process — visible inline. Each block shows its short header;
             // tap to reveal the full reasoning.
             Repeater {
-              model: turnDel.isUser ? [] : rail.turnThinks(modelData.items)
+              model: turnDel.isUser ? [] : rail.turnThinks(turnDel.turn.items)
               Loader {
                 width: cardCol.width
                 sourceComponent: thinkRow
@@ -895,7 +965,7 @@ Item {
 
             // Agent prose — the headline answer (each text block).
             Repeater {
-              model: turnDel.isUser ? [] : rail.turnProse(modelData.items)
+              model: turnDel.isUser ? [] : rail.turnProse(turnDel.turn.items)
               Loader {
                 width: cardCol.width
                 property var entry: modelData
@@ -906,12 +976,12 @@ Item {
 
             // Compact activity summary — "4 bash · 6 read · edited 3", expandable.
             Loader {
-              active: !turnDel.isUser && rail.turnActivitySummary(modelData.items).length > 0
+              active: !turnDel.isUser && rail.turnActivitySummary(turnDel.turn.items).length > 0
               visible: active
               width: cardCol.width
               sourceComponent: activityRow
-              property var items: turnDel.isUser ? [] : rail.turnActivityItems(modelData.items)
-              property string summary: active ? rail.turnActivitySummary(modelData.items) : ""
+              property var items: turnDel.isUser ? [] : rail.turnActivityItems(turnDel.turn.items)
+              property string summary: active ? rail.turnActivitySummary(turnDel.turn.items) : ""
               property string ekey: "turn-" + turnDel.rowIndex
               property bool expanded: rail.expandedGroups[ekey] === true
             }
@@ -1022,6 +1092,46 @@ Item {
       anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 14 }
       spacing: 10
 
+      // Slash-command palette — sits above the composer while the text starts
+      // with "/". Tab/Enter completes the highlighted one, Ctrl+n/p or ↑/↓ move.
+      Rectangle {
+        Layout.fillWidth: true
+        visible: rail.slashOpen
+        implicitHeight: cmdCol.implicitHeight + 12
+        radius: Theme.radiusCard !== undefined ? Theme.radiusCard : 10
+        color: Theme.surface0
+        border.color: Theme.hairline
+        border.width: 1
+        Column {
+          id: cmdCol
+          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 6 }
+          Repeater {
+            model: rail.commandMatches.slice(0, 8)
+            Rectangle {
+              width: cmdCol.width
+              height: 26
+              radius: 6
+              readonly property bool sel: index === Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
+              color: sel ? Theme.surface2 : "transparent"
+              Row {
+                anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+                spacing: 8
+                Text {
+                  text: "/" + modelData
+                  color: parent.parent.sel ? Theme.fg : Theme.fg_muted
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                  font.weight: parent.parent.sel ? 500 : 400
+                }
+              }
+              MouseArea {
+                anchors.fill: parent
+                onClicked: { rail.slashCur = index; rail.acceptSlash() }
+              }
+            }
+          }
+        }
+      }
+
       // Composer — real text input (i to enter, Esc/Ctrl+h to leave)
       Rectangle {
         Layout.fillWidth: true
@@ -1050,10 +1160,27 @@ Item {
               } else if (text.trim().length && rail.agentd) {
                 rail.agentd.sendPrompt(rail.selectedRaw, text)
               }
-              text = ""; rail.exitInsert()
+              // Stay in insert after sending — you almost always have a follow-up,
+              // and dropping to normal mode meant pressing `i` again every time.
+              // Esc / Ctrl+h still leave. (An answered ask_user is done, so exit.)
+              text = ""
+              if (pa && (pa.method === "input" || pa.method === "editor")) rail.exitInsert()
+              else composerInput.forceActiveFocus()
             }
             Keys.onPressed: (e) => {
               var ctrl = (e.modifiers & Qt.ControlModifier)
+              // Slash palette owns Tab / ↑↓ / Ctrl+n,p while it's open.
+              if (rail.slashOpen) {
+                var n = rail.commandMatches.length
+                if (e.key === Qt.Key_Tab) { rail.acceptSlash(); e.accepted = true; return }
+                if (e.key === Qt.Key_Down || (ctrl && e.key === Qt.Key_N)) { rail.slashCur = (rail.slashCur + 1) % n; e.accepted = true; return }
+                if (e.key === Qt.Key_Up   || (ctrl && e.key === Qt.Key_P)) { rail.slashCur = (rail.slashCur - 1 + n) % n; e.accepted = true; return }
+                // Enter on a partial command completes it instead of sending.
+                if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter)
+                    && rail.composerText.slice(1) !== rail.commandMatches[rail.slashCur]) {
+                  rail.acceptSlash(); e.accepted = true; return
+                }
+              }
               if (e.key === Qt.Key_Escape) { rail.exitInsert(); e.accepted = true }
               else if (ctrl && e.key === Qt.Key_H) { rail.exitInsert(); rail.focusNvim(); e.accepted = true }
               else if (ctrl && e.key === Qt.Key_K) {
