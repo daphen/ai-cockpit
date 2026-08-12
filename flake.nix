@@ -60,7 +60,11 @@
           # Single-instance: focus the existing window if one is mapped (niri),
           # else launch. Heidr connects to the already-running agentd; no daemon
           # of its own to spawn.
-          export PATH="/run/current-system/sw/bin:$PATH"
+          # Put the USER profile first so the wrapped `nvim` (with the full config)
+          # wins over the system's unwrapped nvim; keep system bin as a fallback so
+          # qs/tools still resolve when launched from a minimal niri env.
+          _u=$(id -un)
+          export PATH="/etc/profiles/per-user/$_u/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
           if command -v niri >/dev/null 2>&1 && niri msg --json windows 2>/dev/null | grep -q '"title": *"heidr-qs"'; then
             niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r '.[]|select(.title=="heidr-qs")|.id' | head -1)" 2>/dev/null || true
             exit 0

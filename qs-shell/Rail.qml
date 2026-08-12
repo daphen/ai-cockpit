@@ -31,6 +31,13 @@ Item {
   function curLocal()   { return cur < rSize ? cur : cur - rSize }
   property bool insert: false
   property bool pinBottom: true   // chat follows new messages unless you scroll up
+  // Hands off after ANY user scroll: while this is running, no auto-positioning
+  // (pinTimer / bottomSettle / countChanged / feedDebounce) touches contentY.
+  // Several of those fire on a 33-120ms cadence and were fighting the wheel, so
+  // the feed felt locked. One guard makes the user's gesture always win.
+  readonly property bool scrollGuarded: scrollGuard.running
+  Timer { id: scrollGuard; interval: 700 }
+  function noteUserScroll() { scrollGuard.restart() }
   property string activeRaw: ""
   // Roster starts expanded and stays however you leave it — Ctrl+t toggles the
   // full list vs the single-row glance, and the choice persists across focus
@@ -39,6 +46,73 @@ Item {
   readonly property bool rosterExpanded: rosterOverride !== null ? rosterOverride : focused
 
   function copyText(s) { if (s && s.length) Quickshell.execDetached(["wl-copy", "--", String(s)]) }
+
+  // ── vimium-style link hints (mlqs `f` mode) ─────────────────────────────────
+  // `f` labels every link in the FOCUSED message with a code-styled badge;
+  // typing the label opens it. Labels are injected into the markdown (same
+  // approach as mlqs) rather than positioned overlays — Text gives no per-link
+  // geometry, and a single regex drives BOTH collection and injection so the
+  // label order can't drift from the target order.
+  property bool hinting: false
+  property var hintLabels: []
+  property var hintTargets: []
+  property int hintIdx: -1          // feed row the hints belong to
+  readonly property string hintChars: "asdfghjklqwertyuiopzxcvbnm"
+  function _linkRe() { return /\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g }
+  function startHints() {
+    if (view !== "chat" || cur < rSize) return
+    var idx = cur - rSize
+    var txt = feedCopyTarget(groupedFeed[idx])
+    var re = _linkRe(), m, urls = []
+    while ((m = re.exec(String(txt || ""))) !== null) urls.push(m[1] || m[2])
+    if (!urls.length) return
+    var labels = []
+    for (var i = 0; i < urls.length; i++) labels.push(hintChars.charAt(i % hintChars.length))
+    hintTargets = urls; hintLabels = labels; hintIdx = idx; hinting = true
+  }
+  function cancelHints() { hinting = false; hintLabels = []; hintTargets = []; hintIdx = -1 }
+  function hintKey(ch) {
+    var i = hintLabels.indexOf(ch)
+    var url = i >= 0 ? hintTargets[i] : ""
+    cancelHints()
+    if (url) Quickshell.execDetached(["xdg-open", url])
+  }
+  // Qt IGNORES Text.linkColor for MarkdownText (links stay the default dark blue,
+  // invisible on the dark card), so colour the link's visible text inline instead.
+  // Underline is left to the anchor, so links still read as links.
+  readonly property string summaryHex: rail._hex(summaryColor)
+  function colorizeLinks(t) {
+    return String(t || "").replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g,
+      function (all, label, url) {
+        return "[<font color=\"" + rail.summaryHex + "\"><u>" + label + "</u></font>](" + url + ")"
+      })
+  }
+  // Inline hint badge. Qt's MARKDOWN path passes <font color> through but STRIPS
+  // `style` attributes, so an inline background (a real cap) is impossible here —
+  // a bracketed accent letter is the strongest marker that survives. mlqs gets
+  // true KeyCaps by reserving a transparent gap and mirroring the document in a
+  // hidden TextEdit for per-gap pixel rects; that port is the upgrade path.
+  // Hints only ever land on the FOCUSED message, whose card is filled with
+  // Theme.surface2 — so the badge is measured against THAT, not the normal card.
+  // yellow is 5.78:1 on surface2 (orange only 4.28, under AA for small text) and
+  // stays distinct from the link hue.
+  function _hintBadge(label) {
+    return "<font color=\"" + rail._hex(Theme.yellow) + "\"><b>["
+         + label + "]</b></font>&#8201;"
+  }
+  function _hex(c) {
+    function h(v) { var s = Math.round(v * 255).toString(16); return s.length < 2 ? "0" + s : s }
+    return "#" + h(c.r) + h(c.g) + h(c.b)
+  }
+  // Prefix each link with a `label` badge when this row is the hinted one.
+  function hintify(t, rowIdx) {
+    if (!hinting || rowIdx !== hintIdx) return t
+    var n = 0, labels = hintLabels
+    return String(t || "").replace(_linkRe(), function (all) {
+      var l = labels[n]; n++
+      return l ? (rail._hintBadge(l) + all) : all
+    })
+  }
   // On open, land nvim in the active session's worktree + its plan (if any),
   // replacing the default splash. Runs once (first session known).
   property bool _landed: false
@@ -47,7 +121,18 @@ Item {
   Timer {
     id: landTimer; interval: 500; repeat: true
     property int n: 0
-    onTriggered: { rail.landNvim(rail.selectedRaw); n++; if (n >= 3) { running = false; n = 0 } }
+    onTriggered: { rail.landNvim(rail.selectedRaw); n++; if (n >= 3) { running = false; n = 0; rail._landed = true } }
+  }
+  // Remote lovbox sessions report a BOX path (/home/lovable/…). The local nvim
+  // edits those files via the SSHFS mount, so rewrite box paths to the mount
+  // point ($HOME/lovbox/heidr/…). Local sessions (/home/<you>/…) pass through.
+  function _localPath(p) {
+    var s = String(p || "")
+    var boxHome = "/home/lovable"
+    var mount = Quickshell.env("HOME") + "/lovbox/heidr"
+    if (s === boxHome) return mount
+    if (s.indexOf(boxHome + "/") === 0) return mount + s.substring(boxHome.length)
+    return s
   }
   function landNvim(sid) {
     if (!sid || !agentd) return
@@ -55,6 +140,7 @@ Item {
     for (var i = 0; i < agentd.sessions.length; i++)
       if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; break }
     if (!cwd) return
+    cwd = rail._localPath(cwd)   // box path → local SSHFS mount (no-op for local sessions)
     var m = String(sid).match(/every-(\d+)/i)
     var plan = m ? (Quickshell.env("HOME") + "/personal/notes/storage/plans/EVERY-" + m[1] + ".md") : ""
     // cd into the worktree, then: open the plan if it exists, else show the
@@ -74,6 +160,7 @@ Item {
     // Resolve worktree-relative paths against the selected session's cwd — nvim's
     // own cwd is the cockpit dir, so a bare "web/…" would open an empty buffer.
     if (p.charAt(0) !== "/" && changesCwd) p = changesCwd + "/" + p
+    p = rail._localPath(p)   // box path → local SSHFS mount (no-op for local sessions)
     var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
     Quickshell.execDetached(["nvim", "--server", sock, "--remote", p])
     rail.focusNvim()
@@ -268,7 +355,13 @@ Item {
     if (agentd) agentd.select(selectedRaw)
     // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
     // every switch, so the editor always tracks the session you're viewing.
-    if (selectedRaw) { _landed = true; landTimer.n = 0; landTimer.restart() }
+    // First switch retries (nvim's RPC socket may not be up yet); after nvim has
+    // answered once, land EXACTLY once per switch — the 3x retry re-ran cd +
+    // dashboard three times and the buffer visibly blinked on every session change.
+    if (selectedRaw) {
+      if (_landed) rail.landNvim(selectedRaw)
+      else { landTimer.n = 0; landTimer.restart() }
+    }
   }
 
   // Changed files for the selected session (agentd working-tree diff).
@@ -326,51 +419,56 @@ Item {
     }
   }
   // Is the cursor'd feed card at least partly in the viewport?
-  function _curFeedVisible() {
-    if (view !== "chat" || cur < rSize) return true
-    var it = feedView.itemAtIndex(cur - rSize)
-    if (!it) return false   // off-screen items aren't realized
-    var top = it.y - feedView.contentY
-    return (top + it.height) > 0 && top < feedView.height
+  // j/k move the cursor; ListView's native highlight range does the scrolling.
+  // ONE exception needs geometry: a message TALLER than the panel. There j/k
+  // pages INSIDE it until its top/bottom edge shows, then moves on to the
+  // adjacent message. While paging inside, the highlight range steps aside
+  // (NoHighlightRange) so ListView doesn't yank the item back into range.
+  property bool inMsgScroll: false
+  readonly property real _msgPage: feedView.height * 0.85
+  function _curFeedItem() {
+    if (view !== "chat" || cur < rSize) return null
+    return feedView.itemAtIndex(cur - rSize)
   }
-  // Feed index at the top (or bottom) visible edge, or -1.
-  function _feedEdgeIdx(atTop) {
-    var y = atTop ? (feedView.contentY + feedView.spacing + 2)
-                  : (feedView.contentY + feedView.height - 40)
-    return feedView.indexAt(feedView.width / 2, y)
-  }
-  // j/k: if the cursor scrolled out of view (mouse scroll), snap it back onto a
-  // visible card first; if the focused card is taller than the viewport, scroll
-  // WITHIN it; otherwise move to the next/prev card.
+  function _isTall(it) { return it && it.height > feedView.height - 8 }
   function moveDown() {
-    if (cur < rSize) { cur = Math.min(cur + 1, rSize - 1); return }   // stay in roster
-    if (view === "chat") {
-      if (!_curFeedVisible()) { var t = _feedEdgeIdx(true); if (t >= 0) { cur = rSize + t; Qt.callLater(rail._scrollToCur); return } }
-      var it = feedView.itemAtIndex(cur - rSize)
-      if (it && it.height > feedView.height - 8 && feedView.contentY + feedView.height < it.y + it.height - 4) {
-        feedView.contentY = Math.min(it.y + it.height - feedView.height, feedView.contentY + feedView.height * 0.85)
-        return
+    if (cur < rSize && rosterExpanded) { cur = Math.min(cur + 1, rSize - 1); return }   // stay in roster
+    var it = _curFeedItem()
+    if (_isTall(it)) {
+      var bottomEdge = it.y + it.height + 56               // its bottom + the footer margin
+      if (feedView.contentY + feedView.height < bottomEdge - 4) {
+        inMsgScroll = true
+        feedView.contentY = Math.min(bottomEdge - feedView.height, feedView.contentY + _msgPage)
+        return                                              // still inside the message
       }
     }
+    inMsgScroll = false
     cur = Math.min(cur + 1, navTotal - 1)
-    Qt.callLater(rail._scrollToCur)   // ensure the (possibly unchanged, last) item lands with a bottom margin
   }
   function moveUp() {
-    if (cur < rSize) { cur = Math.max(cur - 1, 0); return }           // stay in roster
-    if (view === "chat") {
-      if (!_curFeedVisible()) { var b = _feedEdgeIdx(false); if (b >= 0) { cur = rSize + b; Qt.callLater(rail._scrollToCur); return } }
-      var it = feedView.itemAtIndex(cur - rSize)
-      if (it && it.height > feedView.height - 8 && feedView.contentY > it.y + 4) {
-        feedView.contentY = Math.max(it.y, feedView.contentY - feedView.height * 0.85)
-        return
+    if (cur < rSize) { cur = Math.max(cur - 1, 0); return }   // stay in roster
+    var it = _curFeedItem()
+    if (_isTall(it)) {
+      var topEdge = it.y - feedView.spacing                 // its top + the top gap
+      if (feedView.contentY > topEdge + 4) {
+        inMsgScroll = true
+        feedView.contentY = Math.max(topEdge, feedView.contentY - _msgPage)
+        return                                              // still inside the message
       }
     }
-    cur = Math.max(cur - 1, rSize)   // stay in the chat/files view (Ctrl+k returns to roster)
-    Qt.callLater(rail._scrollToCur)
+    inMsgScroll = false
+    cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
   }
 
   Keys.onPressed: (e) => {
     if (insert) return
+    // Link-hint mode owns the keyboard while active: a label letter opens its
+    // link, Esc (or any non-label key) drops the hints — mlqs's `f` semantics.
+    if (hinting) {
+      if (e.key === Qt.Key_Escape) { cancelHints(); e.accepted = true; return }
+      if (e.text && /^[a-z]$/.test(e.text)) { hintKey(e.text); e.accepted = true; return }
+      cancelHints()   // fall through: the key does its normal thing
+    }
     // A pending question owns the keyboard: y/n (confirm), 1–9 (select),
     // i (type a reply for input/editor), esc (cancel). j/k still scroll.
     if (pendingAsk) {
@@ -397,42 +495,18 @@ Item {
     else if (e.key === Qt.Key_K)  { rail.moveUp(); e.accepted = true }
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
+    else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
     else if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { activateCur(); e.accepted = true }
   }
   // A feed refresh (stream update / reload) can shrink navTotal below cur, so
   // the cursor points past the last message and nothing highlights. Re-clamp.
   onNavTotalChanged: if (cur > navTotal - 1) cur = Math.max(0, navTotal - 1)
 
-  // Keep the cursor visible as it moves into the main-area list.
+  // Cursor moves only set state — feedView's native highlight range does the
+  // scrolling (see currentIndex / preferredHighlightBegin|End there).
   onCurChanged: {
     pinBottom = (cur >= navTotal - 1)   // at the last item → follow new messages
-    if (cur < rSize) return
-    if (view === "files") { changesView.positionViewAtIndex(cur - rSize, ListView.Contain); return }
-    Qt.callLater(rail._scrollToCur)   // deferred so item geometry is settled (no race)
-  }
-  // Bring the cursor'd chat message fully into view with a consistent gap:
-  // above/at-top → top margin; below the fold → scroll in with a bottom margin
-  // (or show the top for a card taller than the viewport). Idempotent — leaves
-  // an already-visible card alone, so re-runs can't drift the offset.
-  function _scrollToCur() {
-    if (view !== "chat" || cur < rSize) return
-    var idx = cur - rSize
-    var it = feedView.itemAtIndex(idx)
-    if (!it) { feedView.positionViewAtIndex(idx, ListView.Contain); Qt.callLater(rail._scrollToCur); return }  // realize, then place
-    var gap = feedView.spacing
-    var vh  = feedView.height
-    var maxY = Math.max(0, feedView.contentHeight - vh)
-    var isLast    = (idx >= rail.fSize - 1)
-    var botMargin = isLast ? 56 : gap              // last card clears the composer by the footer pad (matches the pinned-bottom rest)
-    var top    = it.y - feedView.contentY          // item top relative to the viewport
-    var bottom = top + it.height
-    if (top < gap)                                 // above / too close to the top edge
-      feedView.contentY = Math.max(0, Math.min(maxY, it.y - gap))
-    else if (bottom > vh - botMargin) {            // its bottom (+ margin) runs past the viewport bottom
-      if (it.height <= vh - botMargin - gap) feedView.contentY = Math.min(maxY, it.y + it.height + botMargin - vh)  // fits → bottom margin
-      else feedView.contentY = Math.max(0, Math.min(maxY, it.y - gap))                                             // taller than view → show top
-    }
-    // else: already fully visible → don't move
+    if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
   }
   // subtle focus accent on the left edge (no full ring)
   Rectangle {
@@ -449,7 +523,7 @@ Item {
     id: feedDebounce; interval: 120
     onTriggered: {
       rail.feedTick++
-      if (rail.view === "chat" && (rail.pinBottom || rail._wantBottom)) {
+      if (rail.view === "chat" && !rail.scrollGuarded && (rail.pinBottom || rail._wantBottom)) {
         rail.cur = Math.max(0, rail.navTotal - 1)
         feedView.positionViewAtEnd()
         rail.pinBottom = true
@@ -465,7 +539,7 @@ Item {
     id: bottomSettle; interval: 60; repeat: true
     property int n: 0
     onTriggered: {
-      if (rail.view === "chat" && rail.pinBottom) feedView.positionViewAtEnd()
+      if (rail.view === "chat" && rail.pinBottom && !rail.scrollGuarded) feedView.positionViewAtEnd()
       n++; if (n >= 9) { running = false; n = 0 }
     }
   }
@@ -695,7 +769,35 @@ Item {
       spacing: 18
       model: rail.groupedFeed
       boundsBehavior: Flickable.StopAtBounds
-      ScrollFeel { flick: feedView }
+      // NATIVE cursor-follow: ListView keeps currentIndex inside the preferred
+      // range, scrolling as needed. This replaces ~120 lines of hand-rolled
+      // contentY math (which mis-snapped via indexAt() returning -1 in the gaps).
+      // The range IS the scroll margin: one spacing at the top, the composer's
+      // footer pad at the bottom.
+      currentIndex: (rail.view === "chat" && rail.cur >= rail.rSize) ? (rail.cur - rail.rSize) : -1
+      highlightFollowsCurrentItem: true
+      highlightRangeMode: rail.inMsgScroll ? ListView.NoHighlightRange : ListView.ApplyRange
+      preferredHighlightBegin: spacing
+      preferredHighlightEnd: height - 56
+      highlightMoveDuration: 0
+      highlightResizeDuration: 0
+      highlight: null           // the delegate paints its own cursor fill
+      // ScrollFeel is a WheelHandler that writes contentY DIRECTLY, so wheel
+      // scrolling sets neither `dragging` nor `flicking` — its `scrolled` signal
+      // is the only reliable "the user scrolled" event. Unpin when they leave the
+      // bottom, re-arm follow when they return to it.
+      // Scrolling UP always unpins; follow re-arms only when the user scrolls back
+      // to within a hair of the true bottom. Do NOT trust atYEnd here — with async
+      // delegates contentHeight is an estimate and atYEnd reports true mid-feed,
+      // which left pinBottom armed and pinTimer yanking the viewport ("locked").
+      ScrollFeel {
+        flick: feedView
+        onScrolled: (up) => {
+          rail.noteUserScroll()
+          if (up) rail.pinBottom = false
+          else rail.pinBottom = (feedView.contentY >= feedView.contentHeight - feedView.height - 8)
+        }
+      }
       header: Item { width: feedView.width; height: feedView.spacing }   // top gap == inter-message gap, so the first card clears the chat-title hairline
       footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
       // Hairline pinned to the feed's top edge (fixed overlay, not a scrolling
@@ -710,11 +812,19 @@ Item {
       // Instead: throttle-follow at ~30fps ONLY while streaming (bounded, can't
       // spin), and snap once when a message is added/removed (countChanged).
       Timer {
-        id: pinTimer; interval: 33; repeat: true
-        running: rail.view === "chat" && rail.pinBottom && rail.featuredStreaming
+        id: pinTimer; interval: 100; repeat: true
+        running: rail.view === "chat" && rail.pinBottom && rail.featuredStreaming && !rail.scrollGuarded
         onTriggered: feedView.positionViewAtEnd()
       }
-      onCountChanged: if (rail.view === "chat" && rail.pinBottom) Qt.callLater(feedView.positionViewAtEnd)
+      onCountChanged: if (rail.view === "chat" && rail.pinBottom && !rail.scrollGuarded) Qt.callLater(feedView.positionViewAtEnd)
+      // Manual scrolling wins over follow-the-stream. NOTE: do NOT use
+      // onMovementStarted/Ended here — Flickable emits those for PROGRAMMATIC
+      // contentY changes too, so pinTimer's positionViewAtEnd() (30x/sec) trips
+      // them and oscillates pinBottom, wedging scrolling entirely. `dragging`
+      // and `flicking` are user-gesture-only, so key off those.
+      readonly property bool _atTrueBottom: contentY >= contentHeight - height - 8
+      onDraggingChanged: rail.pinBottom = dragging ? false : feedView._atTrueBottom
+      onFlickingChanged: if (!flicking) rail.pinBottom = feedView._atTrueBottom
       delegate: Item {
         id: turnDel
         width: feedView.width
@@ -763,9 +873,11 @@ Item {
             Text {
               visible: turnDel.isUser
               width: cardCol.width
-              text: turnDel.isUser ? modelData.text : ""
+              text: turnDel.isUser ? rail.colorizeLinks(modelData.text) : ""
               color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+              linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
               wrapMode: Text.WordWrap; textFormat: Text.MarkdownText
+              onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
             }
 
             // Thought process — visible inline. Each block shows its short header;
@@ -787,6 +899,7 @@ Item {
               Loader {
                 width: cardCol.width
                 property var entry: modelData
+                property int rowIndex: turnDel.rowIndex   // so `f` hints can target this row
                 sourceComponent: proseRow
               }
             }
@@ -975,6 +1088,7 @@ Item {
             { k: "⇥",   l: rail.view === "files" ? "chat" : "files" },
             { k: "⏎",   l: rail.view === "files" ? "open" : "act" },
             { k: "y",   l: "copy" },
+            { k: "f",   l: rail.hinting ? "pick" : "links" },
             { k: "i",   l: "type" },
             { k: "h",   l: "nvim" }
           ]
@@ -1155,8 +1269,8 @@ Item {
       Text {
         visible: proseCol._body.length > 0
         width: parent.width
-        text: proseCol._body; color: Theme.fg
-        linkColor: Theme.sky   // legible link blue (default markdown blue sinks into the card)
+        text: rail.colorizeLinks(rail.hintify(proseCol._body, rowIndex)); color: Theme.fg
+        linkColor: rail.summaryColor   // links match the summary hue; underline keeps them scannable
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: Text.WordWrap; lineHeight: 1.35
         textFormat: Text.MarkdownText   // **bold**, `code`, lists — like the old rail
@@ -1165,10 +1279,12 @@ Item {
       Text {
         visible: proseCol._summary.length > 0
         width: parent.width
-        text: proseCol._summary; color: rail.summaryColor
+        text: rail.colorizeLinks(proseCol._summary); color: rail.summaryColor
+        linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: Text.WordWrap; lineHeight: 1.35
         textFormat: Text.MarkdownText
+        onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
       }
     }
   }
