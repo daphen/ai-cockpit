@@ -645,6 +645,8 @@ QImage TermView::renderFrame() {
   // overhang. Separating the passes lets overhangs survive.
   struct Glyph { qreal x, y; uint32_t cp; QColor fg; bool bold; };
   std::vector<Glyph> glyphs;
+  // Run state for merged background fills (see the fill below).
+  bool runActive = false; QColor runColor; int runRow = -1, runStartCol = 0, runEndCol = -1;
   glyphs.reserve((size_t)rows_ * cols_);
 
   for (uint16_t row = 0; row < rows_; ++row) {
@@ -689,7 +691,25 @@ QImage TermView::renderFrame() {
                                    (fg.blue() + effBg.blue()) / 2);
 
       const qreal x = padL_ + col * cellW_, y = padT_ + row * cellH_;
-      if (effBg != defBg) p->fillRect(x, y, cellW_, cellH_, effBg);
+      // Backgrounds accumulate into RUNS instead of one rect per cell. Per-cell fills
+      // leave a hairline seam wherever a cell edge lands off the device-pixel grid, which
+      // is what striped the markdown heading blocks with vertical gaps. One rect per run
+      // of identical colour has no interior edges to seam, and draws far less.
+      if (effBg != defBg) {
+        if (runActive && effBg == runColor && runRow == row && col == runEndCol + 1) {
+          runEndCol = col;                       // extend
+        } else {
+          if (runActive)
+            p->fillRect(padL_ + runStartCol * cellW_, padT_ + runRow * cellH_,
+                        (runEndCol - runStartCol + 1) * cellW_, cellH_, runColor);
+          runActive = true; runColor = effBg; runRow = row;
+          runStartCol = col; runEndCol = col;
+        }
+      } else if (runActive) {
+        p->fillRect(padL_ + runStartCol * cellW_, padT_ + runRow * cellH_,
+                    (runEndCol - runStartCol + 1) * cellW_, cellH_, runColor);
+        runActive = false;
+      }
 
       if (has) {
         uint32_t cp = 0;
@@ -698,6 +718,10 @@ QImage TermView::renderFrame() {
       }
     }
   }
+
+  if (runActive)                                  // flush a run that ended at the last cell
+    p->fillRect(padL_ + runStartCol * cellW_, padT_ + runRow * cellH_,
+                (runEndCol - runStartCol + 1) * cellW_, cellH_, runColor);
 
   for (const Glyph &g : glyphs) {
     if (g.cp >= 0x2500 && g.cp <= 0x257F && drawBoxChar(p, g.x, g.y, g.cp, g.fg))

@@ -44,6 +44,19 @@ ShellRoot {
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
+      // Debug hooks for the transcript path: load a session's history, then count what
+      // the feed actually holds. Cheap, and the only way to prove an off-thread parse
+      // rendered rather than silently dropping.
+      function loadFeed(name: string): string {
+        if (!agentd || !name) return "no agentd"
+        agentd.select(name)
+        return "requested " + name
+      }
+      function feed(name: string): string {
+        if (!agentd || !name) return "no agentd"
+        var f = agentd.feedFor(name)
+        return name + ": " + f.length + " items"
+      }
       // Merged roster as "scope/name status" lines — proves which daemon owns what
       // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
       function sessions(): string {

@@ -335,6 +335,25 @@ Item {
   }
 
   // Reconstruct the active branch (leaf→root via parentId) into a flat feed.
+  // Formatting only — takes the message tail (from here or from the worker) and builds
+  // feed items. Cheap: it never sees more than CHAT_CAP messages.
+  function _msgsToFeed(msgs) {
+    var items = []
+    for (var mi = 0; mi < msgs.length; mi++) {
+      var msg = msgs[mi]
+      if (msg.role === "user") {
+        var uc = msg.content || [], ut = ""
+        for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
+        ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
+        ut = _foldSlashBody(ut)
+        if (ut) items.push({ kind: "user", text: ut })
+      } else {
+        _expandAssistant(msg.content, items)
+      }
+    }
+    return _coalesce(items)
+  }
+
   function _entriesToFeed(entries, leafId) {
     var byid = {}
     for (var i = 0; i < entries.length; i++) if (entries[i].id) byid[entries[i].id] = entries[i]
@@ -351,24 +370,7 @@ Item {
         msgs.push(e.message)
     }
     var CHAT_CAP = 60
-    var startIdx = Math.max(0, msgs.length - CHAT_CAP)
-    var items = []
-    for (var mi = startIdx; mi < msgs.length; mi++) {
-      var msg = msgs[mi]
-      if (msg.role === "user") {
-        var uc = msg.content || [], ut = ""
-        for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
-        ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
-        // A slash command is expanded by pi BEFORE the turn is recorded, so the whole
-        // skill file lands here as your message — hundreds of lines of instructions you
-        // never typed, rendered as markdown (which is where those bare "1. 2. 3."
-        // markers came from). Show what you actually invoked.
-        ut = _foldSlashBody(ut)
-        if (ut) items.push({ kind: "user", text: ut })
-      } else {
-        _expandAssistant(msg.content, items)
-      }
-    }
+    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)))
     return _coalesce(items)
   }
 
@@ -394,20 +396,16 @@ Item {
     return out
   }
 
-  // A whole-session transcript arrives as ONE json line, and JSON.parse runs on the
-  // UI thread — a 19MB history froze the window hard enough that neither pane took
-  // input. Refuse to parse past this size and say so in the feed instead of hanging.
-  // (The real fix is parsing in a WorkerScript thread; this is the guard rail.)
-  readonly property int maxLineBytes: 4 * 1024 * 1024
+  // agentd trims a get_entries reply to its last entries before relaying, so what lands
+  // here is a few MB rather than the whole history — parsing it inline is fine.
+  //
+  // It was NOT fine before that trim, and the failure was subtle: pi returns ~20MB for a
+  // long-running session, and Quickshell's socket reader truncates the line about 23KB
+  // short, so the json never parsed on ANY thread. A WorkerScript detour only moved the
+  // failure — and handing it a 20MB string aborted the process outright.
+  readonly property int maxLineBytes: 32 * 1024 * 1024
   function onLine(data, sockIdx) {
-    if (data.length > maxLineBytes) {
-      var sm = String(data).match(/"session":"([^"]+)"/)
-      var big = sm ? sm[1] : ""
-      if (big) _push(big, { kind: "cmd", tool: "error",
-        text: "transcript too large to render (" + Math.round(data.length / 1048576) +
-              " MB) — live activity only" })
-      return
-    }
+    if (data.length > maxLineBytes) return
     let m
     try { m = JSON.parse(data) } catch (e) { return }
     if (!m) return
@@ -513,23 +511,23 @@ Item {
     var open = null
     for (var j = calls.length - 1; j >= 0; j--)
       if (!answered[calls[j].id]) { open = calls[j]; break }
+    _applyRecoveredAsk(sid, open, lastCallId)
+  }
+
+  // Shared by the inline path and the worker: decide whether an unanswered ask_user is
+  // a LIVE question and publish or clear it accordingly.
+  function _applyRecoveredAsk(sid, open, lastCallId) {
     if (!open) return
-    // It must be the LAST tool call in the transcript. Work that happened after an
-    // unanswered ask means the agent moved on — or, as with a session respawned under
-    // the same name, that the question belongs to a previous pi process entirely. Either
-    // way nobody is waiting on it, and showing it invites an answer that goes nowhere.
-    if (open.id !== lastCallId) {
-      // Also drop a previously-recovered one: a session respawned under the same name
-      // keeps the old transcript, so a question from the dead pi process would otherwise
-      // sit there forever inviting an answer nobody reads.
+    // It must be the transcript's final tool call. Work after an unanswered ask means the
+    // agent moved on — or, for a session respawned under the same name, that the question
+    // belongs to a dead pi process. Clear any card recovered under looser rules.
+    if (lastCallId && open.id !== lastCallId) {
       if (asks[sid] && asks[sid].id === open.id) {
         var da = asks; delete da[sid]; asks = da; askGen++
       }
       return
     }
-    // Only surface it if the session is actually BLOCKED on it. An unanswered call in
-    // the transcript of an idle session is a dead question from a finished turn —
-    // presenting that as live invites you to answer something nobody is listening to.
+    // Only while the session is genuinely blocked on it.
     var busy = false
     for (var k = 0; k < sessions.length; k++)
       if (sessions[k].name === sid) { busy = sessions[k].status === "streaming"; break }
