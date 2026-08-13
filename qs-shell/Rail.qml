@@ -1332,14 +1332,11 @@ Item {
     // 108 = composer + hints + padding, stable across the insert toggle. A pending
     // ask_user expands the chin to hold it, so the question takes over the input
     // instead of floating over the feed — animated so the jump is legible.
-    // 108 is composer + hints + padding. A panel REPLACES the composer (52px), so the
-    // chin only grows by whatever the panel needs beyond it — that keeps the hints row
-    // pinned at the bottom and makes the panel expand UPWARD. Both panels count here;
-    // when only askCard did, the new-session card grew past the chin and covered
-    // everything below it.
-    readonly property int _panelH: (askCard.visible ? askCard.implicitHeight : 0)
-                                 + (newCard.visible ? newCard.implicitHeight : 0)
-    height: 108 + Math.max(0, _panelH - 52)
+    // Height follows the content. The chin is anchored to the BOTTOM, so whatever it
+    // contains — composer, ask card, new-session panel — it grows upward from a fixed
+    // bottom edge with no arithmetic. (This used to be a hardcoded 108 plus per-panel
+    // fudge factors, which is how the new-session card ended up overflowing.)
+    height: chinCol.implicitHeight + chinCol.anchors.topMargin + 14
     Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
     color: Theme.bg
 
@@ -1683,7 +1680,9 @@ Item {
       RowLayout {
         Layout.fillWidth: true
         spacing: 6
-        visible: !rail.insert
+        // opacity, not visible: a hidden row collapses its height, and with a
+        // content-driven chin that made the whole bar jump on every insert toggle.
+        opacity: rail.insert ? 0 : 1
         Item { Layout.fillWidth: true }   // push hint chips to the right
         Repeater {
           model: [
