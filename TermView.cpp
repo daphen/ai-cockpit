@@ -764,7 +764,12 @@ QImage TermView::renderFrame() {
       if (has) {
         uint32_t cp = 0;
         ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CODEPOINT, &cp);
-        glyphs.push_back({x, y, cp, fg, (bool)style.bold});
+        // U+10EEEE is a kitty image PLACEHOLDER, not text: the image blits over these
+        // cells later in this paint. Drawing it painted the cell's foreground — which
+        // encodes the image id — as a coloured block that then showed through every
+        // transparent pixel of the image (the nvim masthead came out hatched).
+        if (cp != 0x10EEEEu)
+          glyphs.push_back({x, y, cp, fg, (bool)style.bold});
       }
     }
   }
