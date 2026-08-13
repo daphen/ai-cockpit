@@ -133,12 +133,34 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   // terminal a storage budget so it accepts + stores images (dashboard banner, etc.).
   static bool s_pngInstalled = false;
   if (!s_pngInstalled) {
-    GhosttySysDecodePngFn png = &heidrDecodePng;
-    ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, &png);
+    // Callback options take the function pointer BY VALUE (ghostty_sys_set casts the
+    // void* straight to the fn type), unlike the scalar terminal options, which take a
+    // pointer TO the value. Passing &localVariable stored the address of a stack slot
+    // and libghostty later jumped into stack garbage — a segfault on the first PNG.
+    ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, reinterpret_cast<void *>(&heidrDecodePng));
     s_pngInstalled = true;
   }
   size_t kittyLimit = (size_t)320 * 1024 * 1024;
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kittyLimit);
+  // Kitty's FILE and SHARED-MEMORY transmission mediums are opt-in — a terminal reading
+  // paths an application names is a real capability, so libghostty makes you ask. Without
+  // this, only inline base64 works, and snacks.image (the nvim dashboard masthead, and
+  // image.nvim generally) writes a PNG to a temp path and sends the PATH — so its images
+  // never landed and the placeholder cells rendered as coloured blocks instead, coloured
+  // by the image id encoded in their foreground.
+  {
+    bool on = true;
+    ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE, &on);
+    ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM, &on);
+    // Temp-file transmission is restricted to a directory, which is the point: the
+    // terminal will only read images out of the system temp dir.
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir || !*tmpdir) tmpdir = "/tmp";
+    GhosttyString tdir{};
+    tdir.ptr = reinterpret_cast<const uint8_t *>(tmpdir);
+    tdir.len = strlen(tmpdir);
+    ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE, &tdir);
+  }
   loadThemeColors();  // fg/bg/cursor + palette 0-15 for the current theme mode
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_USERDATA, this);
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_WRITE_PTY,
