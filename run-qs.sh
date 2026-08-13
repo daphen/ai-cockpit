@@ -11,6 +11,20 @@ cd "$(dirname "$0")"
 # won't touch the bar) so a relaunch always shows the current QML.
 qs kill -p "$PWD/qs-shell" >/dev/null 2>&1 || true
 
+# Default the rail to every agentd we can see: the local `lovable` scope (the
+# orchestrator + PR reviewers) first, then the tunneled lovbox if its socket is
+# up. Order matters — on a name collision the earlier socket wins, which is what
+# keeps the LOCAL `lovable` in the rail instead of the box's base session.
+if [ -z "${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "${HEIDR_AGENTD_SOCK:-}" ]; then
+  socks=""
+  for sc in lovable work; do
+    s="${XDG_RUNTIME_DIR}/agentd-${sc}.sock"
+    [ -S "$s" ] && socks="${socks:+$socks,}$s"
+  done
+  [ -n "$socks" ] && export HEIDR_AGENTD_SOCKS="$socks"
+  echo "HEIDR_AGENTD_SOCKS=${HEIDR_AGENTD_SOCKS:-<none found>}"
+fi
+
 export QML2_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
 export QML_IMPORT_PATH="$QML2_IMPORT_PATH"
 export LD_LIBRARY_PATH="$PWD/build:${LD_LIBRARY_PATH:-}"

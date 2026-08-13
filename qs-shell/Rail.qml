@@ -431,7 +431,11 @@ Item {
   // The ONE bool the thinking pill + orb depend on. Being a bool, its binding only
   // notifies consumers when it actually flips (stream start/stop) — decoupled from
   // `featured`, which allocates a fresh object on every roster tick.
+  // Includes optimistically-pending sends (agentd's roster lags the prompt by up to
+  // tens of seconds over the tunnel), so the pill appears the moment you hit enter
+  // instead of leaving a live session looking dead.
   readonly property bool featuredStreaming: {
+    if (agentd && agentd.pendingGen >= 0 && agentd.isBusy(selectedRaw)) return true
     if (!live) return mockFeatured.status === "streaming"
     var arr = liveSessions
     for (var i = 0; i < arr.length; i++) if (arr[i].name === selectedRaw) return arr[i].status === "streaming"
@@ -1217,11 +1221,22 @@ Item {
         visible: rail.pastedImages.length > 0
         Repeater {
           model: rail.pastedImages
-          Row {
+          Rectangle {
             id: attachChip
-            spacing: 6
             readonly property string imgName: String(modelData)
             readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
+            // A real badge surface (dsqrd's chip is a bare row, but on the rail's chin
+            // it needs a ground of its own to read as an attachment).
+            implicitWidth: chipRow.implicitWidth + 18
+            height: 24
+            radius: 6
+            color: Theme.surface0
+            border.width: 1
+            border.color: referenced ? Theme.electric : Theme.hairline
+            Row {
+            id: chipRow
+            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8 }
+            spacing: 6
             Icon {
               name: "paperclip"; width: 13; height: 13
               color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
@@ -1229,7 +1244,10 @@ Item {
             }
             Text {
               anchors.verticalCenter: parent.verticalCenter
-              text: attachChip.imgName.replace(/\.[a-z]+$/, "")
+              // "image 1", "image 2" … by position in THIS message (pastedImages clears
+              // on send). The file keeps a unique name on disk so earlier messages'
+              // attachments stay readable, but the label you see is per-message.
+              text: "image " + (index + 1)
               color: attachChip.referenced ? Theme.fg : Theme.fg_muted
               font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
               font.pixelSize: rail.fsMeta
@@ -1244,6 +1262,7 @@ Item {
                   rail.pastedImages = rail.pastedImages.filter(function (m) { return m !== attachChip.imgName })
                 }
               }
+            }
             }
           }
         }

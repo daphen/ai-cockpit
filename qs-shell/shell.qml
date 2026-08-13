@@ -12,8 +12,10 @@ ShellRoot {
     id: win
     title: "heidr-qs"   // unique — the old nvim cockpit window title contains "heidr"
     visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
-    implicitWidth: 1600
-    implicitHeight: 950
+    // Wide by default: the cockpit is two panes (nvim ~60% + rail ~40%), so 1600
+    // left the terminal too narrow for real code once the rail took its share.
+    implicitWidth: 2400
+    implicitHeight: 1300
     minimumSize: Qt.size(640, 400)   // let niri's set-column-width actually shrink it
     onClosed: Qt.quit()              // niri close-window quits (FloatingWindow ignores it otherwise)
 
@@ -42,6 +44,16 @@ ShellRoot {
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
+      // Merged roster as "scope/name status" lines — proves which daemon owns what
+      // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
+      function sessions(): string {
+        var out = []
+        for (var i = 0; i < agentd.sessions.length; i++) {
+          var s = agentd.sessions[i]
+          out.push((s.scope || "?") + "/" + s.name + " " + (s.status || "?"))
+        }
+        return out.length ? out.join("\n") : "(empty)"
+      }
     }
 
     AgentdState { id: agentd; scope: "lovable" }

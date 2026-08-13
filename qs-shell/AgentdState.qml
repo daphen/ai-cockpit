@@ -11,8 +11,51 @@ Item {
 
   property string scope: "lovable"
   property bool connected: false
-  property var sessions: []      // raw session structs from the daemon
+  property var sessions: []      // merged roster across every scope, each tagged .scope
   property int gen: 0            // bumped on every roster push
+
+  // One socket per scope. HEIDR_AGENTD_SOCKS (comma-separated) shows the local
+  // orchestrator and a tunneled lovbox side by side; HEIDR_AGENTD_SOCK (singular)
+  // still selects a single daemon. Order matters: on a name collision the EARLIER
+  // socket wins, so list the local scope first to keep it addressable.
+  readonly property var sockPaths: {
+    var multi = String(Quickshell.env("HEIDR_AGENTD_SOCKS") || "").trim()
+    if (multi) return multi.split(",").map(p => p.trim()).filter(p => p.length > 0)
+    var one = Quickshell.env("HEIDR_AGENTD_SOCK")
+    return [one || (Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-" + root.scope + ".sock")]
+  }
+  property var _rosters: ({})   // socket index -> its sessions[]
+  property var _sockOf: ({})    // session name -> owning socket index (routing table)
+  property var _socks: ({})     // socket index -> Socket object
+
+  function _scopeOf(path) {
+    var m = String(path).match(/agentd-([^/]+)\.sock$/)
+    return m ? m[1] : String(path)
+  }
+  function _rebuildSessions() {
+    var out = [], owner = {}
+    for (var i = 0; i < sockPaths.length; i++) {
+      var arr = _rosters[i] || [], sc = _scopeOf(sockPaths[i])
+      for (var j = 0; j < arr.length; j++) {
+        var s = arr[j]
+        if (owner[s.name] !== undefined) continue   // earlier socket owns the name
+        owner[s.name] = i
+        var tagged = {}
+        for (var k in s) tagged[k] = s[k]
+        tagged.scope = sc
+        out.push(tagged)
+      }
+    }
+    _sockOf = owner
+    root.sessions = out
+    root.gen++
+  }
+  function _registerSock(i, obj) { _socks[i] = obj; _recomputeConnected() }
+  function _recomputeConnected() {
+    var any = false
+    for (var k in _socks) if (_socks[k] && _socks[k].connected) { any = true; break }
+    root.connected = any
+  }
 
   // Per-session activity feed. `feeds` is mutated in place; `feedGen` bumps so
   // bindings recompute, and feedFor() returns a fresh slice so ListView refreshes.
@@ -45,14 +88,36 @@ Item {
   function changesFor(sid)    { return (changes[sid] || []).slice() }
   function changesCwdFor(sid) { return changesCwd[sid] || "" }
 
+  // Sockets are per-scope (see the Instantiator below); route each command to the
+  // one that owns the target session, falling back to the first for global calls.
   function send(obj) {
-    const s = sockLoader.item
+    var idx = (obj && obj.session !== undefined && _sockOf[obj.session] !== undefined)
+              ? _sockOf[obj.session] : 0
+    var s = _socks[idx]
     if (s && s.connected) s.write(JSON.stringify(obj) + "\n")
+  }
+  // Sessions we've prompted but haven't heard back from yet. agentd only pushes a
+  // roster when IT sees a state change, and over the tunnel the first event can be
+  // ~40s out — so the badge said "idle" while the agent was already working and the
+  // session looked hung. Treat "we just sent" as busy until the daemon confirms.
+  property var pendingSends: ({})
+  property int pendingGen: 0
+  function isBusy(sid) {
+    if (!sid) return false
+    if (pendingGen >= 0 && pendingSends[sid]) return true
+    for (var i = 0; i < sessions.length; i++)
+      if (sessions[i].name === sid) return sessions[i].status === "streaming"
+    return false
+  }
+  function _clearPending(sid) {
+    if (!pendingSends[sid]) return
+    var p = Object.assign({}, pendingSends); delete p[sid]; pendingSends = p; pendingGen++
   }
   function sendPrompt(sid, text) {
     // agentd/pi expect `message`, not `text`.
     send({ type: "prompt", session: sid, message: text })
     _push(sid, { kind: "user", text: text })   // optimistic echo; get_entries refreshes it
+    var p = Object.assign({}, pendingSends); p[sid] = true; pendingSends = p; pendingGen++
   }
   function stop(sid)             { send({ type: "stop", session: sid }) }
   function feedFor(sid)          { return (feeds[sid] || []).slice() }
@@ -254,15 +319,21 @@ Item {
     return out
   }
 
-  function onLine(data) {
+  function onLine(data, sockIdx) {
     let m
     try { m = JSON.parse(data) } catch (e) { return }
     if (!m) return
     const t = m.type
-    if (t === "roster") { root.sessions = m.sessions || []; root.gen++; return }
+    if (t === "roster") {
+      _rosters[sockIdx || 0] = m.sessions || []
+      _rebuildSessions()
+      return
+    }
     if (t === "response" && m.command === "get_entries") { onEntries(m); return }
     const sid = m.session
     if (!sid) return
+    // The daemon is talking about this session, so its real status is authoritative now.
+    if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
 
     if (t === "extension_ui_request") {
       var mm = m.method
@@ -319,24 +390,33 @@ Item {
     feedGen++
   }
 
-  // Socket in a Loader so a re-dial gets a fresh object (wedge recovery),
-  // same pattern as PaletteState.
-  Loader {
-    id: sockLoader
-    active: true
-    sourceComponent: Socket {
-      // HEIDR_AGENTD_SOCK lets a lovbox launcher point at a tunneled remote
-      // agentd (autossh -L … presents the remote daemon as a local socket),
-      // so the rail is transport-agnostic like the nvim thin client.
-      path: Quickshell.env("HEIDR_AGENTD_SOCK")
-            || (Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-" + root.scope + ".sock")
-      connected: true
-      parser: SplitParser { onRead: data => root.onLine(data) }
-      onConnectionStateChanged: root.connected = connected
+  // One Socket per scope, each in its own Loader so a re-dial gets a fresh object
+  // (wedge recovery, same pattern as PaletteState) without disturbing the others.
+  // A tunneled remote (autossh -L …) presents as a local socket, so the rail stays
+  // transport-agnostic like the nvim thin client.
+  Instantiator {
+    model: root.sockPaths
+    delegate: Item {
+      // Context properties, not `required` ones: Instantiator over a plain JS array
+      // doesn't satisfy required-property binding.
+      readonly property int idx: index
+      readonly property string sockPath: modelData
+      Loader {
+        id: ld
+        active: true
+        sourceComponent: Socket {
+          path: sockPath
+          connected: true
+          parser: SplitParser { onRead: data => root.onLine(data, idx) }
+          onConnectionStateChanged: root._registerSock(idx, ld.item)
+        }
+        onLoaded: root._registerSock(idx, item)
+      }
+      Timer {
+        interval: 2000; repeat: true
+        running: !(ld.item && ld.item.connected)
+        onTriggered: { ld.active = false; ld.active = true }
+      }
     }
-  }
-  Timer {
-    interval: 2000; repeat: true; running: !root.connected
-    onTriggered: { sockLoader.active = false; sockLoader.active = true }
   }
 }
