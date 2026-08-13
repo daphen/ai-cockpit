@@ -1044,10 +1044,12 @@ Item {
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
               }
               Icon {
-                // Only shown when the session actually HAS a devenv slice. It used to
-                // appear green for every top-level session, so a session in the main
-                // checkout looked like it owned a devenv it never had.
-                visible: modelData.devenv === true
+                // Only MARKED when the session actually has a devenv slice (it used to go
+                // green for every top-level session, so a main-checkout session looked
+                // like it owned a slice it never had) — but the slot is always reserved,
+                // via opacity rather than visible, so the status text stays on one
+                // vertical line down the roster instead of shifting per row.
+                opacity: modelData.devenv === true ? 1 : 0
                 name: "plug-2"; width: 15; height: 15
                 Layout.preferredWidth: 15; Layout.preferredHeight: 15   // equal dims → no squish
                 Layout.alignment: Qt.AlignVCenter

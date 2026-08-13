@@ -14,6 +14,8 @@
 #include <cmath>
 
 #include <pty.h>       // forkpty
+#include <signal.h>    // killpg on teardown
+#include <sys/wait.h>
 #include <sys/ioctl.h> // TIOCSWINSZ
 #include <unistd.h>
 #include <poll.h>
@@ -174,6 +176,20 @@ TermView::~TermView() {
   quit_.store(true);
   wakeWorker();
   if (worker_.joinable()) worker_.join();
+  // Take the shell tree with us. forkpty's child is a SESSION LEADER, so its pgid is
+  // its pid and one killpg reaches fish and everything it started. Closing the master
+  // alone was not enough — nvim survived it, so every relaunch of the cockpit orphaned
+  // another editor (30 of them after an afternoon of restarts), and those orphans still
+  // hold the nvim server socket, which is what made live-follow land in the wrong place.
+  if (child_ > 0) {
+    ::killpg(child_, SIGHUP);
+    for (int i = 0; i < 20; ++i) {                 // ~200ms for a clean exit
+      if (::waitpid(child_, nullptr, WNOHANG) == child_) { child_ = -1; break; }
+      struct timespec ts { 0, 10 * 1000 * 1000 };
+      ::nanosleep(&ts, nullptr);
+    }
+    if (child_ > 0) { ::killpg(child_, SIGKILL); ::waitpid(child_, nullptr, 0); }
+  }
   if (wakePipe_[0] >= 0) ::close(wakePipe_[0]);
   if (wakePipe_[1] >= 0) ::close(wakePipe_[1]);
   if (master_ >= 0) ::close(master_);
@@ -270,6 +286,7 @@ void TermView::spawnPty() {
   ws.ws_row = rows_;
   pid_t pid = forkpty(&master_, nullptr, nullptr, &ws);
   if (pid < 0) { qFatal("forkpty failed"); }
+  if (pid > 0) child_ = pid;   // remember it so teardown can take the shell tree with us
   if (pid == 0) {
     // child: exec the login shell
     const char *sh = getenv("SHELL");

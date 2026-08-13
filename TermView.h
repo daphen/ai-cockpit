@@ -82,6 +82,7 @@ private:
   GhosttyRenderState renderState_ = nullptr;  // for the cursor's visual shape (DECSCUSR)
   int cursorShape_ = 1;          // GhosttyRenderStateCursorVisualStyle; 1 = BLOCK
   int master_ = -1;              // PTY master fd (worker-thread owner)
+  pid_t child_ = -1;             // forkpty child (session leader) — killed on teardown
   QFileSystemWatcher *themeWatcher_ = nullptr;  // ~/.config/theme_mode → live light/dark flip
   QFont font_;
   QFont iconFont_;   // QsIcons, for the U+E000-U+E4FF icon range
