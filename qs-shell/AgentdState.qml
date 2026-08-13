@@ -181,6 +181,17 @@ Item {
   }
   function feedFor(sid)          { return (feeds[sid] || []).slice() }
 
+  // "/skill:plan-ticket EVERY-2741" + 400 lines of skill body → just the invocation,
+  // with the size noted so it's clear something was expanded rather than lost.
+  function _foldSlashBody(t) {
+    var s0 = String(t || "")
+    if (s0.charAt(0) !== "/") return s0
+    var nl = s0.indexOf("\n")
+    if (nl < 0 || s0.length < 400) return s0
+    var head = s0.slice(0, nl).trim()
+    var lines = s0.slice(nl + 1).split("\n").length
+    return head + "\n\n_(expanded " + lines + " lines of skill instructions)_"
+  }
   function _base(p)  { var s = String(p); var i = s.lastIndexOf("/"); return i >= 0 ? s.slice(i + 1) : s }
   function _rel(p)   { var s = String(p || ""); return s.replace(/^\/home\/daphen\//, "~/") }
   function _clip(s)  { s = String(s || "").replace(/\s+/g, " "); return s.length > 72 ? s.slice(0, 69) + "…" : s }
@@ -348,6 +359,11 @@ Item {
         var uc = msg.content || [], ut = ""
         for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
         ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
+        // A slash command is expanded by pi BEFORE the turn is recorded, so the whole
+        // skill file lands here as your message — hundreds of lines of instructions you
+        // never typed, rendered as markdown (which is where those bare "1. 2. 3."
+        // markers came from). Show what you actually invoked.
+        ut = _foldSlashBody(ut)
         if (ut) items.push({ kind: "user", text: ut })
       } else {
         _expandAssistant(msg.content, items)
