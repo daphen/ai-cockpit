@@ -1332,7 +1332,14 @@ Item {
     // 108 = composer + hints + padding, stable across the insert toggle. A pending
     // ask_user expands the chin to hold it, so the question takes over the input
     // instead of floating over the feed — animated so the jump is legible.
-    height: 108 + (askCard.visible ? askCard.implicitHeight + chinCol.spacing : 0)
+    // 108 is composer + hints + padding. A panel REPLACES the composer (52px), so the
+    // chin only grows by whatever the panel needs beyond it — that keeps the hints row
+    // pinned at the bottom and makes the panel expand UPWARD. Both panels count here;
+    // when only askCard did, the new-session card grew past the chin and covered
+    // everything below it.
+    readonly property int _panelH: (askCard.visible ? askCard.implicitHeight : 0)
+                                 + (newCard.visible ? newCard.implicitHeight : 0)
+    height: 108 + Math.max(0, _panelH - 52)
     Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
     color: Theme.bg
 
