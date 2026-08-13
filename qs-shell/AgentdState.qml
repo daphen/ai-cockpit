@@ -169,6 +169,11 @@ Item {
     var i = _sockOf[sid]
     return (i === undefined) ? "agentd" : _scopeOf(sockPaths[i])
   }
+  // Pull the authoritative transcript for a session without touching selection state
+  // (select() also re-pins the feed). Used to keep a streaming session's chat live:
+  // prose arrives via get_entries, not via message_* events, so a client that joins
+  // mid-turn otherwise shows a frozen snapshot until the turn ends.
+  function refreshEntries(sid) { if (sid) send({ type: "get_entries", session: sid }) }
   function stop(sid) {
     send({ type: "stop", session: sid })
     delete _steerPending[sid]      // an aborted turn must not resurrect the steer
@@ -452,6 +457,44 @@ Item {
     if (!esid) return
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
     feedGen++
+    _recoverAsk(esid, m.data.entries)
+  }
+
+  // A pending ask is normally learned from a live extension_ui_request. A client that
+  // wasn't connected when it fired — or that reloaded since — never sees it, so the
+  // session sits blocked while the UI shows nothing but "thinking". Rebuild it from the
+  // transcript: an ask_user call with no matching result is still waiting on you.
+  function _recoverAsk(sid, entries) {
+    var calls = [], answered = {}
+    function walk(o) {
+      if (!o || typeof o !== "object") return
+      if (o.type === "toolCall" && o.name === "ask_user") {
+        calls.push(o)
+        if (o.result !== undefined) answered[o.id] = true
+      }
+      var rid = o.toolCallId
+      if (rid && (o.type === "toolResult" || o.result !== undefined || o.output !== undefined))
+        answered[rid] = true
+      for (var k in o) walk(o[k])
+    }
+    for (var i = 0; i < entries.length; i++) walk(entries[i])
+    var open = null
+    for (var j = calls.length - 1; j >= 0; j--)
+      if (!answered[calls[j].id]) { open = calls[j]; break }
+    if (!open) return
+    // Only surface it if the session is actually BLOCKED on it. An unanswered call in
+    // the transcript of an idle session is a dead question from a finished turn —
+    // presenting that as live invites you to answer something nobody is listening to.
+    var busy = false
+    for (var k = 0; k < sessions.length; k++)
+      if (sessions[k].name === sid) { busy = sessions[k].status === "streaming"; break }
+    if (!busy) return
+    if (asks[sid] && asks[sid].id === open.id) return   // already on screen
+    var a = open.arguments || {}
+    var na = asks
+    na[sid] = { id: open.id, method: a.kind || "input", title: a.title || "",
+                message: a.message || "", options: a.options || [] }
+    asks = na; askGen++
   }
 
   // One Socket per scope, each in its own Loader so a re-dial gets a fresh object

@@ -567,6 +567,16 @@ Item {
     }
   }
 
+  // While the selected session is mid-turn, re-pull its transcript on a timer. Without
+  // this the chat is frozen from whenever the rail last fetched — most visibly when you
+  // open heidr while an agent is already working, which reads as "nothing is happening".
+  Timer {
+    interval: 5000
+    repeat: true
+    running: rail.live && rail.featuredStreaming && rail.selectedRaw !== ""
+    onTriggered: if (rail.agentd) rail.agentd.refreshEntries(rail.selectedRaw)
+  }
+
   // Changed files for the selected session (agentd working-tree diff).
   readonly property var changesList:
     !live ? mockChanges
@@ -649,6 +659,14 @@ Item {
     if (pendingAsk) {
       var pm = pendingAsk.method
       if (e.key === Qt.Key_Escape) { answerAsk({ cancelled: true }); e.accepted = true; return }
+      // `t` works for ANY ask kind: cancel the question so the agent stops blocking,
+      // then drop into the composer so you can say what you actually think.
+      // Bare `t` only — Ctrl+T is the roster toggle and must not cancel an ask.
+      if (e.key === Qt.Key_T && !(e.modifiers & Qt.ControlModifier)) {
+        answerAsk({ cancelled: true })
+        Qt.callLater(rail.enterInsert)
+        e.accepted = true; return
+      }
       if (pm === "confirm") {
         if (e.key === Qt.Key_Y) { answerAsk({ confirmed: true });  e.accepted = true; return }
         if (e.key === Qt.Key_N) { answerAsk({ confirmed: false }); e.accepted = true; return }
@@ -908,11 +926,25 @@ Item {
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                 Layout.alignment: Qt.AlignVCenter
               }
-              Icon {
-                name: "filters"; width: 14; height: 14
+              // Working sessions spin; the rest keep the static glyph. Motion is the
+              // cheapest way to read "busy" across a roster at a glance.
+              Item {
                 Layout.preferredWidth: 14; Layout.preferredHeight: 14
                 Layout.alignment: Qt.AlignVCenter
-                color: sessRow.cursor ? Theme.bg : rail.dotColor(modelData.status)
+                Icon {
+                  anchors.fill: parent
+                  visible: !sessRow.streaming
+                  name: "filters"
+                  color: sessRow.cursor ? Theme.bg : rail.dotColor(modelData.status)
+                }
+                // The Orb again, now that it scales: at 14px it picks ~8 nodes instead
+                // of 26, so it reads as a spinning wireframe rather than a blob.
+                Orb {
+                  anchors.fill: parent
+                  visible: sessRow.streaming
+                  running: sessRow.streaming
+                  glow: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                }
               }
               // Where the agent actually runs: cloud = a lovbox worktree, laptop =
               // this machine. Muted on purpose — it's provenance, not status.
@@ -936,7 +968,9 @@ Item {
                 text: modelData.state || modelData.idle || ""
                 Layout.preferredWidth: 74; horizontalAlignment: Text.AlignRight
                 Layout.alignment: Qt.AlignVCenter
-                color: sessRow.cursor ? Theme.bg : sessRow.streaming ? Theme.electric : Theme.fg_muted
+                // One muted colour for every state: the spinning orb on the left already
+                // says "working", so colouring the word too was saying it twice.
+                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
               }
               Icon {
@@ -1273,6 +1307,10 @@ Item {
             Text { text: "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
           Row { spacing: 8; KeyCap { text: "n"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+          // Neither yes nor no: release the agent from the question and open the composer,
+          // for the common case where the question itself is the thing worth discussing.
+          Row { spacing: 8; KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
         }
 
         // input/editor → i to type
@@ -1284,7 +1322,8 @@ Item {
         }
 
         Text {
-          text: (askCard.ask && askCard.ask.method === "select") ? "press a number · esc cancels" : "esc cancels"
+          text: (askCard.ask && askCard.ask.method === "select")
+                ? "press a number · t to talk · esc cancels" : "t to talk · esc cancels"
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
       }

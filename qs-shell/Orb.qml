@@ -13,12 +13,18 @@ Item {
   implicitHeight: 26
   visible: running
 
+  // Node count scales with size. At roster size the 26-node mesh collapsed into a
+  // dark blob: R is ~5px there, the edge threshold spans almost the whole disc, so
+  // all ~325 pairs drew a line. Fewer nodes keeps it legible as a wireframe.
+  property int nodes: width >= 22 ? 26 : Math.max(6, Math.round(width * 0.55))
+
   property var _pts: []
   property real rot: 0
 
   Component.onCompleted: _build()
+  onNodesChanged: _build()
   function _build() {
-    var n = 26, pts = [], off = 2 / n, inc = Math.PI * (3 - Math.sqrt(5))  // fibonacci sphere
+    var n = Math.max(4, orb.nodes), pts = [], off = 2 / n, inc = Math.PI * (3 - Math.sqrt(5))  // fibonacci sphere
     for (var i = 0; i < n; i++) {
       var y = i * off - 1 + off / 2
       var r = Math.sqrt(Math.max(0, 1 - y * y))
@@ -59,17 +65,23 @@ Item {
       for (var e = 0; e < orb._pts.length; e++)
         for (var f = e + 1; f < orb._pts.length; f++) {
           var dx = proj[e][0] - proj[f][0], dy = proj[e][1] - proj[f][1]
-          if (dx * dx + dy * dy < (R * 0.72) * (R * 0.72)) {
+          // Sparser meshes need a wider reach to connect at all; dense ones need a
+          // tighter one or every pair links.
+          var reach = R * (orb._pts.length > 16 ? 0.72 : 0.95)
+          if (dx * dx + dy * dy < reach * reach) {
             var d = (proj[e][2] + proj[f][2]) / 2
             ctx.strokeStyle = Qt.rgba(g.r, g.g, g.b, 0.10 + (d + 1) / 2 * 0.30)
-            ctx.lineWidth = 0.8
+            ctx.lineWidth = Math.max(0.5, R * 0.07)
             ctx.beginPath(); ctx.moveTo(proj[e][0], proj[e][1]); ctx.lineTo(proj[f][0], proj[f][1]); ctx.stroke()
           }
         }
       for (var j = 0; j < proj.length; j++) {
         var dd = proj[j][2]
         ctx.fillStyle = Qt.rgba(g.r, g.g, g.b, 0.35 + (dd + 1) / 2 * 0.6)
-        ctx.beginPath(); ctx.arc(proj[j][0], proj[j][1], 0.7 + (dd + 1) / 2 * 1.4, 0, 2 * Math.PI); ctx.fill()
+        // Radius as a FRACTION of R, not absolute px — 2px dots on a 5px radius are
+        // what made the small orb read as filled.
+        var rr = R * (0.10 + (dd + 1) / 2 * 0.10)
+        ctx.beginPath(); ctx.arc(proj[j][0], proj[j][1], rr, 0, 2 * Math.PI); ctx.fill()
       }
     }
   }
