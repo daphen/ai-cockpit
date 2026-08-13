@@ -50,6 +50,24 @@ Item {
     root.sessions = out
     root.gen++
   }
+  // True once every CONNECTED socket has pushed its first roster, so consumers can
+  // wait before picking a landing session. Without this the rail latches onto
+  // whichever daemon answered first and then jumps (re-cd'ing nvim) when the second
+  // one arrives a beat later.
+  property bool settled: false
+  property var _reported: ({})
+  Timer {
+    id: settleTimer
+    interval: 2500   // a socket that connects but never pushes must not block forever
+    onTriggered: root.settled = true
+  }
+  function _noteReported(i) {
+    _reported[i] = true
+    if (!settled && !settleTimer.running) settleTimer.start()
+    for (var k in _socks)
+      if (_socks[k] && _socks[k].connected && !_reported[k]) return
+    settled = true
+  }
   function _registerSock(i, obj) { _socks[i] = obj; _recomputeConnected() }
   function _recomputeConnected() {
     var any = false
@@ -325,7 +343,9 @@ Item {
     if (!m) return
     const t = m.type
     if (t === "roster") {
-      _rosters[sockIdx || 0] = m.sessions || []
+      var si = sockIdx || 0
+      _rosters[si] = m.sessions || []
+      _noteReported(si)
       _rebuildSessions()
       return
     }

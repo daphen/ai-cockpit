@@ -408,12 +408,24 @@ Item {
   // Stable default: the first top-level session by name (the orchestrator/root),
   // NOT whichever session happens to be streaming — otherwise the selection (and
   // the chat) jumps around as subagents start/stop working.
-  readonly property string defaultRaw: {
-    if (!live) return ""
+  // Assigned imperatively, not bound: with one socket per scope the roster arrives in
+  // pieces, and a live binding re-picked the landing session (re-cd'ing nvim) as each
+  // daemon reported. Wait for agentd.settled, choose once, then keep that choice for
+  // as long as the session exists. (A binding that read its own last value here is a
+  // loop — hence the explicit recompute.)
+  property string defaultRaw: ""
+  function _recomputeDefault() {
+    if (!live || !agentd || !agentd.settled) { defaultRaw = ""; return }
+    if (defaultRaw && liveSessions.some(s => s.name === defaultRaw)) return
     var roots = liveSessions.filter(s => !s.parent)
     var pool = (roots.length ? roots : liveSessions).slice()
     pool.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-    return pool.length ? pool[0].name : ""
+    defaultRaw = pool.length ? pool[0].name : ""
+  }
+  onLiveSessionsChanged: _recomputeDefault()
+  Connections {
+    target: rail.agentd
+    function onSettledChanged() { rail._recomputeDefault() }
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
 
