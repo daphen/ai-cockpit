@@ -107,13 +107,13 @@ Item {
   Process {
     id: cmdList
     running: true
-    // Both of pi's command surfaces. The prompts dir mostly HOLDS the `/skill:<name>`
-    // wrappers, so a bare `skill:` entry is only listed for skills that lack one —
-    // otherwise every skill showed up twice under two spellings.
+    // Both of pi's command surfaces: prompts (~/.pi/agent/prompts/<name>.md) and
+    // EVERY skill as `/skill:<name>`, which is how pi addresses them. Prompts that
+    // wrap a skill therefore appear under both spellings — deliberate: the list is
+    // for discovery, and a missing skill is worse than a duplicate.
     command: ["sh", "-c",
-      "p=~/.pi/agent/prompts; ls $p 2>/dev/null | sed 's/\\.md$//'; " +
-      "for d in ~/.pi/agent/skills/*/; do n=$(basename \"$d\"); " +
-      "  [ -e \"$p/$n.md\" ] || echo \"skill:$n\"; done"]
+      "ls ~/.pi/agent/prompts 2>/dev/null | sed 's/\\.md$//'; " +
+      "for d in ~/.pi/agent/skills/*/; do [ -d \"$d\" ] && basename \"$d\" | sed 's|^|skill:|'; done"]
     stdout: StdioCollector {
       onStreamFinished: rail.commands = String(this.text || "").split("\n").filter(s => s.length > 0)
     }
@@ -198,27 +198,45 @@ Item {
   // Remote lovbox sessions report a BOX path (/home/lovable/…). The local nvim
   // edits those files via the SSHFS mount, so rewrite box paths to the mount
   // point ($HOME/lovbox/heidr/…). Local sessions (/home/<you>/…) pass through.
+  // Remote path → its local mutagen mirror. One entry per remote we sync: the old
+  // lovbox rooted at /home/lovable, and the dev VM whose worktrees live under
+  // ~<vmuser>/src (vm-wt mirrors those to ~/lovbox/vm). Without the VM entry,
+  // live-follow cd'd nvim to a VM-absolute path that does not exist locally, which
+  // is why the editor came up on an empty buffer.
+  readonly property var _mirrors: [
+    { remote: "/home/lovable",
+      local: Quickshell.env("HOME") + "/lovbox/heidr" },
+    { remote: "/home/" + (Quickshell.env("HEIDR_VM_USER") || "david_karlsson_lovable_dev") + "/src",
+      local: Quickshell.env("HOME") + "/lovbox/vm" }
+  ]
   function _localPath(p) {
     var s = String(p || "")
-    var boxHome = "/home/lovable"
-    var mount = Quickshell.env("HOME") + "/lovbox/heidr"
-    if (s === boxHome) return mount
-    if (s.indexOf(boxHome + "/") === 0) return mount + s.substring(boxHome.length)
+    for (var i = 0; i < _mirrors.length; i++) {
+      var m = _mirrors[i]
+      if (s === m.remote) return m.local
+      if (s.indexOf(m.remote + "/") === 0) return m.local + s.substring(m.remote.length)
+    }
     return s
   }
-  // A session runs in the lovbox iff its cwd is a BOX path — the daemon reports the
-  // cwd as the machine running pi sees it, so this holds regardless of which agentd
-  // socket surfaced the session.
+  // Remote = the cwd is not under THIS machine's home. agentd reports cwd as the
+  // machine running pi sees it, so a path outside our own $HOME can only be another
+  // box. Hardcoding /home/lovable only matched the old lovbox and read the dev VM
+  // (/home/david_karlsson_lovable_dev/...) as local.
   function _isRemote(cwd) {
     var s = String(cwd || "")
-    return s === "/home/lovable" || s.indexOf("/home/lovable/") === 0
+    if (!s) return false
+    var home = String(Quickshell.env("HOME") || "/home/daphen")
+    return !(s === home || s.indexOf(home + "/") === 0)
   }
   // Inverse of _localPath: a path under the local mirror → the path the BOX sees.
   // Needed because pi runs IN the box, so an @attachment must be a box path.
   function _remotePath(p) {
     var s = String(p || "")
-    var mount = Quickshell.env("HOME") + "/lovbox/heidr"
-    if (s.indexOf(mount + "/") === 0) return "/home/lovable" + s.substring(mount.length)
+    for (var i = 0; i < _mirrors.length; i++) {
+      var m = _mirrors[i]
+      if (s === m.local) return m.remote
+      if (s.indexOf(m.local + "/") === 0) return m.remote + s.substring(m.local.length)
+    }
     return s
   }
   // ── image paste ─────────────────────────────────────────────────────────────
@@ -404,9 +422,10 @@ Item {
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
-    if (st === "asleep")    return Theme.fg_muted
-    if (st === "offline")   return Theme.fg_muted
-    return Theme.electric
+    // Everything else is a session doing nothing. Electric read as "look here" on
+    // every idle row, which is exactly the wrong signal — reserve colour for state
+    // that wants attention.
+    return Theme.fg_muted
   }
   function toolIcon(tool) {
     if (tool === "mcp") return "puzzle-piece"
@@ -928,9 +947,6 @@ Item {
       }
     }
 
-    // No view-header row: the label + ⇥ hint duplicated the footer chips, and the
-    // chat wants that height. Just the breathing room below the roster.
-    Item { Layout.fillWidth: true; Layout.preferredHeight: 2 }
 
     // Files view — full changed-files list for the selected session.
     ListView {
@@ -1429,46 +1445,63 @@ Item {
     }
   }
 
-  // Slash-command palette — floats above the chin while the text starts
-  // with "/". Tab/Enter completes the highlighted one, Ctrl+n/p or ↑/↓ move.
+  // Slash-command palette. Same shape as the family's inline autocomplete
+  // (slk-gui-proto/Autocomplete.qml): a fixed-width card floating above the chin,
+  // bg_alt on a hairline, 32px rows, fg-tinted selection with a hairpin border —
+  // Theme.selection is near-invisible on the light popup ground.
   Rectangle {
     id: slashPalette
-    anchors { left: parent.left; right: parent.right; bottom: chin.top
-              leftMargin: 20; rightMargin: 20; bottomMargin: 8 }
-    height: implicitHeight
-    z: 12   // over the feed, like the ask card
+    readonly property int w: 340
     visible: rail.slashOpen
-    implicitHeight: cmdCol.implicitHeight + 12
-    radius: Theme.radiusCard !== undefined ? Theme.radiusCard : 10
-    color: Theme.surface0
+    anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
+    width: Math.min(w, parent.width - 40)
+    height: visible ? Math.min(slashList.contentHeight + 8, 248) : 0
+    color: Theme.bg_alt
+    radius: Theme.radius !== undefined ? Theme.radius : 10
     border.color: Theme.hairline
     border.width: 1
-    Column {
-      id: cmdCol
-      anchors { left: parent.left; right: parent.right; top: parent.top; margins: 6 }
-      Repeater {
-        model: rail.commandMatches.slice(0, 8)
-        Rectangle {
-          width: cmdCol.width
-          height: 26
-          radius: 6
-          readonly property bool sel: index === Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
-          color: sel ? Theme.surface2 : "transparent"
-          Row {
-            anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
-            spacing: 8
-            Text {
-              text: "/" + modelData
-              color: parent.parent.sel ? Theme.fg : Theme.fg_muted
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-              font.weight: parent.parent.sel ? 500 : 400
+    z: 12
+    ListView {
+      id: slashList
+      anchors.fill: parent; anchors.margins: 4; clip: true
+      model: rail.commandMatches
+      currentIndex: Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
+      highlightFollowsCurrentItem: false
+      interactive: contentHeight > height
+      boundsBehavior: Flickable.StopAtBounds
+      onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
+      delegate: Rectangle {
+        id: slashRow
+        required property var modelData
+        required property int index
+        readonly property bool sel: index === slashList.currentIndex
+        readonly property bool isSkill: String(modelData).indexOf("skill:") === 0
+        width: slashList.width; height: 32
+        radius: 9
+        color: sel ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
+             : chov.hovered ? Theme.hover : "transparent"
+        border.width: 1
+        border.color: sel ? Theme.hairline : "transparent"
+        Row {
+          anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 10; spacing: 9
+          Item {
+            width: 20; height: 20; anchors.verticalCenter: parent.verticalCenter
+            Icon {
+              anchors.centerIn: parent
+              name: slashRow.isSkill ? "puzzle-piece" : "bolt-lightning"
+              width: 14; height: 14
+              color: slashRow.sel ? Theme.fg : Theme.fg_muted
             }
           }
-          MouseArea {
-            anchors.fill: parent
-            onClicked: { rail.slashCur = index; rail.acceptSlash() }
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "/" + modelData
+            color: slashRow.sel ? Theme.fg : Theme.fg_secondary
+            font.family: Theme.fontFamily; font.pixelSize: 14
           }
         }
+        HoverHandler { id: chov }
+        TapHandler { onTapped: { rail.slashCur = slashRow.index; rail.acceptSlash(); composerInput.forceActiveFocus() } }
       }
     }
   }
