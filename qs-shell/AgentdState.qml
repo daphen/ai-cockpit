@@ -378,7 +378,20 @@ Item {
     return out
   }
 
+  // A whole-session transcript arrives as ONE json line, and JSON.parse runs on the
+  // UI thread — a 19MB history froze the window hard enough that neither pane took
+  // input. Refuse to parse past this size and say so in the feed instead of hanging.
+  // (The real fix is parsing in a WorkerScript thread; this is the guard rail.)
+  readonly property int maxLineBytes: 4 * 1024 * 1024
   function onLine(data, sockIdx) {
+    if (data.length > maxLineBytes) {
+      var sm = String(data).match(/"session":"([^"]+)"/)
+      var big = sm ? sm[1] : ""
+      if (big) _push(big, { kind: "cmd", tool: "error",
+        text: "transcript too large to render (" + Math.round(data.length / 1048576) +
+              " MB) — live activity only" })
+      return
+    }
     let m
     try { m = JSON.parse(data) } catch (e) { return }
     if (!m) return
