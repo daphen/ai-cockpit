@@ -943,7 +943,9 @@ Item {
                   anchors.fill: parent
                   visible: sessRow.streaming
                   running: sessRow.streaming
-                  glow: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                  // Electric, not muted: this is the one thing in the row that should
+                  // catch the eye — a session actually doing work.
+                  glow: sessRow.cursor ? Theme.bg : Theme.electric
                 }
               }
               // Where the agent actually runs: cloud = a lovbox worktree, laptop =
