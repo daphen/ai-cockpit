@@ -278,6 +278,7 @@ void TermView::applyMetrics(qreal dpr) {
   cellH_  = snap(baseCellH_);
   ascent_ = std::round(baseAscent_ * dpr) / dpr;
   padT_ = snap(18); padR_ = snap(16); padB_ = 0; padL_ = snap(10);
+  basePadT_ = padT_; basePadB_ = padB_;
 }
 
 void TermView::spawnPty() {
@@ -318,7 +319,12 @@ void TermView::geometryChange(const QRectF &n, const QRectF &o) {
   QQuickPaintedItem::geometryChange(n, o);
   if (n.size() == o.size() || cellW_ <= 0 || cellH_ <= 0) return;
   const int c = std::max(1, (int)((n.width()  - padL_ - padR_) / cellW_));
-  const int r = std::max(1, (int)((n.height() - padT_ - padB_) / cellH_));
+  // Rows never divide the height exactly, and the remainder used to pile up at the
+  // bottom as a dead band below the statusline — with the cursor occasionally drawn
+  // into it, which is what the stray dash past the lualine was. Split the remainder
+  // top/bottom so it reads as symmetric padding instead of a gap.
+  const int r = std::max(1, (int)((n.height() - basePadT_ - basePadB_) / cellH_));
+  centerGrid(n.height(), r);
   const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
   syncTextureSize(dpr);
   {
@@ -326,6 +332,18 @@ void TermView::geometryChange(const QRectF &n, const QRectF &o) {
     resize_ = { true, c, r, (int)n.width(), (int)n.height(), dpr };
   }
   wakeWorker();   // worker applies ghostty_terminal_resize + TIOCSWINSZ + re-renders
+}
+
+// Distribute the vertical remainder around the grid. basePad* is the design padding
+// (kitty's window_padding_width); anything left over after whole rows is shared between
+// top and bottom so no unexplained strip survives at one edge.
+void TermView::centerGrid(qreal viewH, int rows) {
+  const qreal used = rows * cellH_;
+  qreal slack = viewH - used - basePadT_ - basePadB_;
+  if (slack < 0) slack = 0;
+  const qreal half = std::floor(slack / 2.0);
+  padT_ = basePadT_ + half;
+  padB_ = basePadB_ + (slack - half);
 }
 
 void TermView::wakeWorker() {
