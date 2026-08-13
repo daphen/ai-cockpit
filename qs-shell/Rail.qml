@@ -302,7 +302,10 @@ Item {
       open = '(filereadable("' + wtPlan + '") ? execute("edit ' + wtPlan + '")'
            + ' : (filereadable("' + vaultPlan + '") ? execute("edit ' + vaultPlan + '") : ' + dash + '))'
     }
-    var expr = 'execute("cd ' + cwd + '") . ' + open
+    // Guard the cd: a session whose worktree isn't mirrored locally (the VM's main
+    // checkout, an unsynced tree) maps to a path that does not exist here, and cd'ing
+    // there left nvim on an empty buffer staring at nothing.
+    var expr = 'isdirectory("' + cwd + '") ? (execute("cd ' + cwd + '") . ' + open + ') : ""' 
     var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
     Quickshell.execDetached(["nvim", "--server", sock, "--remote-expr", expr])
   }
@@ -536,6 +539,11 @@ Item {
       out.push({ name: shortName(s.name), rawName: s.name, idle: stateLabel(s.status),
                  status: s.status, linked: !!s.parent, cwd: s.cwd || "",
                  hasWorktree: /\.daphen-|\/work\//.test(s.cwd || ""),
+                 // A devenv slice belongs to a WORKTREE, not to the main checkout. Local
+                 // worktrees are <repo>.daphen-<t>, VM ones <repo>-<t>; the plain repo
+                 // root (…/work/lovable, …/src/lovable) has none, so a session opened
+                 // there — an orchestrator, a one-off — must not claim one.
+                 devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || ""),
                  remote: rail._isRemote(s.cwd), scope: s.scope || "",
                  depth: Math.min(depth, 1) })  // one level deep only
       var kids = children[s.name] || []
@@ -544,6 +552,28 @@ Item {
     for (var r = 0; r < roots.length; r++) walk(roots[r], 0)
     return out
   }
+
+  // ── new session ─────────────────────────────────────────────────────────────
+  // Enter on the roster's last row opens this: pick where it runs, name it, done.
+  // local  → an agentd session in the lovable scope at the main checkout
+  // remote → `vm-wt <ticket>`, which also makes the worktree + devenv slice + mirror
+  property bool newOpen: false
+  property string newMode: ""      // "" = choosing, then "local" | "remote"
+  function openNew()  { newOpen = true; newMode = ""; requestFocus() }
+  function closeNew() { newOpen = false; newMode = ""; exitInsert() }
+  function createSession(name) {
+    var n = String(name || "").trim()
+    if (!n) return
+    if (newMode === "remote") {
+      vmWt.command = ["vm-wt", n]
+      vmWt.running = true
+    } else if (agentd) {
+      agentd.send({ type: "spawn", session: n.toLowerCase(),
+                    cwd: Quickshell.env("HOME") + "/work/lovable" })
+    }
+    closeNew()
+  }
+  Process { id: vmWt; running: false }
   property bool _wantBottom: false   // scroll chat to bottom once the new session's feed loads
   // A send needs to land on the new row too, but WITHOUT bottomSettle: that timer
   // re-pins 9x over ~540ms to survive async delegate sizing on first load, and on a
@@ -601,7 +631,8 @@ Item {
   readonly property bool askWantsText: pendingAsk && (pendingAsk.method === "input" || pendingAsk.method === "editor")
   function enterInsert() {
     insert = true
-    if (askWantsText) askInput.forceActiveFocus()
+    if (newOpen && newMode !== "") newInput.forceActiveFocus()
+    else if (askWantsText) askInput.forceActiveFocus()
     else composerInput.forceActiveFocus()
   }
   function exitInsert() {
@@ -668,6 +699,14 @@ Item {
     }
     // A pending question owns the keyboard: y/n (confirm), 1–9 (select),
     // i (type a reply for input/editor), esc (cancel). j/k still scroll.
+    if (newOpen) {
+      if (e.key === Qt.Key_Escape) { closeNew(); e.accepted = true; return }
+      if (newMode === "") {
+        if (e.key === Qt.Key_L) { newMode = "local";  Qt.callLater(rail.enterInsert); e.accepted = true; return }
+        if (e.key === Qt.Key_R) { newMode = "remote"; Qt.callLater(rail.enterInsert); e.accepted = true; return }
+        e.accepted = true; return                     // swallow the rest while choosing
+      }
+    }
     if (pendingAsk) {
       var pm = pendingAsk.method
       if (e.key === Qt.Key_Escape) { answerAsk({ cancelled: true }); e.accepted = true; return }
@@ -701,6 +740,7 @@ Item {
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
+    else if (e.key === Qt.Key_N)  { rail.openNew(); e.accepted = true }      // new session
     else if (e.key === Qt.Key_X)  {                                          // stop a turn
       // Act on the row under the CURSOR when the cursor is in the roster — you
       // highlight with j/k and expect x to hit what you are looking at. Bound to
@@ -997,16 +1037,54 @@ Item {
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
               }
               Icon {
+                // Only shown when the session actually HAS a devenv slice. It used to
+                // appear green for every top-level session, so a session in the main
+                // checkout looked like it owned a devenv it never had.
+                visible: modelData.devenv === true
                 name: "plug-2"; width: 15; height: 15
                 Layout.preferredWidth: 15; Layout.preferredHeight: 15   // equal dims → no squish
                 Layout.alignment: Qt.AlignVCenter
-                // Green = top-level session with its own worktree/devenv; muted =
-                // a spawned subagent (shares the parent's, no devenv of its own).
-                color: sessRow.cursor ? Theme.bg
-                     : !modelData.linked ? Theme.green : Theme.fg_muted
-                opacity: modelData.linked ? 0.5 : 1.0
+                color: sessRow.cursor ? Theme.bg : Theme.green
               }
             }
+          }
+        }
+        // new session — inside the roster card, below the sessions: this is where you
+        // look when you want to start something. Not a roster ROW though; a session is a
+        // thing that exists, this is a verb, and rendering it as a pill row made it look
+        // like an agent sitting idle.
+        Item {
+          Layout.fillWidth: true
+          implicitHeight: 34
+          Rectangle {
+            id: newBtn
+            anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+            implicitWidth: newBtnRow.implicitWidth + 20
+            width: implicitWidth
+            height: 26
+            radius: height / 2
+            color: nsHov.hovered ? Theme.surface2 : "transparent"
+            border.width: 1
+            border.color: nsHov.hovered ? Theme.electric : Theme.hairline
+            Row {
+              id: newBtnRow
+              anchors.centerIn: parent
+              spacing: 7
+              Icon {
+                name: "plus"; width: 11; height: 11
+                anchors.verticalCenter: parent.verticalCenter
+                color: nsHov.hovered ? Theme.fg : Theme.fg_muted
+              }
+              Text {
+                text: "new session"
+                color: nsHov.hovered ? Theme.fg : Theme.fg_muted
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                anchors.verticalCenter: parent.verticalCenter
+              }
+              KeyCap { small: true; text: "n"; anchors.verticalCenter: parent.verticalCenter }
+            }
+            HoverHandler { id: nsHov }
+            TapHandler { onTapped: { rail.requestFocus(); rail.openNew() } }
           }
         }
       }
@@ -1263,8 +1341,68 @@ Item {
       anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 14 }
       spacing: 10
 
+
+      // Attachment chips — same shape as dsqrd/slqs/mlqs (paperclip + name + ✕), so
+      // the family looks consistent. The name matches the inline reference exactly
+      // (@.heidr-pastes/img1.png → "img1"), which is what makes "before: img1, after:
+      // img2" unambiguous for the agent as well as for you.
+      Flow {
+        Layout.fillWidth: true
+        spacing: 16
+        visible: rail.pastedImages.length > 0
+        Repeater {
+          model: rail.pastedImages
+          Rectangle {
+            id: attachChip
+            readonly property string imgName: String(modelData)
+            readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
+            // A real badge surface (dsqrd's chip is a bare row, but on the rail's chin
+            // it needs a ground of its own to read as an attachment).
+            implicitWidth: chipRow.implicitWidth + 18
+            height: 24
+            radius: 6
+            color: Theme.surface0
+            border.width: 1
+            border.color: referenced ? Theme.electric : Theme.hairline
+            Row {
+            id: chipRow
+            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8 }
+            spacing: 6
+            Icon {
+              name: "paperclip"; width: 13; height: 13
+              color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
+              anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              // "image 1", "image 2" … by position in THIS message (pastedImages clears
+              // on send). The file keeps a unique name on disk so earlier messages'
+              // attachments stay readable, but the label you see is per-message.
+              text: "image " + (index + 1)
+              color: attachChip.referenced ? Theme.fg : Theme.fg_muted
+              font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
+              font.pixelSize: rail.fsMeta
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "  ✕"; color: Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              TapHandler {
+                onTapped: {
+                  composerInput.text = composerInput.text.replace("@.heidr-pastes/" + attachChip.imgName + " ", "")
+                  rail.pastedImages = rail.pastedImages.filter(function (m) { return m !== attachChip.imgName })
+                }
+              }
+            }
+            }
+          }
+        }
+      }
+
+
     // ask_user card — mirrors the nvim rail's "needs your input" approval: a
-    // bordered card that TAKES OVER the chin above the input. confirm → y/n; select → 1–9;
+    // bordered card that TAKES OVER the composer's slot — same bottom edge as the input,
+    // growing upward as it gets taller. confirm → y/n; select → 1–9;
     // input/editor → i to type. Answered via the rail's Keys / the composer.
     Rectangle {
       id: askCard
@@ -1384,70 +1522,78 @@ Item {
       }
     }
 
-      // Attachment chips — same shape as dsqrd/slqs/mlqs (paperclip + name + ✕), so
-      // the family looks consistent. The name matches the inline reference exactly
-      // (@.heidr-pastes/img1.png → "img1"), which is what makes "before: img1, after:
-      // img2" unambiguous for the agent as well as for you.
-      Flow {
+      // new-session panel — same shape as an ask card, because it is one: it takes over
+      // the chin, and the composer hides beneath it.
+      Rectangle {
+        id: newCard
         Layout.fillWidth: true
-        spacing: 16
-        visible: rail.pastedImages.length > 0
-        Repeater {
-          model: rail.pastedImages
+        visible: rail.newOpen
+        implicitHeight: newCol.implicitHeight + 24
+        radius: 14
+        color: Theme.surface
+        border.width: 1
+        border.color: Theme.electric
+        Column {
+          id: newCol
+          anchors { left: parent.left; right: parent.right; top: parent.top
+                    leftMargin: 18; rightMargin: 16; topMargin: 12 }
+          spacing: 8
+          Text {
+            text: "new session"; color: Theme.electric
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+          }
+          Row {
+            spacing: 20
+            visible: rail.newMode === ""
+            Row { spacing: 8; KeyCap { text: "l"; anchors.verticalCenter: parent.verticalCenter }
+              Text { text: "local — a session here"; color: Theme.fg
+                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+            Row { spacing: 8; KeyCap { text: "r"; anchors.verticalCenter: parent.verticalCenter }
+              Text { text: "remote — worktree on the VM"; color: Theme.fg
+                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+          }
           Rectangle {
-            id: attachChip
-            readonly property string imgName: String(modelData)
-            readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
-            // A real badge surface (dsqrd's chip is a bare row, but on the rail's chin
-            // it needs a ground of its own to read as an attachment).
-            implicitWidth: chipRow.implicitWidth + 18
-            height: 24
-            radius: 6
+            width: newCol.width
+            visible: rail.newMode !== ""
+            implicitHeight: 44; height: implicitHeight
+            radius: 10
             color: Theme.surface0
+            border.color: rail.insert ? Theme.electric : Theme.hairline
             border.width: 1
-            border.color: referenced ? Theme.electric : Theme.hairline
-            Row {
-            id: chipRow
-            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8 }
-            spacing: 6
-            Icon {
-              name: "paperclip"; width: 13; height: 13
-              color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
-              anchors.verticalCenter: parent.verticalCenter
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              // "image 1", "image 2" … by position in THIS message (pastedImages clears
-              // on send). The file keeps a unique name on disk so earlier messages'
-              // attachments stay readable, but the label you see is per-message.
-              text: "image " + (index + 1)
-              color: attachChip.referenced ? Theme.fg : Theme.fg_muted
-              font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
-              font.pixelSize: rail.fsMeta
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: "  ✕"; color: Theme.fg_muted
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-              TapHandler {
-                onTapped: {
-                  composerInput.text = composerInput.text.replace("@.heidr-pastes/" + attachChip.imgName + " ", "")
-                  rail.pastedImages = rail.pastedImages.filter(function (m) { return m !== attachChip.imgName })
+            RowLayout {
+              anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+              spacing: 8
+              Icon { name: "chevron-right"; width: 14; height: 14; color: Theme.electric }
+              TextInput {
+                id: newInput
+                Layout.fillWidth: true
+                color: Theme.fg
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+                clip: true
+                verticalAlignment: TextInput.AlignVCenter
+                cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: newInput.cursorVisible ? 1 : 0 }
+                onAccepted: { rail.createSession(text); text = "" }
+                Keys.onPressed: (e) => {
+                  if (e.key === Qt.Key_Escape) { rail.closeNew(); e.accepted = true }
                 }
               }
             }
-            }
+          }
+          Text {
+            text: rail.newMode === "remote" ? "ticket id, e.g. EVERY-2739 · esc cancels"
+                : rail.newMode === "local"  ? "session name · esc cancels"
+                : "esc cancels"
+            color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
         }
       }
-
 
       // Composer — real text input (i to enter, Esc/Ctrl+h to leave). Hidden while an
       // ask is pending: the question TAKES OVER the input rather than floating above a
       // composer that still looks ready for an unrelated message.
       Rectangle {
         Layout.fillWidth: true
-        visible: !rail.pendingAsk
+        visible: !rail.pendingAsk && !rail.newOpen
         implicitHeight: 52   // extra vertical padding
         radius: height / 2   // fully rounded input
         color: Theme.surface0
