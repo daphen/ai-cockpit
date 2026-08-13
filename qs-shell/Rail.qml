@@ -206,15 +206,23 @@ Item {
   readonly property var _mirrors: [
     { remote: "/home/lovable",
       local: Quickshell.env("HOME") + "/lovbox/heidr" },
-    { remote: "/home/" + (Quickshell.env("HEIDR_VM_USER") || "david_karlsson_lovable_dev") + "/src",
-      local: Quickshell.env("HOME") + "/lovbox/vm" }
+    // The VM's worktrees mirror into REAL local git worktrees (…/work/lovable.daphen-<t>),
+    // not a bare directory: gitsigns, hunk jumping and the dashboard all need a
+    // repository, and a plain mirror has none — mutagen has to skip .git because a
+    // worktree's .git is a FILE holding a VM-absolute gitdir.
+    { remote: "/home/" + (Quickshell.env("HEIDR_VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable-",
+      local: Quickshell.env("HOME") + "/work/lovable.daphen-" }
   ]
   function _localPath(p) {
     var s = String(p || "")
     for (var i = 0; i < _mirrors.length; i++) {
       var m = _mirrors[i]
       if (s === m.remote) return m.local
-      if (s.indexOf(m.remote + "/") === 0) return m.local + s.substring(m.remote.length)
+      // Plain prefix, NOT only at a "/" boundary: the VM entry ends in "lovable-" so a
+      // path like …/src/lovable-every-2741 has no slash after the prefix. Requiring one
+      // silently matched nothing, so every remote cwd passed through as a VM path,
+      // isdirectory() failed, and nvim never changed directory.
+      if (s.indexOf(m.remote) === 0) return m.local + s.substring(m.remote.length)
     }
     return s
   }
@@ -235,7 +243,7 @@ Item {
     for (var i = 0; i < _mirrors.length; i++) {
       var m = _mirrors[i]
       if (s === m.local) return m.remote
-      if (s.indexOf(m.local + "/") === 0) return m.remote + s.substring(m.local.length)
+      if (s.indexOf(m.local) === 0) return m.remote + s.substring(m.local.length)
     }
     return s
   }
