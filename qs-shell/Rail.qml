@@ -596,8 +596,20 @@ Item {
     expandedGroups = e
   }
   function toggleGroupKey(k) { toggleGroup(k) }   // string-keyed groups (turn activity)
-  function enterInsert() { insert = true; composerInput.forceActiveFocus() }
-  function exitInsert()  { insert = false; composerInput.focus = false; rail.forceActiveFocus() }
+  // Focus follows whichever field is VISIBLE: with a question up, the composer is
+  // hidden and typing belongs to the ask, so `i` must land there instead.
+  readonly property bool askWantsText: pendingAsk && (pendingAsk.method === "input" || pendingAsk.method === "editor")
+  function enterInsert() {
+    insert = true
+    if (askWantsText) askInput.forceActiveFocus()
+    else composerInput.forceActiveFocus()
+  }
+  function exitInsert() {
+    insert = false
+    composerInput.focus = false
+    if (askWantsText) askInput.focus = false
+    rail.forceActiveFocus()
+  }
 
   // Tab toggles the main area between the chat feed and the changed-files view.
   Keys.onTabPressed: (e) => {
@@ -689,8 +701,17 @@ Item {
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
-    else if (e.key === Qt.Key_X)  {                                          // stop the current turn
-      if (rail.agentd && rail.selectedRaw) rail.agentd.stop(rail.selectedRaw)
+    else if (e.key === Qt.Key_X)  {                                          // stop a turn
+      // Act on the row under the CURSOR when the cursor is in the roster — you
+      // highlight with j/k and expect x to hit what you are looking at. Bound to
+      // selectedRaw, this stopped whichever session happened to be OPEN instead of the
+      // highlighted one, which is how it killed the orchestrator mid-roster-browse.
+      var xt = rail.selectedRaw
+      if (rail.curSection() === "roster") {
+        var row = rail.rosterList[rail.curLocal()]
+        if (row) xt = row.rawName || row.name
+      }
+      if (rail.agentd && xt) rail.agentd.stop(xt)
       e.accepted = true
     }
     else if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { activateCur(); e.accepted = true }
@@ -1315,12 +1336,44 @@ Item {
             Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
         }
 
-        // input/editor → i to type
-        Row {
-          spacing: 8
+        // input/editor → answer HERE, in the card, not in the composer below
+        Rectangle {
+          width: askCol.width
           visible: askCard.ask && (askCard.ask.method === "input" || askCard.ask.method === "editor")
-          KeyCap { text: "i"; anchors.verticalCenter: parent.verticalCenter }
-          Text { text: "type a reply"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+          implicitHeight: 44
+          height: implicitHeight
+          radius: 10
+          color: Theme.surface0
+          border.color: rail.insert ? Theme.orange : Theme.hairline
+          border.width: 1
+          RowLayout {
+            anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+            spacing: 8
+            Icon { name: "chevron-right"; width: 14; height: 14; color: Theme.orange }
+            TextInput {
+              id: askInput
+              Layout.fillWidth: true
+              color: Theme.fg
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+              clip: true
+              verticalAlignment: TextInput.AlignVCenter
+              cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: askInput.cursorVisible ? 1 : 0 }
+              onAccepted: {
+                if (text.trim().length) rail.answerAsk({ value: text })
+                text = ""
+                rail.exitInsert()
+              }
+              Keys.onPressed: (e) => {
+                if (e.key === Qt.Key_Escape) { rail.exitInsert(); e.accepted = true }
+              }
+            }
+            Text {
+              visible: !rail.insert
+              text: "i to answer"
+              color: Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            }
+          }
         }
 
         Text {
@@ -1389,9 +1442,12 @@ Item {
       }
 
 
-      // Composer — real text input (i to enter, Esc/Ctrl+h to leave)
+      // Composer — real text input (i to enter, Esc/Ctrl+h to leave). Hidden while an
+      // ask is pending: the question TAKES OVER the input rather than floating above a
+      // composer that still looks ready for an unrelated message.
       Rectangle {
         Layout.fillWidth: true
+        visible: !rail.pendingAsk
         implicitHeight: 52   // extra vertical padding
         radius: height / 2   // fully rounded input
         color: Theme.surface0
