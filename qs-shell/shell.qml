@@ -44,6 +44,15 @@ ShellRoot {
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
+      // The rail's test interface (test/rail-nav.sh): cursor/scroll behaviour depends on
+      // the roster and feed changing UNDER the cursor, which is only assertable from
+      // outside the process.
+      function railState(): string {
+        return JSON.stringify({ cur: rail.cur, rSize: rail.rSize, navTotal: rail.navTotal,
+                                view: rail.view, mode: rail.scrollMode,
+                                sel: rail.selectedRaw, key: rail.cursorKey })
+      }
+      function railKey(k: string): string { rail.debugNav(k); return "ok" }
       // Merged roster as "scope/name status" lines — proves which daemon owns what
       // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
       function sessions(): string {

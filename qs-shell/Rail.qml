@@ -39,21 +39,42 @@ Item {
   readonly property int navTotal: rSize + viewSize
   function curSection() { return cur < rSize ? "roster" : view }
   function curLocal()   { return cur < rSize ? cur : cur - rSize }
+
+  // The roster cursor is anchored to a session's IDENTITY, not its row number. Rows are
+  // name-sorted, but a session appearing or going offline still shifts every index below
+  // it, so a bare index quietly slides onto a different session between rebuilds — which
+  // is how `x` once closed the wrong one. Re-derive the index after every rebuild.
+  property string cursorName: ""
+  readonly property string cursorKey: cur < rSize ? ("r:" + cursorName) : ("f:" + (cur - rSize))
+  function _rosterIndexOf(n) {
+    if (!n) return -1
+    for (var i = 0; i < rosterList.length; i++)
+      if ((rosterList[i].rawName || rosterList[i].name) === n) return i
+    return -1
+  }
+  function _anchorCursor() {
+    if (cur < rSize && rosterList[cur])
+      cursorName = rosterList[cur].rawName || rosterList[cur].name
+  }
+  onRosterListChanged: {
+    if (cur >= rSize) return          // cursor is in the feed; roster order can't affect it
+    var want = _rosterIndexOf(cursorName)
+    if (want >= 0) cur = want
+    else { cur = Math.max(0, Math.min(cur, rSize - 1)); _anchorCursor() }
+  }
   property bool insert: false
-  property bool pinBottom: true   // chat follows new messages unless you scroll up
-  // Hands off after ANY user scroll: while this is running, no auto-positioning
-  // (pinTimer / bottomSettle / countChanged / feedDebounce) touches contentY.
-  // Several of those fire on a 33-120ms cadence and were fighting the wheel, so
-  // the feed felt locked. One guard makes the user's gesture always win.
-  // Exactly ONE thing may drive the viewport at a time:
-  //   followMode = true  → bottom-anchored stream follow (pinTimer), range OFF
-  //   followMode = false → the cursor drives it (native ApplyRange), no timers
-  // They contradict each other: ApplyRange pulls the CURRENT item's TOP into view,
-  // so on a tall growing last card it scrolled UP while the pin timer pulled DOWN.
-  readonly property bool followMode: view === "chat" && pinBottom && featuredStreaming
-  readonly property bool scrollGuarded: scrollGuard.running
-  Timer { id: scrollGuard; interval: 700 }
-  function noteUserScroll() { scrollGuard.restart() }
+  // Chat autoscroll is a state machine (FeedScroll.qml) and the ONLY thing that moves
+  // the feed viewport. Callers report events — scrolled, gesture, synced, cursor moved —
+  // and it decides. Everything here used to be four booleans arbitrating six writers.
+  FeedScroll {
+    id: feedScroll
+    view: feedView
+    streaming: rail.featuredStreaming
+    chatVisible: rail.view === "chat"
+    onWantCursorAtEnd: (force) => {
+      if (force || rail.cur >= rail.rSize) rail.cur = Math.max(0, rail.navTotal - 1)
+    }
+  }
   property string activeRaw: ""
   // Roster starts expanded and stays however you leave it — Ctrl+t toggles the
   // full list vs the single-row glance, and the choice persists across focus
@@ -589,17 +610,10 @@ Item {
     closeNew()
   }
   Process { id: vmWt; running: false }
-  property bool _wantBottom: false   // scroll chat to bottom once the new session's feed loads
-  // A send needs to land on the new row too, but WITHOUT bottomSettle: that timer
-  // re-pins 9x over ~540ms to survive async delegate sizing on first load, and on a
-  // send the rows are already sized, so those re-pins were visible as the
-  // "blinks only on the first message" flicker.
-  property bool _sendPin: false
   onSelectedRawChanged: {
     _feedReset = true
     Qt.callLater(rail.syncFeedModel)
-    pinBottom = true
-    _wantBottom = true
+    feedScroll.toEnd(true)   // settle: the switched-in transcript's rows aren't sized yet
     if (agentd) agentd.select(selectedRaw)
     // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
     // every switch, so the editor always tracks the session you're viewing.
@@ -778,18 +792,21 @@ Item {
   // Cursor moves only set state — feedView's native highlight range does the
   // scrolling (see currentIndex / preferredHighlightBegin|End there).
   onCurChanged: {
-    pinBottom = (cur >= navTotal - 1)   // at the last item → follow new messages
+    _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
-    // ApplyRange only guarantees the current item's TOP sits inside the range, so
-    // landing on the LAST card left its bottom (and the footer pad) below the fold.
-    // Bottom-align that one case explicitly — "j to the last message" should mean
-    // the end of the feed. Deferred so the row's height is settled first.
-    if (view === "chat" && cur >= navTotal - 1 && navTotal > rSize)
-      Qt.callLater(feedView.positionViewAtEnd)
-    // With the range disabled during streaming, a deliberate cursor move still needs
-    // to bring its row into view — but ONCE, not as a standing constraint.
-    else if (view === "chat" && cur >= rSize && featuredStreaming)
-      Qt.callLater(function () { feedView.positionViewAtIndex(rail.cur - rail.rSize, ListView.Contain) })
+    else if (view === "chat" && cur >= rSize)
+      feedScroll.cursorMoved(cur - rSize, cur >= navTotal - 1)
+  }
+
+  readonly property string scrollMode: feedScroll.mode
+  // Nav driven from the IPC, for test/rail-nav.sh.
+  function debugNav(k) {
+    if (k === "j") moveDown()
+    else if (k === "k") moveUp()
+    else if (k === "g") cur = 0
+    else if (k === "G") cur = Math.max(0, navTotal - 1)
+    else if (k === "enter") activateCur()
+    else if (k === "tab") { view = (view === "chat") ? "files" : "chat"; if (cur >= rSize) cur = rSize }
   }
   // subtle focus accent on the left edge (no full ring)
   Rectangle {
@@ -848,26 +865,7 @@ Item {
     onTriggered: {
       rail.feedTick++
       rail.syncFeedModel()
-      if (rail.view === "chat" && !rail.scrollGuarded
-          && (rail.pinBottom || rail._wantBottom || rail._sendPin)) {
-        if (rail._wantBottom || rail._sendPin) rail.cur = Math.max(0, rail.navTotal - 1)
-        feedView.positionViewAtEnd()
-        rail.pinBottom = true
-        if (rail._wantBottom) bottomSettle.restart()   // FIRST load only — see _sendPin
-        rail._wantBottom = false
-        rail._sendPin = false
-      }
-    }
-  }
-  // On the first feed load the ListView's delegates aren't realized yet, so a
-  // single positionViewAtEnd lands mid-feed (contentHeight is an estimate).
-  // Re-pin a few times over ~500ms until the geometry settles at the true bottom.
-  Timer {
-    id: bottomSettle; interval: 60; repeat: true
-    property int n: 0
-    onTriggered: {
-      if (rail.view === "chat" && rail.pinBottom && !rail.scrollGuarded) feedView.positionViewAtEnd()
-      n++; if (n >= 9) { running = false; n = 0 }
+      feedScroll.synced()
     }
   }
   Connections {
@@ -1172,21 +1170,9 @@ Item {
       highlightMoveDuration: 0
       highlightResizeDuration: 0
       highlight: null           // the delegate paints its own cursor fill
-      // ScrollFeel is a WheelHandler that writes contentY DIRECTLY, so wheel
-      // scrolling sets neither `dragging` nor `flicking` — its `scrolled` signal
-      // is the only reliable "the user scrolled" event. Unpin when they leave the
-      // bottom, re-arm follow when they return to it.
-      // Scrolling UP always unpins; follow re-arms only when the user scrolls back
-      // to within a hair of the true bottom. Do NOT trust atYEnd here — with async
-      // delegates contentHeight is an estimate and atYEnd reports true mid-feed,
-      // which left pinBottom armed and pinTimer yanking the viewport ("locked").
       ScrollFeel {
         flick: feedView
-        onScrolled: (up) => {
-          rail.noteUserScroll()
-          if (up) rail.pinBottom = false
-          else rail.pinBottom = (feedView.contentY >= feedView.contentHeight - feedView.height - 8)
-        }
+        onScrolled: (up) => feedScroll.userScrolled(up)
       }
       header: Item { width: feedView.width; height: feedView.spacing }   // top gap == inter-message gap, so the first card clears the chat-title hairline
       footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
@@ -1196,23 +1182,7 @@ Item {
         anchors { left: parent.left; right: parent.right; top: parent.top }
         height: 1; color: Theme.hairline; z: 2
       }
-      // Follow new content. Positioning synchronously on contentHeightChanged
-      // re-triggers async delegate incubation → contentHeight changes → fires
-      // again → a 100%-CPU refill loop under qs 0.3.0's render-loop incubation.
-      // Instead: throttle-follow at ~30fps ONLY while streaming (bounded, can't
-      // spin), and snap once when a message is added/removed (countChanged).
-      Timer {
-        id: pinTimer; interval: 250; repeat: true
-        running: rail.followMode && !rail.scrollGuarded
-        // Follow the bottom with the SUPPORTED api. Writing contentY directly (tried
-        // 2026-08-12) fights ListView's own layout bookkeeping while the streaming
-        // card resizes and the feed visibly blinks. A slower cadence also keeps the
-        // resize-chase from reading as a bounce. Continuously following a resizing
-        // list is inherently a little jumpy — the jitter-free fix is a BottomToTop
-        // layout with a reversed model, which is a bigger refactor.
-        onTriggered: feedView.positionViewAtEnd()
-      }
-      onCountChanged: if (rail.view === "chat" && rail.pinBottom && !rail.scrollGuarded) Qt.callLater(feedView.positionViewAtEnd)
+      onCountChanged: feedScroll.contentChanged()
       // Streaming content arrived as a hard pop. Fade added rows in — short enough
       // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
       // below from jumping when one is inserted.
@@ -1224,12 +1194,10 @@ Item {
       }
       // Manual scrolling wins over follow-the-stream. NOTE: do NOT use
       // onMovementStarted/Ended here — Flickable emits those for PROGRAMMATIC
-      // contentY changes too, so pinTimer's positionViewAtEnd() (30x/sec) trips
-      // them and oscillates pinBottom, wedging scrolling entirely. `dragging`
-      // and `flicking` are user-gesture-only, so key off those.
-      readonly property bool _atTrueBottom: contentY >= contentHeight - height - 8
-      onDraggingChanged: rail.pinBottom = dragging ? false : feedView._atTrueBottom
-      onFlickingChanged: if (!flicking) rail.pinBottom = feedView._atTrueBottom
+      // contentY changes too, so the follow timer's own scrolling would trip them.
+      // `dragging` and `flicking` are user-gesture-only, so key off those.
+      onDraggingChanged: dragging ? feedScroll.gestureStarted() : feedScroll.gestureEnded()
+      onFlickingChanged: if (!flicking) feedScroll.gestureEnded()
       delegate: Item {
         id: turnDel
         width: feedView.width
@@ -1641,8 +1609,9 @@ Item {
                 rail.agentd.submit(rail.selectedRaw, text)
               }
               rail.pastedImages = []      // attachments belong to the message just sent
-              rail.pinBottom = true
-              rail._sendPin = true   // land on the new last row (no re-pin storm)
+              // No settle burst on a send: the rows are already sized, so re-pinning
+              // 9x over ~540ms was visible as a flicker on the first message.
+              feedScroll.toEnd(false)
               // Stay in insert after sending — you almost always have a follow-up,
               // and dropping to normal mode meant pressing `i` again every time.
               // Esc / Ctrl+h still leave. (An answered ask_user is done, so exit.)
