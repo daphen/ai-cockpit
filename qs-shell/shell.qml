@@ -50,7 +50,8 @@ ShellRoot {
       function railState(): string {
         return JSON.stringify({ cur: rail.cur, rSize: rail.rSize, navTotal: rail.navTotal,
                                 view: rail.view, mode: rail.scrollMode,
-                                sel: rail.selectedRaw, key: rail.cursorKey })
+                                sel: rail.selectedRaw, key: rail.cursorKey,
+                                row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
       // Merged roster as "scope/name status" lines — proves which daemon owns what

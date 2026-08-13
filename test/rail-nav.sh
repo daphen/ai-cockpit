@@ -103,6 +103,30 @@ fake grow 6
 ro2=$(st)
 check "still on the roster row" "$(field "$ro2" cur)" "0"
 
+say "7. reading survives the 60-message cap SLIDING (long session)"
+# Past the cap the feed stops growing and instead slides: a row's index shifts by one per
+# new message, so anything keyed on the index lands on a neighbouring turn.
+key G; sleep 1
+for _ in $(seq 1 34); do echo grow >> "$CMD"; done
+sleep 8
+key G; key k; key k; key k      # read three rows up from the newest
+# Assert on the row's CONTENT: comparing the anchor key to itself would pass even when the
+# cursor is sitting on a different turn, which is exactly how this test first fooled me.
+a=$(st); arow=$(field "$a" row); acur=$(field "$a" cur); atot=$(field "$a" navTotal)
+say "  reading row $acur (navTotal $atot): '$arow'"
+fake grow 7
+fake grow 7
+b=$(st); brow=$(field "$b" row); bcur=$(field "$b" cur); btot=$(field "$b" navTotal)
+say "  now row $bcur (navTotal $btot): '$brow'"
+check "same message still under the cursor" "$brow" "$arow"
+if [ "$btot" = "$atot" ] && [ "$bcur" -lt "$acur" ]; then
+  say "  ✓ window slid and the row index followed it ($acur -> $bcur)"; pass=$((pass+1))
+elif [ "$btot" -gt "$atot" ]; then
+  say "  – cap not reached (navTotal still growing $atot -> $btot); identity check above still applies"
+else
+  say "  ✗ expected the row to slide up, got $acur -> $bcur"; fail=$((fail+1))
+fi
+
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
 check "error lines" "$errs" "0"

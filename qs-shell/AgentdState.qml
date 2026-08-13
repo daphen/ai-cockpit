@@ -341,6 +341,7 @@ Item {
     var items = []
     for (var mi = 0; mi < msgs.length; mi++) {
       var msg = msgs[mi]
+      var _from = items.length
       if (msg.role === "user") {
         var uc = msg.content || [], ut = ""
         for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
@@ -350,6 +351,10 @@ Item {
       } else {
         _expandAssistant(msg.content, items)
       }
+      for (var ti = _from; ti < items.length; ti++)
+        // (message id, nth item OF THAT MESSAGE) — `ti` alone is the index into the
+        // whole items array, which slides with the window and is not an identity.
+        if (msg._mid && !items[ti].mid) items[ti].mid = msg._mid + ":" + (ti - _from)
     }
     return _coalesce(items)
   }
@@ -366,8 +371,13 @@ Item {
     var msgs = []
     for (var j = chain.length - 1; j >= 0; j--) {
       var e = chain[j]
-      if (e.type === "message" && e.message && (e.message.role === "user" || e.message.role === "assistant"))
+      if (e.type === "message" && e.message && (e.message.role === "user" || e.message.role === "assistant")) {
+        // Stamp the entry id onto the message: feed rows need an identity that survives
+        // the CHAT_CAP window sliding, or every row's INDEX shifts by one per new message
+        // and anything keyed on it (the cursor, expanded groups) lands on a neighbour.
+        e.message._mid = e.id
         msgs.push(e.message)
+      }
     }
     var CHAT_CAP = 60
     return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)))
@@ -385,7 +395,7 @@ Item {
         if (j - i >= 3) {
           var cmds = []
           for (var k = i; k < j; k++) cmds.push({ text: items[k].text, command: items[k].command || "" })
-          out.push({ kind: "group", tool: it.tool, cmds: cmds })
+          out.push({ kind: "group", tool: it.tool, cmds: cmds, mid: it.mid })
           i = j
           continue
         }

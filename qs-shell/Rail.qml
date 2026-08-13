@@ -44,23 +44,42 @@ Item {
   // name-sorted, but a session appearing or going offline still shifts every index below
   // it, so a bare index quietly slides onto a different session between rebuilds — which
   // is how `x` once closed the wrong one. Re-derive the index after every rebuild.
+  // The same holds for a feed row: the transcript is capped to its last 60 messages, so
+  // in a long session every new message slides that window and shifts every row's index.
   property string cursorName: ""
-  readonly property string cursorKey: cur < rSize ? ("r:" + cursorName) : ("f:" + (cur - rSize))
+  property string cursorFeedKey: ""
+  readonly property string cursorKey: cur < rSize ? ("r:" + cursorName) : ("f:" + cursorFeedKey)
   function _rosterIndexOf(n) {
     if (!n) return -1
     for (var i = 0; i < rosterList.length; i++)
       if ((rosterList[i].rawName || rosterList[i].name) === n) return i
     return -1
   }
+  function _feedIndexOf(k) {
+    if (!k) return -1
+    for (var i = 0; i < groupedFeed.length; i++)
+      if (groupedFeed[i].key === k) return i
+    return -1
+  }
   function _anchorCursor() {
-    if (cur < rSize && rosterList[cur])
-      cursorName = rosterList[cur].rawName || rosterList[cur].name
+    if (cur < rSize) {
+      if (rosterList[cur]) cursorName = rosterList[cur].rawName || rosterList[cur].name
+    } else if (groupedFeed[cur - rSize]) {
+      cursorFeedKey = groupedFeed[cur - rSize].key
+    }
   }
   onRosterListChanged: {
     if (cur >= rSize) return          // cursor is in the feed; roster order can't affect it
     var want = _rosterIndexOf(cursorName)
     if (want >= 0) cur = want
     else { cur = Math.max(0, Math.min(cur, rSize - 1)); _anchorCursor() }
+  }
+  // Only while READING (free): following wants the newest row, and a session switch is
+  // seeking to the end — neither should be dragged back to a stale anchor.
+  onGroupedFeedChanged: {
+    if (cur < rSize || feedScroll.mode !== "free") return
+    var i = _feedIndexOf(cursorFeedKey)
+    if (i >= 0 && rSize + i !== cur) cur = rSize + i
   }
   property bool insert: false
   // Chat autoscroll is a state machine (FeedScroll.qml) and the ONLY thing that moves
@@ -647,7 +666,7 @@ Item {
     if (i >= 0 && i < rosterList.length)
       activeRaw = rosterList[i].rawName || rosterList[i].name
   }
-  // Per-group expand state, keyed by feed index (resets on transcript refresh).
+  // Per-group expand state, keyed by the row's stable identity (see groupedFeed.key).
   property var expandedGroups: ({})
   function toggleGroup(i) {
     var e = Object.assign({}, expandedGroups)
@@ -799,6 +818,21 @@ Item {
   }
 
   readonly property string scrollMode: feedScroll.mode
+  // The actual content under the cursor, so a test can verify WHICH row it is instead of
+  // trusting the anchor variable (which would only ever agree with itself).
+  function curRowText() {
+    var it = curItem()
+    if (!it) return ""
+    if (curSection() === "roster") return String(it.rawName || it.name || "")
+    if (view === "files") return String(it.path || "")
+    if (it.kind === "turn") {
+      var its = it.items || []
+      for (var i = its.length - 1; i >= 0; i--)
+        if (its[i].text) return String(its[i].text).slice(0, 48)
+      return "turn"
+    }
+    return String(it.text || "").slice(0, 48)
+  }
   // Nav driven from the IPC, for test/rail-nav.sh.
   function debugNav(k) {
     if (k === "j") moveDown()
@@ -893,15 +927,18 @@ Item {
   // Fold the flat feed into cards: each user message stands alone; an agent
   // message = its tool activity plus the prose that ends it → one card. A new
   // agent card opens after each prose block (and after every user message).
+  // Every row carries `key`, a stable identity from the message it came from. Row INDEX
+  // is not stable: the transcript is capped to the last 60 messages, so past that each
+  // new message slides the whole window and every index shifts by one.
   readonly property var groupedFeed: {
     var f = feed, out = [], cur = null
     for (var i = 0; i < f.length; i++) {
       var it = f[i]
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null }
-        out.push(it)
+        out.push({ kind: "user", text: it.text, mid: it.mid, key: it.mid || ("i" + i) })
       } else {
-        if (!cur) cur = { kind: "turn", items: [] }
+        if (!cur) cur = { kind: "turn", items: [], key: it.mid || ("i" + i) }
         cur.items.push(it)
         if (it.kind === "text") { out.push(cur); cur = null }  // prose ends the card
       }
@@ -1291,7 +1328,9 @@ Item {
               sourceComponent: activityRow
               property var items: turnDel.isUser ? [] : rail.turnActivityItems(turnDel.turn.items)
               property string summary: active ? rail.turnActivitySummary(turnDel.turn.items) : ""
-              property string ekey: "turn-" + turnDel.rowIndex
+              // Keyed on the row's stable identity, not its index: a group you expanded
+              // otherwise collapsed (and its neighbour opened) as the window slid.
+              property string ekey: "turn-" + (turnDel.turn.key || turnDel.rowIndex)
               // The turn that is CURRENTLY working expands by default, so you can watch
               // which tools it's reaching for; finished turns stay condensed to the
               // one-line summary. An explicit tap always wins over the default.
