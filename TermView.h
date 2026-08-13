@@ -36,6 +36,13 @@ public:
   ~TermView() override;
   void paint(QPainter *p) override;
 
+  // The real device pixel ratio, published so QML can snap this item's size to whole
+  // device pixels. QML's Screen.devicePixelRatio resolved to 1 here while the window was
+  // actually at 1.75, which silently defeated the snapping and left every frame
+  // resampling.
+  Q_PROPERTY(qreal dpr READ dpr NOTIFY dprChanged)
+  qreal dpr() const { return guiDpr_ > 0 ? guiDpr_ : 1.0; }
+
   // false when focus is in the rail → hide the terminal cursor.
   Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
   bool active() const { return active_.load(); }
@@ -43,8 +50,14 @@ public:
 
 signals:
   void activeChanged();
+  void dprChanged();
 
 protected:
+  // The GUI thread learns the ratio here. paint() runs on the RENDER thread, so a
+  // dprChanged() emitted from there cannot reliably re-evaluate the QML binding that
+  // snaps this item's size — the width silently stayed unsnapped while the height
+  // updated.
+  void itemChange(ItemChange change, const ItemChangeData &data) override;
   void keyPressEvent(QKeyEvent *e) override;
   void mousePressEvent(QMouseEvent *e) override;
   void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
@@ -119,5 +132,6 @@ private:
   QImage frame_;
   // worker-thread-local geometry (seeded in ctor, updated via resize_ commands)
   int wViewW_ = 0, wViewH_ = 0; qreal wDpr_ = 1.0;
-  qreal lastDpr_ = 0.0;   // GUI-thread: last ratio pushed to the worker (drift check)
+  qreal lastDpr_ = 0.0;   // render-thread: last ratio pushed to the worker (drift check)
+  qreal guiDpr_ = 0.0;    // GUI-thread copy, published to QML via the dpr property
 };

@@ -44,19 +44,6 @@ ShellRoot {
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
-      // Debug hooks for the transcript path: load a session's history, then count what
-      // the feed actually holds. Cheap, and the only way to prove an off-thread parse
-      // rendered rather than silently dropping.
-      function loadFeed(name: string): string {
-        if (!agentd || !name) return "no agentd"
-        agentd.select(name)
-        return "requested " + name
-      }
-      function feed(name: string): string {
-        if (!agentd || !name) return "no agentd"
-        var f = agentd.feedFor(name)
-        return name + ": " + f.length + " items"
-      }
       // Merged roster as "scope/name status" lines — proves which daemon owns what
       // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
       function sessions(): string {
@@ -69,6 +56,11 @@ ShellRoot {
       }
     }
 
+    // Mirrored off the terminal so its own width/height bindings never reference a
+    // property of the item they are sizing — that self-reference resolved late and left
+    // the width unsnapped while the height snapped correctly.
+    readonly property real termDpr: term.dpr > 0 ? term.dpr : 1
+
     AgentdState { id: agentd; scope: "lovable" }
 
     Rectangle {
@@ -80,8 +72,15 @@ ShellRoot {
 
         TermView {
           id: term
-          width: Math.round(parent.width * 0.6)
-          height: parent.height
+          // Device-pixel EXACT size. The offscreen frame is ceil(w*dpr) wide and the
+          // paint texture is too, so unless w*dpr is a whole number the painter's scale
+          // is ceil(w*dpr)/w rather than dpr and every blit resamples the frame by ~1+ε.
+          // With smoothing off that is nearest-neighbour, which is what made glyph stems
+          // uneven — some crisp, some smeared. Snapping the item removes the mismatch.
+          // term.dpr comes from the widget itself (window()->effectiveDevicePixelRatio()),
+          // because QML's Screen.devicePixelRatio reported 1 while the window ran at 1.75.
+          width: Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
+          height: Math.round(parent.height * win.termDpr) / win.termDpr
           // Focus is managed IMPERATIVELY (onPaneChanged + click). A `focus:`
           // binding here fights forceActiveFocus and leaves the terminal unable
           // to hold keyboard focus — same lesson the rail notes for itself.

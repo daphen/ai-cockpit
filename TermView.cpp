@@ -266,8 +266,27 @@ void TermView::applyThemeColors() {
 // that no font/metric tuning can recover. Pin the texture to device pixels instead.
 void TermView::syncTextureSize(qreal dpr) {
   if (dpr <= 0) dpr = 1.0;
-  const int tw = std::max(1, (int)std::ceil(width()  * dpr));
-  const int th = std::max(1, (int)std::ceil(height() * dpr));
+  // qRound, not ceil: with a device-pixel-snapped item these are exact, and rounding
+  // keeps the painter's scale equal to dpr instead of a hair above it. A warning fires
+  // if the item is ever unsnapped again, because the symptom (slightly soft, unevenly
+  // weighted glyphs) is easy to misread as a font problem.
+  const qreal wantW = width() * dpr, wantH = height() * dpr;
+  const bool exact = std::abs(wantW - std::round(wantW)) <= 0.01 &&
+                     std::abs(wantH - std::round(wantH)) <= 0.01;
+  // Only report a mismatch that SURVIVES: Qt hands out dpr 1, then 2, then the real
+  // ratio during startup, and the item re-snaps at each step. Warning on the way through
+  // told me the mapping was broken when the settled state was already exact.
+  if (!exact) {
+    QMetaObject::invokeMethod(this, [this] {
+      const qreal r = guiDpr_ > 0 ? guiDpr_ : 1.0;
+      const qreal w = width() * r, h = height() * r;
+      if (std::abs(w - std::round(w)) > 0.01 || std::abs(h - std::round(h)) > 0.01)
+        qWarning("TermView: settled size %gx%g at dpr %g is not device-pixel exact — "
+                 "frames resample, glyph stems will look uneven", width(), height(), r);
+    }, Qt::QueuedConnection);
+  }
+  const int tw = std::max(1, (int)std::round(wantW));
+  const int th = std::max(1, (int)std::round(wantH));
   if (textureSize() != QSize(tw, th)) setTextureSize(QSize(tw, th));
 }
 
@@ -595,6 +614,15 @@ void TermView::paint(QPainter *outP) {
   // stretched into the item and the text looked blotchy/pixelated rather than merely
   // soft. Re-check the live ratio here and hand the worker a fresh one when it drifts.
   const qreal liveDpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  // Publish the ratio to the GUI thread. itemChange() fires before the window is mapped,
+  // where effectiveDevicePixelRatio() still reads 1, and screenChanged never fires when
+  // the window opens on its final screen — so paint() is the only place that reliably
+  // knows. Queued, because this runs on the render thread.
+  if (liveDpr > 0 && std::abs(liveDpr - guiDpr_) > 0.001) {
+    QMetaObject::invokeMethod(this, [this, liveDpr] {
+      if (std::abs(liveDpr - guiDpr_) > 0.001) { guiDpr_ = liveDpr; emit dprChanged(); }
+    }, Qt::QueuedConnection);
+  }
   if (liveDpr > 0 && std::abs(liveDpr - lastDpr_) > 0.01) {
     lastDpr_ = liveDpr;
     syncTextureSize(liveDpr);
@@ -616,8 +644,8 @@ QImage TermView::renderFrame() {
   // density with an identity transform), which paint() then blits 1:1.
   const qreal ratio = wDpr_ > 0 ? wDpr_ : 1.0;
   const int vw = std::max(1, wViewW_), vh = std::max(1, wViewH_);
-  QImage img(QSize(std::max(1, (int)std::ceil(vw * ratio)),
-                   std::max(1, (int)std::ceil(vh * ratio))),
+  QImage img(QSize(std::max(1, (int)std::round(vw * ratio)),
+                   std::max(1, (int)std::round(vh * ratio))),
              QImage::Format_RGB32);   // OPAQUE: alpha blending softens glyph edges
   img.setDevicePixelRatio(ratio);
   img.fill(toQ(defBg_));   // the bg is repainted below; this seeds an opaque surface
@@ -903,6 +931,21 @@ QImage TermView::renderFrame() {
 
   localPainter.end();
   return img;
+}
+
+void TermView::itemChange(ItemChange change, const ItemChangeData &data) {
+  QQuickPaintedItem::itemChange(change, data);
+  if (change != ItemSceneChange || !data.window) return;
+  auto publish = [this] {
+    if (!window()) return;
+    const qreal r = window()->effectiveDevicePixelRatio();
+    if (r > 0 && std::abs(r - guiDpr_) > 0.001) { guiDpr_ = r; emit dprChanged(); }
+  };
+  publish();
+  // Follow the window across monitors: a different screen means a different ratio, and
+  // the size has to re-snap for the mapping to stay 1:1.
+  connect(data.window, &QQuickWindow::screenChanged, this, publish);
+  connect(data.window, &QWindow::screenChanged, this, publish);
 }
 
 void TermView::keyPressEvent(QKeyEvent *e) {
