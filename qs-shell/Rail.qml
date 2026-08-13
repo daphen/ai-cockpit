@@ -484,6 +484,14 @@ Item {
     return agentd.askFor(selectedRaw)
   }
   function answerAsk(payload) { if (agentd && pendingAsk) agentd.answerAsk(selectedRaw, payload) }
+  // The whole point of an ask is that it blocks: pull focus to the rail the moment
+  // one lands, and for a free-text answer enter insert so the input is already yours.
+  onPendingAskChanged: {
+    if (!pendingAsk) return
+    rail.requestFocus()
+    var m = pendingAsk.method
+    if (m === "input" || m === "editor") Qt.callLater(rail.enterInsert)
+  }
 
   readonly property var featured: {
     if (!live) return mockFeatured
@@ -1179,91 +1187,6 @@ Item {
 
   }
 
-  // ask_user card — mirrors the nvim rail's "needs your input" approval: a
-  // bordered card pinned above the composer. confirm → y/n; select → 1–9;
-  // input/editor → i to type. Answered via the rail's Keys / the composer.
-  Rectangle {
-    id: askCard
-    readonly property var ask: rail.pendingAsk
-    visible: ask !== null && rail.view === "chat"
-    anchors { left: parent.left; right: parent.right; bottom: chin.top
-              leftMargin: 20; rightMargin: 20; bottomMargin: 8 }
-    implicitHeight: askCol.implicitHeight + 28
-    height: implicitHeight
-    radius: 14
-    color: Theme.surface
-    border.width: 1
-    border.color: Theme.orange
-    z: 12
-
-    Rectangle {   // left attention accent
-      anchors { left: parent.left; top: parent.top; bottom: parent.bottom; topMargin: 12; bottomMargin: 12 }
-      width: 2; radius: 1; color: Theme.orange
-    }
-
-    Column {
-      id: askCol
-      anchors { left: parent.left; right: parent.right; top: parent.top
-                leftMargin: 18; rightMargin: 16; topMargin: 14 }
-      spacing: 9
-
-      Text {
-        text: "needs your input"
-        color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
-      }
-      Text {
-        visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
-        text: askCard.ask ? (askCard.ask.title || "") : ""
-        color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-      }
-      Text {
-        visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
-        text: askCard.ask ? (askCard.ask.message || "") : ""
-        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-      }
-
-      // select → one keycap-numbered row per option
-      Column {
-        spacing: 6
-        visible: askCard.ask && askCard.ask.method === "select"
-        Repeater {
-          model: (askCard.ask && askCard.ask.method === "select") ? askCard.ask.options : []
-          Row {
-            spacing: 9
-            KeyCap { text: String(index + 1); anchors.verticalCenter: parent.verticalCenter }
-            Text {
-              text: modelData; color: Theme.fg; width: askCol.width - 40; wrapMode: Text.Wrap
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-              anchors.verticalCenter: parent.verticalCenter
-            }
-          }
-        }
-      }
-
-      // confirm → y / n
-      Row {
-        spacing: 20
-        visible: askCard.ask && askCard.ask.method === "confirm"
-        Row { spacing: 8; KeyCap { text: "y"; anchors.verticalCenter: parent.verticalCenter }
-          Text { text: "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
-        Row { spacing: 8; KeyCap { text: "n"; anchors.verticalCenter: parent.verticalCenter }
-          Text { text: "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
-      }
-
-      // input/editor → i to type
-      Row {
-        spacing: 8
-        visible: askCard.ask && (askCard.ask.method === "input" || askCard.ask.method === "editor")
-        KeyCap { text: "i"; anchors.verticalCenter: parent.verticalCenter }
-        Text { text: "type a reply"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
-      }
-
-      Text {
-        text: (askCard.ask && askCard.ask.method === "select") ? "press a number · esc cancels" : "esc cancels"
-        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-      }
-    }
-  }
 
   // Chin: an opaque bottom bar (composer + hints) anchored to the rail bottom,
   // like the sibling apps' statusbar. The feed is bounded to chin.top, so chat
@@ -1271,13 +1194,101 @@ Item {
   Rectangle {
     id: chin
     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-    height: 108   // fixed: composer + hints + padding, stable across the insert toggle
+    // 108 = composer + hints + padding, stable across the insert toggle. A pending
+    // ask_user expands the chin to hold it, so the question takes over the input
+    // instead of floating over the feed — animated so the jump is legible.
+    height: 108 + (askCard.visible ? askCard.implicitHeight + chinCol.spacing : 0)
+    Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
     color: Theme.bg
 
     ColumnLayout {
       id: chinCol
       anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 14 }
       spacing: 10
+
+    // ask_user card — mirrors the nvim rail's "needs your input" approval: a
+    // bordered card that TAKES OVER the chin above the input. confirm → y/n; select → 1–9;
+    // input/editor → i to type. Answered via the rail's Keys / the composer.
+    Rectangle {
+      id: askCard
+      readonly property var ask: rail.pendingAsk
+      visible: ask !== null && rail.view === "chat"
+      Layout.fillWidth: true
+      implicitHeight: askCol.implicitHeight + 28
+      radius: 14
+      color: Theme.surface
+      border.width: 1
+      border.color: Theme.orange
+      z: 12
+
+      Rectangle {   // left attention accent
+        anchors { left: parent.left; top: parent.top; bottom: parent.bottom; topMargin: 12; bottomMargin: 12 }
+        width: 2; radius: 1; color: Theme.orange
+      }
+
+      Column {
+        id: askCol
+        anchors { left: parent.left; right: parent.right; top: parent.top
+                  leftMargin: 18; rightMargin: 16; topMargin: 14 }
+        spacing: 9
+
+        Text {
+          text: "needs your input"
+          color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+        }
+        Text {
+          visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
+          text: askCard.ask ? (askCard.ask.title || "") : ""
+          color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        }
+        Text {
+          visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
+          text: askCard.ask ? (askCard.ask.message || "") : ""
+          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+        }
+
+        // select → one keycap-numbered row per option
+        Column {
+          spacing: 6
+          visible: askCard.ask && askCard.ask.method === "select"
+          Repeater {
+            model: (askCard.ask && askCard.ask.method === "select") ? askCard.ask.options : []
+            Row {
+              spacing: 9
+              KeyCap { text: String(index + 1); anchors.verticalCenter: parent.verticalCenter }
+              Text {
+                text: modelData; color: Theme.fg; width: askCol.width - 40; wrapMode: Text.Wrap
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+          }
+        }
+
+        // confirm → y / n
+        Row {
+          spacing: 20
+          visible: askCard.ask && askCard.ask.method === "confirm"
+          Row { spacing: 8; KeyCap { text: "y"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+          Row { spacing: 8; KeyCap { text: "n"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+        }
+
+        // input/editor → i to type
+        Row {
+          spacing: 8
+          visible: askCard.ask && (askCard.ask.method === "input" || askCard.ask.method === "editor")
+          KeyCap { text: "i"; anchors.verticalCenter: parent.verticalCenter }
+          Text { text: "type a reply"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+        }
+
+        Text {
+          text: (askCard.ask && askCard.ask.method === "select") ? "press a number · esc cancels" : "esc cancels"
+          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+        }
+      }
+    }
 
       // Attachment chips — same shape as dsqrd/slqs/mlqs (paperclip + name + ✕), so
       // the family looks consistent. The name matches the inline reference exactly
