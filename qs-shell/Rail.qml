@@ -180,6 +180,13 @@ Item {
     if (s.indexOf(boxHome + "/") === 0) return mount + s.substring(boxHome.length)
     return s
   }
+  // A session runs in the lovbox iff its cwd is a BOX path — the daemon reports the
+  // cwd as the machine running pi sees it, so this holds regardless of which agentd
+  // socket surfaced the session.
+  function _isRemote(cwd) {
+    var s = String(cwd || "")
+    return s === "/home/lovable" || s.indexOf("/home/lovable/") === 0
+  }
   // Inverse of _localPath: a path under the local mirror → the path the BOX sees.
   // Needed because pi runs IN the box, so an @attachment must be a box path.
   function _remotePath(p) {
@@ -462,6 +469,7 @@ Item {
       out.push({ name: shortName(s.name), rawName: s.name, idle: stateLabel(s.status),
                  status: s.status, linked: !!s.parent, cwd: s.cwd || "",
                  hasWorktree: /\.daphen-|\/work\//.test(s.cwd || ""),
+                 remote: rail._isRemote(s.cwd), scope: s.scope || "",
                  depth: Math.min(depth, 1) })  // one level deep only
       var kids = children[s.name] || []
       for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1)
@@ -834,6 +842,18 @@ Item {
                 Layout.preferredWidth: 14; Layout.preferredHeight: 14
                 Layout.alignment: Qt.AlignVCenter
                 color: sessRow.cursor ? Theme.bg : rail.dotColor(modelData.status)
+              }
+              // Where the agent actually runs: cloud = a lovbox worktree, laptop =
+              // this machine. Muted on purpose — it's provenance, not status.
+              Icon {
+                // Filled 12px cuts, not the default outlines: at 13px the outline
+                // laptop is indistinguishable from a plain rectangle — a house reads instantly.
+                name: modelData.remote ? "cloud--glyph--12" : "house-2--glyph--12"
+                width: 13; height: 13
+                Layout.preferredWidth: 13; Layout.preferredHeight: 13
+                Layout.alignment: Qt.AlignVCenter
+                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                opacity: sessRow.cursor ? 0.8 : 0.65
               }
               Text {
                 text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight
