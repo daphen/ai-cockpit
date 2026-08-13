@@ -71,12 +71,32 @@ Item {
   property var commands: []
   readonly property string composerText: composerInput.text
   readonly property bool slashOpen: rail.insert && composerText.charAt(0) === "/" && commandMatches.length > 0
+  // Fuzzy subsequence match, ranked: exact prefix first, then earliest-and-tightest
+  // run of matched letters. Prefix-only matching meant `/plan` never found
+  // `skill:plan-ticket`, and the skills are the long names you least want to type.
+  function _fuzzyScore(cand, q) {
+    if (!q.length) return 0
+    var c = cand.toLowerCase(), i = 0, first = -1, last = -1
+    for (var k = 0; k < c.length && i < q.length; k++) {
+      if (c[k] === q[i]) { if (first < 0) first = k; last = k; i++ }
+    }
+    if (i < q.length) return -1                       // not a subsequence
+    if (c.indexOf(q) === 0) return 1000               // exact prefix wins outright
+    var spread = last - first + 1
+    return 500 - first * 4 - (spread - q.length) * 2  // early + tight scores higher
+  }
   readonly property var commandMatches: {
     var t = String(composerText || "")
     if (t.charAt(0) !== "/") return []
-    var q = t.slice(1).split(/\s/)[0].toLowerCase()
     if (t.indexOf(" ") >= 0) return []            // already past the command word
-    return commands.filter(c => c.toLowerCase().indexOf(q) === 0)
+    var q = t.slice(1).toLowerCase()
+    var scored = []
+    for (var i = 0; i < commands.length; i++) {
+      var sc = _fuzzyScore(commands[i], q)
+      if (sc >= 0) scored.push({ c: commands[i], s: sc, i: i })
+    }
+    scored.sort((a, b) => b.s - a.s || (a.c.length - b.c.length) || (a.i - b.i))
+    return scored.map(x => x.c)
   }
   property int slashCur: 0
   onCommandMatchesChanged: slashCur = 0
@@ -87,7 +107,13 @@ Item {
   Process {
     id: cmdList
     running: true
-    command: ["sh", "-c", "ls ~/.pi/agent/prompts 2>/dev/null | sed 's/\\.md$//' | sort"]
+    // Both of pi's command surfaces. The prompts dir mostly HOLDS the `/skill:<name>`
+    // wrappers, so a bare `skill:` entry is only listed for skills that lack one —
+    // otherwise every skill showed up twice under two spellings.
+    command: ["sh", "-c",
+      "p=~/.pi/agent/prompts; ls $p 2>/dev/null | sed 's/\\.md$//'; " +
+      "for d in ~/.pi/agent/skills/*/; do n=$(basename \"$d\"); " +
+      "  [ -e \"$p/$n.md\" ] || echo \"skill:$n\"; done"]
     stdout: StdioCollector {
       onStreamFinished: rail.commands = String(this.text || "").split("\n").filter(s => s.length > 0)
     }
@@ -372,12 +398,14 @@ Item {
     if (st === "streaming") return "working"
     if (st === "asleep")    return "asleep"
     if (st === "error")     return "error"
+    if (st === "offline")   return "offline"   // its daemon/tunnel is gone
     return "idle"
   }
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
     if (st === "asleep")    return Theme.fg_muted
+    if (st === "offline")   return Theme.fg_muted
     return Theme.electric
   }
   function toolIcon(tool) {
@@ -900,21 +928,9 @@ Item {
       }
     }
 
-    // View header: which main area is showing (Tab toggles chat ↔ files).
-    RowLayout {
-      Layout.fillWidth: true
-      spacing: 6
-      Icon { name: rail.view === "files" ? "nodes" : "msgs"; width: rail.fsMeta; height: rail.fsMeta; color: Theme.fg_muted }
-      Text {
-        text: rail.view === "files" ? ("FILES · " + rail.cSize) : "CHAT"
-        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
-      }
-      Item { Layout.fillWidth: true }
-      Text {
-        text: "⇥ " + (rail.view === "files" ? "chat" : "files")
-        color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-      }
-    }
+    // No view-header row: the label + ⇥ hint duplicated the footer chips, and the
+    // chat wants that height. Just the breathing room below the roster.
+    Item { Layout.fillWidth: true; Layout.preferredHeight: 2 }
 
     // Files view — full changed-files list for the selected session.
     ListView {
@@ -1304,45 +1320,6 @@ Item {
         }
       }
 
-      // Slash-command palette — sits above the composer while the text starts
-      // with "/". Tab/Enter completes the highlighted one, Ctrl+n/p or ↑/↓ move.
-      Rectangle {
-        Layout.fillWidth: true
-        visible: rail.slashOpen
-        implicitHeight: cmdCol.implicitHeight + 12
-        radius: Theme.radiusCard !== undefined ? Theme.radiusCard : 10
-        color: Theme.surface0
-        border.color: Theme.hairline
-        border.width: 1
-        Column {
-          id: cmdCol
-          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 6 }
-          Repeater {
-            model: rail.commandMatches.slice(0, 8)
-            Rectangle {
-              width: cmdCol.width
-              height: 26
-              radius: 6
-              readonly property bool sel: index === Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
-              color: sel ? Theme.surface2 : "transparent"
-              Row {
-                anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
-                spacing: 8
-                Text {
-                  text: "/" + modelData
-                  color: parent.parent.sel ? Theme.fg : Theme.fg_muted
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                  font.weight: parent.parent.sel ? 500 : 400
-                }
-              }
-              MouseArea {
-                anchors.fill: parent
-                onClicked: { rail.slashCur = index; rail.acceptSlash() }
-              }
-            }
-          }
-        }
-      }
 
       // Composer — real text input (i to enter, Esc/Ctrl+h to leave)
       Rectangle {
@@ -1446,6 +1423,50 @@ Item {
             KeyCap { small: true; text: modelData.k }
             CapLabel { text: modelData.l }
             Item { width: 4 }
+          }
+        }
+      }
+    }
+  }
+
+  // Slash-command palette — floats above the chin while the text starts
+  // with "/". Tab/Enter completes the highlighted one, Ctrl+n/p or ↑/↓ move.
+  Rectangle {
+    id: slashPalette
+    anchors { left: parent.left; right: parent.right; bottom: chin.top
+              leftMargin: 20; rightMargin: 20; bottomMargin: 8 }
+    height: implicitHeight
+    z: 12   // over the feed, like the ask card
+    visible: rail.slashOpen
+    implicitHeight: cmdCol.implicitHeight + 12
+    radius: Theme.radiusCard !== undefined ? Theme.radiusCard : 10
+    color: Theme.surface0
+    border.color: Theme.hairline
+    border.width: 1
+    Column {
+      id: cmdCol
+      anchors { left: parent.left; right: parent.right; top: parent.top; margins: 6 }
+      Repeater {
+        model: rail.commandMatches.slice(0, 8)
+        Rectangle {
+          width: cmdCol.width
+          height: 26
+          radius: 6
+          readonly property bool sel: index === Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
+          color: sel ? Theme.surface2 : "transparent"
+          Row {
+            anchors { left: parent.left; leftMargin: 8; verticalCenter: parent.verticalCenter }
+            spacing: 8
+            Text {
+              text: "/" + modelData
+              color: parent.parent.sel ? Theme.fg : Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              font.weight: parent.parent.sel ? 500 : 400
+            }
+          }
+          MouseArea {
+            anchors.fill: parent
+            onClicked: { rail.slashCur = index; rail.acceptSlash() }
           }
         }
       }

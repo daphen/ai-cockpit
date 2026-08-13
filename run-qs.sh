@@ -9,7 +9,19 @@ cd "$(dirname "$0")"
 
 # Clear any stale cockpit instance for this exact config path (config-scoped,
 # won't touch the bar) so a relaunch always shows the current QML.
+# `qs kill -p` does not always take (and a survivor leaves a second window plus an
+# ambiguous ipc registry entry, which silently breaks Ctrl+l / Super+T). Verify.
 qs kill -p "$PWD/qs-shell" >/dev/null 2>&1 || true
+for _ in 1 2 3 4 5 6; do
+  survivors=$(ps -eo pid=,args= | awk -v p="$PWD/qs-shell" '$0 ~ ("-p " p) && $0 !~ /awk/ {print $1}')
+  [ -z "$survivors" ] && break
+  sleep 0.5
+done
+for pid in ${survivors:-}; do
+  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = "qs" ] ||
+  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = ".quickshell-wra" ] || continue
+  kill "$pid" 2>/dev/null || true
+done
 
 # Default the rail to every agentd we can see: the local `lovable` scope (the
 # orchestrator + PR reviewers) first, then the tunneled lovbox if its socket is

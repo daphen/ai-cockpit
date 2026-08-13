@@ -36,6 +36,7 @@ Item {
     var out = [], owner = {}
     for (var i = 0; i < sockPaths.length; i++) {
       var arr = _rosters[i] || [], sc = _scopeOf(sockPaths[i])
+      var up = !!(_socks[i] && _socks[i].connected)
       for (var j = 0; j < arr.length; j++) {
         var s = arr[j]
         if (owner[s.name] !== undefined) continue   // earlier socket owns the name
@@ -43,6 +44,9 @@ Item {
         var tagged = {}
         for (var k in s) tagged[k] = s[k]
         tagged.scope = sc
+        tagged.offline = !up
+        if (!up) tagged.status = "offline"   // its daemon is gone; whatever it was
+                                             // doing, we can no longer see or reach it
         out.push(tagged)
       }
     }
@@ -112,7 +116,11 @@ Item {
     var idx = (obj && obj.session !== undefined && _sockOf[obj.session] !== undefined)
               ? _sockOf[obj.session] : 0
     var s = _socks[idx]
-    if (s && s.connected) s.write(JSON.stringify(obj) + "\n")
+    if (!s || !s.connected) return false   // caller MUST surface this; a dropped
+                                           // prompt that still echoed in the feed
+                                           // looked exactly like a sent one.
+    s.write(JSON.stringify(obj) + "\n")
+    return true
   }
   // Sessions we've prompted but haven't heard back from yet. agentd only pushes a
   // roster when IT sees a state change, and over the tunnel the first event can be
@@ -133,7 +141,7 @@ Item {
   }
   function sendPrompt(sid, text) {
     // agentd/pi expect `message`, not `text`.
-    send({ type: "prompt", session: sid, message: text })
+    if (!send({ type: "prompt", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text })   // optimistic echo; get_entries refreshes it
     var p = Object.assign({}, pendingSends); p[sid] = true; pendingSends = p; pendingGen++
   }
@@ -144,7 +152,7 @@ Item {
   readonly property int steerGraceMs: 4000
   property var _steerPending: ({})
   function steer(sid, text) {
-    send({ type: "steer", session: sid, message: text })
+    if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text })
     _steerPending[sid] = { text: text, at: Date.now() }
   }
@@ -152,6 +160,14 @@ Item {
   function submit(sid, text) {
     if (isBusy(sid)) steer(sid, text)
     else sendPrompt(sid, text)
+  }
+  function _undelivered(sid, text) {
+    _push(sid, { kind: "cmd", tool: "error",
+                 text: "not delivered — the " + _scopeOfSid(sid) + " daemon is disconnected" })
+  }
+  function _scopeOfSid(sid) {
+    var i = _sockOf[sid]
+    return (i === undefined) ? "agentd" : _scopeOf(sockPaths[i])
   }
   function stop(sid) {
     send({ type: "stop", session: sid })
@@ -456,7 +472,13 @@ Item {
           path: sockPath
           connected: true
           parser: SplitParser { onRead: data => root.onLine(data, idx) }
-          onConnectionStateChanged: root._registerSock(idx, ld.item)
+          // A dead socket's last roster must not keep claiming "working", but dropping
+          // it loses the session AND its cached transcript. Keep the rows, mark them
+          // offline (see _rebuildSessions) — context stays, the lie goes.
+          onConnectionStateChanged: {
+            root._registerSock(idx, ld.item)
+            root._rebuildSessions()
+          }
         }
         onLoaded: root._registerSock(idx, item)
       }
