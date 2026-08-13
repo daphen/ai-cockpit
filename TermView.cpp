@@ -106,6 +106,13 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     const int px = qgetenv("HEIDR_FONT_PX").toInt(&ok);
     font_.setPixelSize(ok && px >= 8 && px <= 48 ? px : 17);
   }
+  // kitty's `symbol_map U+E000-U+E4FF QsIcons` has no Qt equivalent, and the range
+  // collides with the Nerd Font's Seti block — so without an explicit per-codepoint
+  // font the rail's Nucleo icons silently render as the WRONG glyph.
+  iconFont_ = QFont("QsIcons");
+  iconFont_.setHintingPreference(font_.hintingPreference());
+  iconFont_.setPixelSize(font_.pixelSize());
+
   QFontMetricsF fm(font_);
   const double natural = fm.height();
   baseCellW_ = fm.horizontalAdvance(QChar('M'));
@@ -664,8 +671,11 @@ QImage TermView::renderFrame() {
       continue;  // procedural block elements fill the cell; skip the glyph
     if (g.cp >= 0xE0B0 && g.cp <= 0xE0B7 && drawPowerline(p, g.x, g.y, g.cp, g.fg))
       continue;  // procedural powerline separators (smooth, seamless)
-    QFont f = font_;
-    f.setBold(g.bold);
+    // U+E000-U+E4FF = the QsIcons range (see the ctor); everything else uses the
+    // text face. Mirrors kitty's symbol_map so the rail's icons match the editor's.
+    const bool isIcon = g.cp >= 0xE000 && g.cp <= 0xE4FF;
+    QFont f = isIcon ? iconFont_ : font_;
+    if (!isIcon) f.setBold(g.bold);
     // Italics off entirely: the GeistMono italic face slants past the cell's
     // right edge and gets clipped, so render italic-attributed cells upright.
     p->setFont(f);

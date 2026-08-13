@@ -616,6 +616,10 @@ Item {
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
+    else if (e.key === Qt.Key_X)  {                                          // stop the current turn
+      if (rail.agentd && rail.selectedRaw) rail.agentd.stop(rail.selectedRaw)
+      e.accepted = true
+    }
     else if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { activateCur(); e.accepted = true }
   }
   // A feed refresh (stream update / reload) can shrink navTotal below cur, so
@@ -1366,7 +1370,7 @@ Item {
               if (pa && (pa.method === "input" || pa.method === "editor")) {
                 if (text.trim().length) rail.answerAsk({ value: text })
               } else if (text.trim().length && rail.agentd) {
-                rail.agentd.sendPrompt(rail.selectedRaw, text)
+                rail.agentd.submit(rail.selectedRaw, text)
               }
               rail.pastedImages = []      // attachments belong to the message just sent
               rail.pinBottom = true
@@ -1436,7 +1440,7 @@ Item {
             { k: "f",   l: rail.hinting ? "pick" : "links" },
             { k: "i",   l: "type" },
             { k: "h",   l: "nvim" }
-          ]
+          ].concat(rail.featuredStreaming ? [{ k: "x", l: "stop" }] : [])
           RowLayout {
             spacing: 4
             KeyCap { small: true; text: modelData.k }

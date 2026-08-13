@@ -137,7 +137,27 @@ Item {
     _push(sid, { kind: "user", text: text })   // optimistic echo; get_entries refreshes it
     var p = Object.assign({}, pendingSends); p[sid] = true; pendingSends = p; pendingGen++
   }
-  function stop(sid)             { send({ type: "stop", session: sid }) }
+  // Mid-turn redirect. pi's steer is BEST-EFFORT: if the turn ends within a moment of
+  // the steer it was too short to have consumed the message, and pi strands it unread.
+  // Record when we steered so the turn_end handler can re-send it as a normal prompt —
+  // the same strand-fallback the nvim rail runs.
+  readonly property int steerGraceMs: 4000
+  property var _steerPending: ({})
+  function steer(sid, text) {
+    send({ type: "steer", session: sid, message: text })
+    _push(sid, { kind: "user", text: text })
+    _steerPending[sid] = { text: text, at: Date.now() }
+  }
+  // A send while the agent is working should redirect it, not queue behind the turn.
+  function submit(sid, text) {
+    if (isBusy(sid)) steer(sid, text)
+    else sendPrompt(sid, text)
+  }
+  function stop(sid) {
+    send({ type: "stop", session: sid })
+    delete _steerPending[sid]      // an aborted turn must not resurrect the steer
+    _clearPending(sid)
+  }
   function feedFor(sid)          { return (feeds[sid] || []).slice() }
 
   function _base(p)  { var s = String(p); var i = s.lastIndexOf("/"); return i >= 0 ? s.slice(i + 1) : s }
@@ -354,6 +374,14 @@ Item {
     if (!sid) return
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
+    // Strand fallback: the turn ended too soon after a steer to have consumed it, so
+    // pi dropped the message. Re-send it as a fresh prompt (already echoed in the feed).
+    if (t === "turn_end" || t === "agent_end") {
+      var sp = _steerPending[sid]
+      delete _steerPending[sid]
+      if (sp && (Date.now() - sp.at) < steerGraceMs)
+        send({ type: "prompt", session: sid, message: sp.text })
+    }
 
     if (t === "extension_ui_request") {
       var mm = m.method

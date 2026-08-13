@@ -84,6 +84,8 @@ private:
   int master_ = -1;              // PTY master fd (worker-thread owner)
   QFileSystemWatcher *themeWatcher_ = nullptr;  // ~/.config/theme_mode → live light/dark flip
   QFont font_;
+  QFont iconFont_;   // QsIcons, for the U+E000-U+E4FF icon range
+
   // Metrics are qreal and SNAPPED to whole device pixels (see applyMetrics): with
   // integer logical metrics, col*cellW*dpr lands on a half pixel at 1.75x, so
   // identical glyphs rasterized at different subpixel offsets — some stems crisp,
