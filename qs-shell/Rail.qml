@@ -293,7 +293,14 @@ Item {
     // the session dashboard — filereadable() runs inside nvim, which is the only
     // side that can actually test the paths.
     var m = String(sid).match(/every-(\d+)/i)
-    var dash = 'execute(\'lua require("heidr").dashboard("' + cwd + '")\')'
+    // The dashboard needs a git worktree. A remote session's mirror deliberately has no
+    // .git (a worktree's .git is a FILE holding a VM-absolute gitdir), so pointing the
+    // dashboard at the mirror renders an almost-empty buffer — the "giant whitespace".
+    // Fall back to the local checkout for the dashboard while still cd'ing to the mirror.
+    var repo = Quickshell.env("HOME") + "/work/lovable"
+    var dashAt = function (d) { return 'execute(\'lua require("heidr").dashboard("' + d + '")\')' }
+    var dash = '((isdirectory("' + cwd + '/.git") || filereadable("' + cwd + '/.git")) ? '
+             + dashAt(cwd) + ' : ' + dashAt(repo) + ')'
     var open = dash
     if (m) {
       var key = "EVERY-" + m[1]

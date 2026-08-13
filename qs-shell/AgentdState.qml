@@ -478,12 +478,15 @@ Item {
   // session sits blocked while the UI shows nothing but "thinking". Rebuild it from the
   // transcript: an ask_user call with no matching result is still waiting on you.
   function _recoverAsk(sid, entries) {
-    var calls = [], answered = {}
+    var calls = [], answered = {}, lastCallId = ""
     function walk(o) {
       if (!o || typeof o !== "object") return
-      if (o.type === "toolCall" && o.name === "ask_user") {
-        calls.push(o)
-        if (o.result !== undefined) answered[o.id] = true
+      if (o.type === "toolCall") {
+        lastCallId = o.id || lastCallId          // track the most recent call of ANY kind
+        if (o.name === "ask_user") {
+          calls.push(o)
+          if (o.result !== undefined) answered[o.id] = true
+        }
       }
       var rid = o.toolCallId
       if (rid && (o.type === "toolResult" || o.result !== undefined || o.output !== undefined))
@@ -495,6 +498,19 @@ Item {
     for (var j = calls.length - 1; j >= 0; j--)
       if (!answered[calls[j].id]) { open = calls[j]; break }
     if (!open) return
+    // It must be the LAST tool call in the transcript. Work that happened after an
+    // unanswered ask means the agent moved on — or, as with a session respawned under
+    // the same name, that the question belongs to a previous pi process entirely. Either
+    // way nobody is waiting on it, and showing it invites an answer that goes nowhere.
+    if (open.id !== lastCallId) {
+      // Also drop a previously-recovered one: a session respawned under the same name
+      // keeps the old transcript, so a question from the dead pi process would otherwise
+      // sit there forever inviting an answer nobody reads.
+      if (asks[sid] && asks[sid].id === open.id) {
+        var da = asks; delete da[sid]; asks = da; askGen++
+      }
+      return
+    }
     // Only surface it if the session is actually BLOCKED on it. An unanswered call in
     // the transcript of an idle session is a dead question from a finished turn —
     // presenting that as live invites you to answer something nobody is listening to.
