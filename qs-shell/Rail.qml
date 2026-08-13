@@ -18,7 +18,16 @@ Item {
   // Click a row: focus the rail, move the cursor there, and act on it.
   function clickAt(idx) { requestFocus(); cur = idx; activateCur() }
   // Pull focus to the rail and land on the roster (Super+T from the desktop).
-  function focusRoster() { if (rosterOverride === false) rosterOverride = true; cur = 0; requestFocus() }
+  // Super+T must work from ANYWHERE, including while typing: the composer holds the
+  // keyboard in insert mode, so moving `cur` alone did nothing visible. Leave insert
+  // and clear the restore flag, or the next focus change would drop you back into it.
+  function focusRoster() {
+    if (rosterOverride === false) rosterOverride = true
+    exitInsert()
+    _wasInsert = false
+    cur = 0
+    requestFocus()
+  }
 
   // Cursor flows: roster (always) → the main area, whose view Tab toggles.
   property int cur: 0
@@ -171,6 +180,55 @@ Item {
     if (s.indexOf(boxHome + "/") === 0) return mount + s.substring(boxHome.length)
     return s
   }
+  // Inverse of _localPath: a path under the local mirror → the path the BOX sees.
+  // Needed because pi runs IN the box, so an @attachment must be a box path.
+  function _remotePath(p) {
+    var s = String(p || "")
+    var mount = Quickshell.env("HOME") + "/lovbox/heidr"
+    if (s.indexOf(mount + "/") === 0) return "/home/lovable" + s.substring(mount.length)
+    return s
+  }
+  // ── image paste ─────────────────────────────────────────────────────────────
+  // pi takes images as `@path` references in the prompt, so a pasted image becomes
+  // a file plus an @mention. The file is written into the SELECTED SESSION's cwd
+  // (via the mirror for remote work) so mutagen carries it to the box and pi can
+  // actually open it — a local /tmp path would not exist over there.
+  property var pastedImages: []   // filenames pasted this session, for the strip below
+  property string pasteDirFor: {
+    var cwd = ""
+    if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
+      if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
+    return (cwd ? rail._localPath(cwd) : Quickshell.env("HOME")) + "/.heidr-pastes"
+  }
+  Process {
+    id: pasteProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var out = String(this.text || "").trim()
+        if (!out || out === "NOIMAGE") { composerInput.paste(); return }   // no image → normal text paste
+        var ref = "@.heidr-pastes/" + out + " "
+        composerInput.insert(composerInput.cursorPosition, ref)
+        rail.pastedImages = rail.pastedImages.concat([out])   // for the thumbnail strip
+      }
+    }
+  }
+  function pasteImage() {
+    // One shell pass: detect an image flavour, write it, print the path (or NOIMAGE).
+    pasteProc.running = false
+    pasteProc.command = ["sh", "-c",
+      'd=' + JSON.stringify(rail.pasteDirFor) + '; mkdir -p "$d" || exit 0; ' +
+      't=$(wl-paste --list-types 2>/dev/null | grep -m1 "^image/"); ' +
+      '[ -n "$t" ] || { echo NOIMAGE; exit 0; }; ' +
+      'e=${t#image/}; [ "$e" = jpeg ] && e=jpg; [ "$e" = svg+xml ] && e=svg; ' +
+      // Sequential img1/img2/… per session: the reference has to be readable in the
+      // sentence ("before: @img1.png, after: @img2.png"), and a timestamped name made
+      // two pastes indistinguishable at a glance.
+      'n=$(ls "$d" 2>/dev/null | grep -c "^img[0-9]"); n=$((n+1)); ' +
+      'f="$d/img$n.$e"; ' +
+      'wl-paste --type "$t" > "$f" 2>/dev/null && echo "img$n.$e" || echo NOIMAGE']
+    pasteProc.running = true
+  }
+
   function landNvim(sid) {
     if (!sid || !agentd) return
     var cwd = ""
@@ -289,7 +347,14 @@ Item {
   // --- Roster: real agentd sessions when available, else mock ---
   readonly property var liveSessions:
     (agentd && agentd.sessions && agentd.sessions.length) ? agentd.sessions : []
-  readonly property bool live: !demo && liveSessions.length > 0
+  // Liveness is about having a DAEMON, not about having sessions. Keying it on
+  // liveSessions.length meant "connected but no sessions yet" and "tunnel is dead"
+  // both rendered the mock showcase — fake sessions that look completely real
+  // (this misread bit twice: once as a phantom roster, once when the lovbox tunnel
+  // dropped). Now mock appears only in explicit demo mode; a connected-but-empty
+  // daemon shows an empty roster, and a dead socket shows the disconnected note.
+  readonly property bool live: !demo
+  readonly property bool daemonUp: !!(agentd && agentd.connected)
 
   function shortName(n) {
     var s = String(n).replace(/^lovable\.daphen-/, "").replace(/^daphen-/, "")
@@ -341,7 +406,7 @@ Item {
     var roots = liveSessions.filter(s => !s.parent)
     var pool = (roots.length ? roots : liveSessions).slice()
     pool.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
-    return pool[0].name
+    return pool.length ? pool[0].name : ""
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
 
@@ -358,6 +423,9 @@ Item {
     if (!live) return mockFeatured
     var arr = liveSessions.filter(s => s.name === selectedRaw)
     var f = arr.length ? arr[0] : liveSessions[0]
+    // No sessions at all (daemon up but idle, or the tunnel dropped) — everything
+    // downstream reads .name, so hand back a placeholder rather than undefined.
+    if (!f) return { name: daemonUp ? "no sessions" : "disconnected", rawName: "", state: "", status: "idle" }
     return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
   }
   // The ONE bool the thinking pill + orb depend on. Being a bool, its binding only
@@ -398,6 +466,11 @@ Item {
     return out
   }
   property bool _wantBottom: false   // scroll chat to bottom once the new session's feed loads
+  // A send needs to land on the new row too, but WITHOUT bottomSettle: that timer
+  // re-pins 9x over ~540ms to survive async delegate sizing on first load, and on a
+  // send the rows are already sized, so those re-pins were visible as the
+  // "blinks only on the first message" flicker.
+  property bool _sendPin: false
   onSelectedRawChanged: {
     _feedReset = true
     Qt.callLater(rail.syncFeedModel)
@@ -530,6 +603,16 @@ Item {
   onCurChanged: {
     pinBottom = (cur >= navTotal - 1)   // at the last item → follow new messages
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
+    // ApplyRange only guarantees the current item's TOP sits inside the range, so
+    // landing on the LAST card left its bottom (and the footer pad) below the fold.
+    // Bottom-align that one case explicitly — "j to the last message" should mean
+    // the end of the feed. Deferred so the row's height is settled first.
+    if (view === "chat" && cur >= navTotal - 1 && navTotal > rSize)
+      Qt.callLater(feedView.positionViewAtEnd)
+    // With the range disabled during streaming, a deliberate cursor move still needs
+    // to bring its row into view — but ONCE, not as a standing constraint.
+    else if (view === "chat" && cur >= rSize && featuredStreaming)
+      Qt.callLater(function () { feedView.positionViewAtIndex(rail.cur - rail.rSize, ListView.Contain) })
   }
   // subtle focus accent on the left edge (no full ring)
   Rectangle {
@@ -564,7 +647,14 @@ Item {
     for (var i = 0; i < arr.length; i++) {
       var sig = _turnSig(arr[i])
       if (i < feedModel.count) {
-        if (feedModel.get(i).sig !== sig) feedModel.set(i, { d: arr[i], sig: sig })
+        // setProperty, NOT set(): set() REPLACES the element and rebuilds that row's
+        // delegate. The streaming row fills the viewport, so rebuilding it 8x/sec
+        // still read as the whole chat blinking. setProperty mutates the role, so the
+        // delegate survives and only its bindings re-evaluate.
+        if (feedModel.get(i).sig !== sig) {
+          feedModel.setProperty(i, "d", arr[i])
+          feedModel.setProperty(i, "sig", sig)
+        }
       } else {
         feedModel.append({ d: arr[i], sig: sig })
       }
@@ -581,12 +671,14 @@ Item {
     onTriggered: {
       rail.feedTick++
       rail.syncFeedModel()
-      if (rail.view === "chat" && !rail.scrollGuarded && (rail.pinBottom || rail._wantBottom)) {
-        if (rail._wantBottom) rail.cur = Math.max(0, rail.navTotal - 1)   // initial load only
+      if (rail.view === "chat" && !rail.scrollGuarded
+          && (rail.pinBottom || rail._wantBottom || rail._sendPin)) {
+        if (rail._wantBottom || rail._sendPin) rail.cur = Math.max(0, rail.navTotal - 1)
         feedView.positionViewAtEnd()
         rail.pinBottom = true
-        if (rail._wantBottom) bottomSettle.restart()   // initial load: re-pin as async delegates size up
+        if (rail._wantBottom) bottomSettle.restart()   // FIRST load only — see _sendPin
         rail._wantBottom = false
+        rail._sendPin = false
       }
     }
   }
@@ -837,7 +929,12 @@ Item {
       // footer pad at the bottom.
       currentIndex: (rail.view === "chat" && rail.cur >= rail.rSize) ? (rail.cur - rail.rSize) : -1
       highlightFollowsCurrentItem: true
-      highlightRangeMode: rail.followMode ? ListView.NoHighlightRange : ListView.ApplyRange
+      // ApplyRange re-evaluates the current item's position on EVERY model change, so
+      // while a turn streams (rows updating ~8x/sec) it continuously yanked the view —
+      // that was the "constant blinking", and it stopped the moment pinning kicked in
+      // because that already disabled the range. Keep the range off for the whole
+      // streaming window; cursor moves get one-shot positioning below instead.
+      highlightRangeMode: rail.featuredStreaming ? ListView.NoHighlightRange : ListView.ApplyRange
       preferredHighlightBegin: spacing
       preferredHighlightEnd: height - 56
       highlightMoveDuration: 0
@@ -884,6 +981,15 @@ Item {
         onTriggered: feedView.positionViewAtEnd()
       }
       onCountChanged: if (rail.view === "chat" && rail.pinBottom && !rail.scrollGuarded) Qt.callLater(feedView.positionViewAtEnd)
+      // Streaming content arrived as a hard pop. Fade added rows in — short enough
+      // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
+      // below from jumping when one is inserted.
+      add: Transition {
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140; easing.type: Easing.OutQuad }
+      }
+      displaced: Transition {
+        NumberAnimation { properties: "y"; duration: 140; easing.type: Easing.OutQuad }
+      }
       // Manual scrolling wins over follow-the-stream. NOTE: do NOT use
       // onMovementStarted/Ended here — Flickable emits those for PROGRAMMATIC
       // contentY changes too, so pinTimer's positionViewAtEnd() (30x/sec) trips
@@ -957,6 +1063,9 @@ Item {
               Loader {
                 width: cardCol.width
                 sourceComponent: thinkRow
+                opacity: 0
+                Component.onCompleted: opacity = 1
+                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
                 property var entry: modelData
                 property string gkey: "think-" + turnDel.rowIndex + "-" + index
                 property bool expanded: rail.expandedGroups[gkey] === true
@@ -983,7 +1092,13 @@ Item {
               property var items: turnDel.isUser ? [] : rail.turnActivityItems(turnDel.turn.items)
               property string summary: active ? rail.turnActivitySummary(turnDel.turn.items) : ""
               property string ekey: "turn-" + turnDel.rowIndex
-              property bool expanded: rail.expandedGroups[ekey] === true
+              // The turn that is CURRENTLY working expands by default, so you can watch
+              // which tools it's reaching for; finished turns stay condensed to the
+              // one-line summary. An explicit tap always wins over the default.
+              property bool liveTurn: turnDel.rowIndex >= rail.fSize - 1 && rail.featuredStreaming
+              property bool expanded: (ekey in rail.expandedGroups)
+                                      ? rail.expandedGroups[ekey] === true
+                                      : liveTurn
             }
           }
         }
@@ -1092,6 +1207,48 @@ Item {
       anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 14 }
       spacing: 10
 
+      // Attachment chips — same shape as dsqrd/slqs/mlqs (paperclip + name + ✕), so
+      // the family looks consistent. The name matches the inline reference exactly
+      // (@.heidr-pastes/img1.png → "img1"), which is what makes "before: img1, after:
+      // img2" unambiguous for the agent as well as for you.
+      Flow {
+        Layout.fillWidth: true
+        spacing: 16
+        visible: rail.pastedImages.length > 0
+        Repeater {
+          model: rail.pastedImages
+          Row {
+            id: attachChip
+            spacing: 6
+            readonly property string imgName: String(modelData)
+            readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
+            Icon {
+              name: "paperclip"; width: 13; height: 13
+              color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
+              anchors.verticalCenter: parent.verticalCenter
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: attachChip.imgName.replace(/\.[a-z]+$/, "")
+              color: attachChip.referenced ? Theme.fg : Theme.fg_muted
+              font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
+              font.pixelSize: rail.fsMeta
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: "  ✕"; color: Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              TapHandler {
+                onTapped: {
+                  composerInput.text = composerInput.text.replace("@.heidr-pastes/" + attachChip.imgName + " ", "")
+                  rail.pastedImages = rail.pastedImages.filter(function (m) { return m !== attachChip.imgName })
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Slash-command palette — sits above the composer while the text starts
       // with "/". Tab/Enter completes the highlighted one, Ctrl+n/p or ↑/↓ move.
       Rectangle {
@@ -1160,6 +1317,9 @@ Item {
               } else if (text.trim().length && rail.agentd) {
                 rail.agentd.sendPrompt(rail.selectedRaw, text)
               }
+              rail.pastedImages = []      // attachments belong to the message just sent
+              rail.pinBottom = true
+              rail._sendPin = true   // land on the new last row (no re-pin storm)
               // Stay in insert after sending — you almost always have a follow-up,
               // and dropping to normal mode meant pressing `i` again every time.
               // Esc / Ctrl+h still leave. (An answered ask_user is done, so exit.)
@@ -1169,6 +1329,13 @@ Item {
             }
             Keys.onPressed: (e) => {
               var ctrl = (e.modifiers & Qt.ControlModifier)
+              // Ctrl+V: the clipboard may hold an IMAGE, and we only learn that
+              // asynchronously (wl-paste --list-types), so swallow the key and let
+              // pasteImage() decide — it falls back to a text paste when there is no
+              // image, so one path covers both.
+              if (ctrl && e.key === Qt.Key_V && !(e.modifiers & Qt.ShiftModifier)) {
+                rail.pasteImage(); e.accepted = true; return
+              }
               // Slash palette owns Tab / ↑↓ / Ctrl+n,p while it's open.
               if (rail.slashOpen) {
                 var n = rail.commandMatches.length
@@ -1258,7 +1425,9 @@ Item {
     opacity: (rail.view === "chat" && rail.featuredStreaming) ? 1 : 0
     visible: opacity > 0.01
     Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.InOutQuad } }
-    anchors { horizontalCenter: parent.horizontalCenter; bottom: chin.top; bottomMargin: 14 }
+    // Sits lower, closer to the composer. The fade gradient anchors to chin.top
+    // separately, so this margin moves ONLY the pill.
+    anchors { horizontalCenter: parent.horizontalCenter; bottom: chin.top; bottomMargin: 4 }
     implicitWidth: pillRow.implicitWidth + 22
     height: 40
     radius: height / 2

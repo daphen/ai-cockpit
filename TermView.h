@@ -66,13 +66,13 @@ private:
   // Box-drawing glyphs must fill the whole cell so lines connect across the
   // 1.25× line height; draw the common ones procedurally. Returns false for
   // codepoints we don't handle (caller falls back to the font glyph).
-  bool drawBoxChar(QPainter *p, int x, int y, uint32_t cp, const QColor &fg);
+  bool drawBoxChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg);
   // Block elements (U+2580..U+259F: █ ▌ ▎ ▄ shades …) must fill the full cell so
   // vertical bars (markdown quote guides) connect across the 1.25× line height.
-  bool drawBlockChar(QPainter *p, int x, int y, uint32_t cp, const QColor &fg);
+  bool drawBlockChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg);
   // Powerline separators (U+E0B0..E0B7) drawn as filled vector shapes scaled to
   // the full cell — smooth + seamless, like kitty/ghostty (not the font glyph).
-  bool drawPowerline(QPainter *p, int x, int y, uint32_t cp, const QColor &fg);
+  bool drawPowerline(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg);
   // libghostty-vt invokes this when the terminal must reply to the PTY
   // (DSR, DA, cursor-position reports). Routes back to writePty via userdata.
   static void onWritePty(GhosttyTerminal t, void *userdata,
@@ -84,10 +84,17 @@ private:
   int master_ = -1;              // PTY master fd (worker-thread owner)
   QFileSystemWatcher *themeWatcher_ = nullptr;  // ~/.config/theme_mode → live light/dark flip
   QFont font_;
-  int cellW_ = 9, cellH_ = 18, ascent_ = 14;   // immutable after ctor (fixed font)
+  // Metrics are qreal and SNAPPED to whole device pixels (see applyMetrics): with
+  // integer logical metrics, col*cellW*dpr lands on a half pixel at 1.75x, so
+  // identical glyphs rasterized at different subpixel offsets — some stems crisp,
+  // others smeared. Snapping makes every cell origin a real pixel boundary.
+  qreal cellW_ = 9, cellH_ = 18, ascent_ = 14;
+  qreal baseCellW_ = 9, baseCellH_ = 18, baseAscent_ = 14;   // unsnapped, from QFontMetricsF
+  void applyMetrics(qreal dpr);   // snap metrics + padding for this ratio
+  void syncTextureSize(qreal dpr); // pin the backing texture to DEVICE pixels
   int cols_ = 110, rows_ = 30;   // worker-thread only after start; reflows on resize
   // kitty window_padding_width 10 16 10 10 (top right bottom left)
-  const int padT_ = 18, padR_ = 16, padB_ = 0, padL_ = 10;  // top matches the rail's 18px window inset
+  qreal padT_ = 18, padR_ = 16, padB_ = 0, padL_ = 10;  // top matches the rail's 18px window inset
   GhosttyColorRgb palette_[256];
   GhosttyColorRgb defFg_{0xdd, 0xdd, 0xdd};
   GhosttyColorRgb defBg_{0x1e, 0x1e, 0x2e};
@@ -107,4 +114,5 @@ private:
   QImage frame_;
   // worker-thread-local geometry (seeded in ctor, updated via resize_ commands)
   int wViewW_ = 0, wViewH_ = 0; qreal wDpr_ = 1.0;
+  qreal lastDpr_ = 0.0;   // GUI-thread: last ratio pushed to the worker (drift check)
 };

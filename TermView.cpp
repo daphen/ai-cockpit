@@ -85,15 +85,33 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setAcceptedMouseButtons(Qt::AllButtons);
   setFocus(true);
 
+  // Match the RAIL's text rendering so the two panes look like one app: same family,
+  // sized in PIXELS like QsLib does (Theme.fontSize + n), and the DEFAULT hinting
+  // preference. PreferNoHinting was chosen to imitate kitty, but the rail's QML Text
+  // uses Quickshell's forced NativeRendering with default hinting, so the terminal
+  // read visibly lighter/softer than the panel beside it.
   font_ = QFont("GeistMono Nerd Font");
   font_.setStyleHint(QFont::Monospace);
-  font_.setHintingPreference(QFont::PreferNoHinting);  // don't stem-darken; lighter, closer to kitty
-  font_.setPointSizeF(13.0);                 // kitty font_size 13
+  // Tunable at runtime so rendering can be judged side by side without a rebuild:
+  //   HEIDR_HINTING = none | slight | full | default   (default: default = rail-like)
+  //   HEIDR_FONT_PX = <pixels>                          (default: 17 ≈ 13pt at 96dpi)
+  {
+    const QByteArray h = qgetenv("HEIDR_HINTING");
+    QFont::HintingPreference hp = QFont::PreferDefaultHinting;
+    if (h == "none")   hp = QFont::PreferNoHinting;
+    if (h == "slight") hp = QFont::PreferVerticalHinting;   // vertical stems only
+    if (h == "full")   hp = QFont::PreferFullHinting;
+    font_.setHintingPreference(hp);
+    bool ok = false;
+    const int px = qgetenv("HEIDR_FONT_PX").toInt(&ok);
+    font_.setPixelSize(ok && px >= 8 && px <= 48 ? px : 17);
+  }
   QFontMetricsF fm(font_);
   const double natural = fm.height();
-  cellW_ = qRound(fm.horizontalAdvance(QChar('M')));
-  cellH_ = qRound(natural * 1.25);           // kitty modify_font cell_height 125%
-  ascent_ = qRound(fm.ascent() + (cellH_ - natural) / 2.0);  // center glyph in cell
+  baseCellW_ = fm.horizontalAdvance(QChar('M'));
+  baseCellH_ = natural * 1.25;                // kitty modify_font cell_height 125%
+  baseAscent_ = fm.ascent() + (baseCellH_ - natural) / 2.0;   // center glyph in cell
+  applyMetrics(1.0);
   setImplicitSize(cols_ * cellW_ + padL_ + padR_,
                   rows_ * cellH_ + padT_ + padB_);
 
@@ -215,6 +233,30 @@ void TermView::applyThemeColors() {
   ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, palette_);
 }
 
+// Snap the cell box + padding to whole DEVICE pixels for this ratio. Everything the
+// renderer positions is a multiple of cellW/cellH offset by the pads, so if those are
+// exact device-pixel multiples then every glyph origin is too — which is what keeps
+// stem weights identical across columns instead of alternating crisp/smeared.
+// QQuickPaintedItem's backing texture defaults to the item size in LOGICAL pixels,
+// so on a 1.5x/1.75x display everything we paint is rasterized into a texture smaller
+// than the physical pixels and then scaled UP by the compositor — a permanent softness
+// that no font/metric tuning can recover. Pin the texture to device pixels instead.
+void TermView::syncTextureSize(qreal dpr) {
+  if (dpr <= 0) dpr = 1.0;
+  const int tw = std::max(1, (int)std::ceil(width()  * dpr));
+  const int th = std::max(1, (int)std::ceil(height() * dpr));
+  if (textureSize() != QSize(tw, th)) setTextureSize(QSize(tw, th));
+}
+
+void TermView::applyMetrics(qreal dpr) {
+  if (dpr <= 0) dpr = 1.0;
+  auto snap = [dpr](qreal v) { return std::max(1.0, std::round(v * dpr)) / dpr; };
+  cellW_  = snap(baseCellW_);
+  cellH_  = snap(baseCellH_);
+  ascent_ = std::round(baseAscent_ * dpr) / dpr;
+  padT_ = snap(18); padR_ = snap(16); padB_ = 0; padL_ = snap(10);
+}
+
 void TermView::spawnPty() {
   struct winsize ws = {};
   ws.ws_col = cols_;
@@ -251,9 +293,10 @@ void TermView::spawnPty() {
 void TermView::geometryChange(const QRectF &n, const QRectF &o) {
   QQuickPaintedItem::geometryChange(n, o);
   if (n.size() == o.size() || cellW_ <= 0 || cellH_ <= 0) return;
-  const int c = std::max(1, (int(n.width()) - padL_ - padR_) / cellW_);
-  const int r = std::max(1, (int(n.height()) - padT_ - padB_) / cellH_);
+  const int c = std::max(1, (int)((n.width()  - padL_ - padR_) / cellW_));
+  const int r = std::max(1, (int)((n.height() - padT_ - padB_) / cellH_));
   const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  syncTextureSize(dpr);
   {
     std::lock_guard<std::mutex> lk(cmdMtx_);
     resize_ = { true, c, r, (int)n.width(), (int)n.height(), dpr };
@@ -313,7 +356,8 @@ void TermView::workerLoop() {
         }
         lastCols = cols_; lastRows = rows_;
       }
-      wViewW_ = rz.viewW; wViewH_ = rz.viewH; wDpr_ = rz.dpr;
+      wViewW_ = rz.viewW; wViewH_ = rz.viewH;
+      if (std::abs(rz.dpr - wDpr_) > 0.001) { wDpr_ = rz.dpr; applyMetrics(wDpr_); }
       dirty = true;
     }
     if (doRepaint) dirty = true;
@@ -398,11 +442,11 @@ static QColor resolveStyleColor(const GhosttyStyleColor &sc,
   }
 }
 
-bool TermView::drawBoxChar(QPainter *p, int x, int y, uint32_t cp, const QColor &fg) {
+bool TermView::drawBoxChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg) {
   // One antialiased pen for EVERY segment (straight, tee, corner) so lines and
   // corners have identical weight — kitty-style uniform box-drawing. Pixel-snap
   // the center lines (+0.5) so 1px strokes stay crisp.
-  const qreal t = std::max(1, cellW_ / 8);
+  const qreal t = std::max(1.0, cellW_ / 8);
   const qreal mx = std::floor(x + cellW_ / 2.0) + 0.5;
   const qreal my = std::floor(y + cellH_ / 2.0) + 0.5;
   const qreal x0 = x, x2 = x + cellW_, y0 = y, y2 = y + cellH_;
@@ -442,7 +486,7 @@ bool TermView::drawBoxChar(QPainter *p, int x, int y, uint32_t cp, const QColor 
   return ok;
 }
 
-bool TermView::drawBlockChar(QPainter *p, int x, int y, uint32_t cp, const QColor &fg) {
+bool TermView::drawBlockChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg) {
   const int x2 = x + cellW_, y2 = y + cellH_;
   const int midx = x + cellW_ / 2, midy = y + cellH_ / 2;
   switch (cp) {
@@ -468,7 +512,7 @@ bool TermView::drawBlockChar(QPainter *p, int x, int y, uint32_t cp, const QColo
   }
 }
 
-bool TermView::drawPowerline(QPainter *p, int x, int y, uint32_t cp, const QColor &fg) {
+bool TermView::drawPowerline(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg) {
   const qreal w = cellW_, h = cellH_;
   const qreal x0 = x, x1 = x + w, y0 = y, y1 = y + h, ym = y + h / 2.0;
   p->save();
@@ -502,6 +546,22 @@ bool TermView::drawPowerline(QPainter *p, int x, int y, uint32_t cp, const QColo
 void TermView::paint(QPainter *outP) {
   // GUI/scene-graph thread: only blit the frame the worker rasterized. All the
   // heavy work (VT parse + glyph raster) happens off this thread in workerLoop.
+  //
+  // The worker caches the device-pixel-ratio and previously only refreshed it on a
+  // RESIZE, so plugging into a differently-scaled display (or any scale change with
+  // no geometry change) left it rasterizing at the old ratio — the frame then got
+  // stretched into the item and the text looked blotchy/pixelated rather than merely
+  // soft. Re-check the live ratio here and hand the worker a fresh one when it drifts.
+  const qreal liveDpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+  if (liveDpr > 0 && std::abs(liveDpr - lastDpr_) > 0.01) {
+    lastDpr_ = liveDpr;
+    syncTextureSize(liveDpr);
+    {
+      std::lock_guard<std::mutex> lk(cmdMtx_);
+      resize_ = { true, cols_, rows_, (int)width(), (int)height(), liveDpr };
+    }
+    wakeWorker();
+  }
   QImage f;
   { std::lock_guard<std::mutex> lk(frameMtx_); f = frame_; }
   if (f.isNull()) { outP->fillRect(boundingRect(), toQ(defBg_)); return; }
@@ -516,9 +576,9 @@ QImage TermView::renderFrame() {
   const int vw = std::max(1, wViewW_), vh = std::max(1, wViewH_);
   QImage img(QSize(std::max(1, (int)std::ceil(vw * ratio)),
                    std::max(1, (int)std::ceil(vh * ratio))),
-             QImage::Format_ARGB32_Premultiplied);
+             QImage::Format_RGB32);   // OPAQUE: alpha blending softens glyph edges
   img.setDevicePixelRatio(ratio);
-  img.fill(Qt::transparent);
+  img.fill(toQ(defBg_));   // the bg is repainted below; this seeds an opaque surface
   QPainter localPainter(&img);
   QPainter *p = &localPainter;
 
@@ -541,7 +601,7 @@ QImage TermView::renderFrame() {
   // can overhang its cell (wide Nerd icons horizontally, descenders vertically);
   // if a neighbor's background were filled after the glyph, it would clip that
   // overhang. Separating the passes lets overhangs survive.
-  struct Glyph { int x, y; uint32_t cp; QColor fg; bool bold; };
+  struct Glyph { qreal x, y; uint32_t cp; QColor fg; bool bold; };
   std::vector<Glyph> glyphs;
   glyphs.reserve((size_t)rows_ * cols_);
 
@@ -586,7 +646,7 @@ QImage TermView::renderFrame() {
                                    (fg.green() + effBg.green()) / 2,
                                    (fg.blue() + effBg.blue()) / 2);
 
-      const int x = padL_ + col * cellW_, y = padT_ + row * cellH_;
+      const qreal x = padL_ + col * cellW_, y = padT_ + row * cellH_;
       if (effBg != defBg) p->fillRect(x, y, cellW_, cellH_, effBg);
 
       if (has) {
@@ -610,13 +670,13 @@ QImage TermView::renderFrame() {
     // right edge and gets clipped, so render italic-attributed cells upright.
     p->setFont(f);
     p->setPen(g.fg);
-    p->drawText(g.x, g.y + ascent_,
+    p->drawText(QPointF(g.x, g.y + ascent_),
                 QString::fromUcs4(reinterpret_cast<const char32_t *>(&g.cp), 1));
   }
 
   // Cursor: honor the app's requested shape (nvim swaps block/beam by mode).
   if (cvis && active_.load() && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
-    const int x = padL_ + cx * cellW_, y = padT_ + cy * cellH_;
+    const qreal x = padL_ + cx * cellW_, y = padT_ + cy * cellH_;
     switch (cursorShape_) {
       case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR:
         p->fillRect(x, y, 2, cellH_, curColor);  // beam (insert mode)
@@ -645,7 +705,7 @@ QImage TermView::renderFrame() {
               ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CODEPOINT, &cp);
               p->setFont(font_);
               p->setPen(defBg);
-              p->drawText(x, y + ascent_,
+              p->drawText(QPointF(x, y + ascent_),
                           QString::fromUcs4(reinterpret_cast<const char32_t *>(&cp), 1));
             }
           }
