@@ -901,6 +901,11 @@ Item {
     if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_D && staleAsk) {
       dismissStaleAsk(); e.accepted = true; return
     }
+    // Ctrl+T toggles the roster from ANY state — insert included; the composer doesn't
+    // consume it, so it bubbles up here like Ctrl+D does.
+    if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_T) {
+      rosterOverride = !rosterExpanded; e.accepted = true; return
+    }
     // A confirm/select ask overrides a stale insert flag: the composer is hidden while
     // the ask card holds the chin, so there is nothing to type into anyway — fall
     // through so y/n/1-9/esc reach the ask block below. Text asks keep insert (the
@@ -948,7 +953,6 @@ Item {
     // Ctrl+j → jump into the main view (chat/files); Ctrl+k → back to roster top.
     if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); e.accepted = true; return }
     if (ctrl && e.key === Qt.Key_K) { cur = 0; e.accepted = true; return }
-    if (ctrl && e.key === Qt.Key_T) { rosterOverride = !rosterExpanded; e.accepted = true; return }
     if (e.key === Qt.Key_I)      { enterInsert(); e.accepted = true }
     else if (e.key === Qt.Key_Escape) {
       // Esc = interrupt, everywhere (composer already does this): abort the open
