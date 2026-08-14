@@ -1078,10 +1078,12 @@ Item {
                 font.weight: sessRow.selected ? 600 : 400
               }
               // Spinner immediately right of the name. The slot is reserved even when idle
-              // so nothing shifts as a session starts or stops working. 16px is free: the
-              // row is a fixed 40px tall, so the orb cannot push it.
+              // so nothing shifts as a session starts or stops working. 20px is free (the
+              // row is a fixed 40px tall) and 20 is what it takes to LOOK bigger: the box
+              // draws a sphere ~0.83 of its size, so a 16px box was only ~13px of visible
+              // mesh next to 14px icons.
               Item {
-                Layout.preferredWidth: 16; Layout.preferredHeight: 16
+                Layout.preferredWidth: 20; Layout.preferredHeight: 20
                 Layout.alignment: Qt.AlignVCenter
                 Orb {
                   anchors.fill: parent

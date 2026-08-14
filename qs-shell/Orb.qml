@@ -56,7 +56,11 @@ Item {
       var ctx = getContext("2d")
       ctx.reset()
       var w = width, h = height, cx = w / 2, cy = h / 2
-      var R = Math.min(w, h) / 2 - 1.5
+      // Largest sphere that still fits its own dots: a node sits at distance R and its
+      // dot reaches R*0.20 past that, so the inset has to be that dot radius, not a
+      // fixed 1.5px. At small sizes the flat inset was most of the difference — a 16px
+      // box drew a ~13px sphere, so making the box bigger barely showed.
+      var R = Math.min(w, h) / 2 / 1.2
       var ca = Math.cos(orb.rot), sa = Math.sin(orb.rot)
       var tilt = 0.45, ct = Math.cos(tilt), st = Math.sin(tilt)
       var proj = []
