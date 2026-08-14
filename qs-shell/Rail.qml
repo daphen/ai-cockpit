@@ -355,8 +355,35 @@ Item {
         var ref = "@.heidr-pastes/" + out + " "
         composerInput.insert(composerInput.cursorPosition, ref)
         rail.pastedImages = rail.pastedImages.concat([out])   // for the thumbnail strip
+        rail._pushPasteRemote(out)
       }
     }
+  }
+  // A paste for a REMOTE session rides two channels: the @reference goes with the prompt
+  // (milliseconds) while the file itself waits for mutagen's watch→scan→ship cycle
+  // (~1-3s) — so paste-and-Enter-immediately could reach pi before its file existed.
+  // Push the file up eagerly over the same ControlMaster socket vm-sync keeps warm
+  // (~150ms; a cold dial still beats typing the message). mutagen syncing it again a
+  // moment later is a harmless no-op — identical content resolves clean.
+  function _pushPasteRemote(name) {
+    var cwd = ""
+    if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
+      if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
+    if (!_isRemote(cwd)) return
+    var vmuser = Quickshell.env("HEIDR_VM_USER") || "david_karlsson_lovable_dev"
+    // Only the dev VM speaks plain ssh/scp; a lovbox mirror keeps mutagen as its carrier.
+    if (cwd.indexOf("/home/" + vmuser + "/") !== 0) return
+    var host = Quickshell.env("HEIDR_VM_HOST")
+             || ((Quickshell.env("HEIDR_VM") || "dev-heidr-2a39") + ".workstation.lovable.net")
+    var ssh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            + " -o ControlMaster=auto -o ControlPath=" + Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-vm-cm"
+            + " -o ControlPersist=600 -o ConnectTimeout=15"
+    var rdir = cwd + "/.heidr-pastes"
+    var local = pasteDirFor + "/" + name
+    Quickshell.execDetached(["sh", "-c",
+      ssh + " " + vmuser + "@" + host + " 'mkdir -p " + JSON.stringify(rdir) + "' && "
+      + "scp " + ssh.substring(4) + " " + JSON.stringify(local) + " "
+      + vmuser + "@" + host + ":" + JSON.stringify(rdir) + "/"])
   }
   function pasteImage() {
     // One shell pass: detect an image flavour, write it, print the path (or NOIMAGE).
