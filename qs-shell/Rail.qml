@@ -1045,6 +1045,11 @@ Item {
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
+    else if (e.key === Qt.Key_Y && (e.modifiers & Qt.ShiftModifier)) {       // Y = whole message, no mode
+      if (rail.view === "chat" && rail.cur >= rail.rSize)
+        rail.copyText(String(rail.feedCopyTarget(rail.groupedFeed[rail.cur - rail.rSize]) || ""))
+      e.accepted = true
+    }
     else if (e.key === Qt.Key_Y)  { rail.startYank(); e.accepted = true }    // yank-hints (yy = whole message)
     else if (e.key === Qt.Key_N)  { rail.openNew(); e.accepted = true }      // new session
     else if (e.key === Qt.Key_X)  {
