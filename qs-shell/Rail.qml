@@ -1073,7 +1073,9 @@ Item {
                 elide: Text.ElideRight
                 color: sessRow.cursor ? Theme.bg : Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName
-                font.weight: (sessRow.selected || sessRow.streaming) ? 600 : 400
+                // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
+                // meant two rows shouting at once with no way to tell which you were on.
+                font.weight: sessRow.selected ? 600 : 400
               }
               // Spinner immediately right of the name. The slot is reserved even when idle
               // so nothing shifts as a session starts or stops working. 16px is free: the
