@@ -1044,15 +1044,9 @@ Item {
       else if (insert) exitInsert()
     }
   }
-  // subtle focus accent on the left edge (no full ring)
   // The rail's own ground: one step darker than the editor side (Theme.bgDim), so the
   // two panes read as distinct layers without a divider doing the work.
   Rectangle { anchors.fill: parent; color: Theme.bgDim; z: -1 }
-
-  Rectangle {
-    width: 2; height: parent.height; anchors.left: parent.left
-    color: Theme.electric; opacity: rail.focused ? 0.5 : 0; z: 10
-  }
 
   // Incremental feed model. `groupedFeed` is a fresh JS ARRAY every time stream data
   // lands, and ListView cannot diff arrays — assigning one destroys and rebuilds every
@@ -1202,9 +1196,9 @@ Item {
     Rectangle {
       id: rosterCard
       Layout.fillWidth: true
-      // Inset to the chat cards' outer edges — the sheet spans the same column as the
-      // feed instead of full-bleed.
-      Layout.leftMargin: 20; Layout.rightMargin: 20
+      // Full-bleed: 1px past the window sides so the vertical hairlines are
+      // offscreen and only the bottom rounded seam carries a line.
+      Layout.leftMargin: -1; Layout.rightMargin: -1
       // Square top WITHOUT painting over the border: the card extends one radius above
       // the window, so its top rounding is offscreen and the visible edge is the native
       // hairline, unbroken. (The strip+patch approach mixed an antialiased rounded
@@ -1263,7 +1257,7 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 120 } }
         // Top matches the visual weight of the sides/bottom: flush against the window
         // edge, 8px read as none — the first pill needs real breathing room up there.
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 20 + rosterCard.radius }
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 20 + rosterCard.radius }
         spacing: 3
         Repeater {
           model: rosterModel
