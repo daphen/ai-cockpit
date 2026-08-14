@@ -1206,8 +1206,11 @@ Item {
       // the bottom radius is the whole seam.
       radius: 20 + 8   // (rowHeight/2) + padding → concentric with the pill rows
       color: Theme.surface0            // subtler than surface (barely-there tint)
-      Rectangle {   // square the top corners (same fill, painted under the content)
-        anchors { top: parent.top; left: parent.left; right: parent.right }
+      border.color: Theme.hairlineSoft; border.width: 1
+      // Square the top corners with a fill strip: inset 1px so the SIDE hairlines run
+      // through to the window edge while the TOP edge stays line-free (flush sheet).
+      Rectangle {
+        anchors { top: parent.top; left: parent.left; right: parent.right; leftMargin: 1; rightMargin: 1 }
         height: parent.radius
         color: parent.color
       }
