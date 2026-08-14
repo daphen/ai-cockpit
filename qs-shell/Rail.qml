@@ -638,13 +638,16 @@ Item {
     return agentd.staleAskFor(selectedRaw)
   }
   function dismissStaleAsk() { if (agentd && selectedRaw) agentd.dismissStaleAsk(selectedRaw) }
-  // The whole point of an ask is that it blocks: pull focus to the rail the moment
-  // one lands, and for a free-text answer enter insert so the input is already yours.
+  // The whole point of an ask is that it blocks: take the keyboard the moment one lands.
+  // A free-text ask enters insert so the input is already yours; a confirm/select ask
+  // must EXIT insert — sending leaves the composer in insert on purpose, so an ask right
+  // after a send otherwise landed with insert still true, and the key handler's insert
+  // guard ate y/n while the hidden composer had no focus: keys went nowhere at all.
   onPendingAskChanged: {
     if (!pendingAsk) return
-    rail.requestFocus()
     var m = pendingAsk.method
-    if (m === "input" || m === "editor") Qt.callLater(rail.enterInsert)
+    if (m === "input" || m === "editor") { rail.requestFocus(); Qt.callLater(rail.enterInsert) }
+    else rail.exitInsert()   // clears insert AND focuses the rail
   }
 
   readonly property var featured: {
@@ -877,7 +880,11 @@ Item {
     if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_D && staleAsk) {
       dismissStaleAsk(); e.accepted = true; return
     }
-    if (insert) return
+    // A confirm/select ask overrides a stale insert flag: the composer is hidden while
+    // the ask card holds the chin, so there is nothing to type into anyway — fall
+    // through so y/n/1-9/esc reach the ask block below. Text asks keep insert (the
+    // answer IS typed).
+    if (insert && !(pendingAsk && !askWantsText)) return
     // Link-hint mode owns the keyboard while active: a label letter opens its
     // link, Esc (or any non-label key) drops the hints — mlqs's `f` semantics.
     if (hinting) {
