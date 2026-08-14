@@ -1636,17 +1636,32 @@ Item {
   }
 
 
-  // Elevation: a dark gradient leaking out from under the roster sheet into the chat,
-  // so content dims as it slides beneath the rounded seam. Sibling of the layout with
-  // z above it, starting exactly at the sheet's (animated) bottom edge.
+  // Fades, not shadows: scrolled content DISSOLVES into the rail's ground as it slides
+  // under the roster seam / behind the composer. A translucent dark veil left text
+  // half-readable in the band, which read as a glitch.
   Rectangle {
     x: 20; width: parent.width - 40
     y: rosterCard.height
     height: 44
     z: 1
     gradient: Gradient {
-      GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.38) }
-      GradientStop { position: 1.0; color: "transparent" }
+      GradientStop { position: 0.0; color: Theme.bgDim }
+      GradientStop { position: 1.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
+    }
+  }
+  // …and the mirror above the composer, shown only while there is more chat BELOW the
+  // viewport (at the live edge it vanishes, so the newest message never looks cut).
+  Rectangle {
+    x: 20; width: parent.width - 40
+    anchors.bottom: chin.top
+    height: 44
+    z: 1
+    visible: rail.view === "chat"
+    opacity: (feedView.originY + feedView.contentHeight - feedView.height - feedView.contentY) > 8 ? 1 : 0
+    Behavior on opacity { NumberAnimation { duration: 150 } }
+    gradient: Gradient {
+      GradientStop { position: 0.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
+      GradientStop { position: 1.0; color: Theme.bgDim }
     }
   }
 
