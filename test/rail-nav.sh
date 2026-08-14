@@ -211,8 +211,8 @@ a1=$(st)
 check "ask arrived"            "$(field "$a1" ask)" "True"
 check "insert escaped on ask"  "$(field "$a1" ins)" "False"
 key y; sleep 2
-ans=$(grep -c '"id": "fake-live-1"' "$SOCK.answers" 2>/dev/null || echo 0)
-check "answer reached the daemon" "$ans" "1"
+ans=$(grep -c '"id": "fake-live-1"' "$SOCK.answers" 2>/dev/null)
+check "answer reached the daemon" "${ans:-0}" "1"
 check "card cleared"              "$(field "$(st)" ask)" "False"
 
 say "12. the stale notice: never over a streaming session, and self-heals"
@@ -229,6 +229,47 @@ check "notice for the idle open ask" "$(field "$(st)" stale)" "True"
 fake answer_in_transcript 1
 fake grow                              # refresh: transcript now shows the answer
 check "notice self-healed" "$(field "$(st)" stale)" "False"
+
+say "13. interrupt vs kill: Esc/x abort the TURN, roster-x kills the SESSION"
+# x used to send the daemon's stop from anywhere — session killed, roster row gone, on
+# one unconfirmed keypress. Now: Esc in the composer (and x outside the roster) sends
+# pi's turn-abort and the session SURVIVES; x on a roster row keeps the kill semantics.
+rm -f "$SOCK.answers"
+fake stream_on
+key G                                # cursor in the feed
+key i                                # composer focused, insert on
+key esc; sleep 2                     # Esc while streaming = interrupt
+ab=$(grep -c '"type": "abort"' "$SOCK.answers" 2>/dev/null)
+check "Esc sent the abort"          "${ab:-0}" "1"
+check "session survived interrupt"  "$(field "$(st)" rSize)" "3"
+key esc                              # now idle: Esc = plain leave-insert
+check "second Esc left insert"      "$(field "$(st)" ins)" "False"
+key g; key j; key j                  # roster cursor onto zulu-9999
+key x; sleep 2                       # roster-x = kill THAT session
+kl=$(grep -c '"type": "stop", "session": "zulu-9999"' "$SOCK.answers" 2>/dev/null)
+check "roster-x killed the row's session" "${kl:-0}" "1"
+check "roster shrank" "$(field "$(st)" rSize)" "2"
+
+say "14. enter steers a live turn; ctrl+enter queues; abort flushes the queue"
+# The Claude Code model: steering redirects the running turn (default), a queued message
+# waits for agent_end — which an ABORT also emits, so interrupting picks the queued
+# item up immediately instead of leaving it in limbo.
+rm -f "$SOCK.answers"
+fake insert 1                          # restore a 3-row roster (13 killed zulu-9999)
+fake stream_on
+ipc_send() { timeout 10 qs -p "$T/qs-shell" ipc call heidr "$1" "$2" >/dev/null 2>&1; }
+ipc_send railSend "redirect please"; sleep 1.5
+steered=$(grep -c '"type": "steer", "session": "every-9001", "message": "redirect please"' "$SOCK.answers" 2>/dev/null)
+check "enter while busy STEERED" "${steered:-0}" "1"
+ipc_send railQueue "do this next"; sleep 1
+check "message queued" "$(field "$(st)" q)" "1"
+qp=$(grep -c '"type": "prompt".*do this next' "$SOCK.answers" 2>/dev/null)
+check "not sent yet" "${qp:-0}" "0"
+key G                                  # cursor into the feed — roster-x would KILL, not interrupt
+key x; sleep 3
+qp2=$(grep -c '"message": "do this next"' "$SOCK.answers" 2>/dev/null)
+check "abort flushed the queued item" "${qp2:-0}" "1"
+check "queue empty" "$(field "$(st)" q)" "0"
 
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")

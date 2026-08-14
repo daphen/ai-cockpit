@@ -52,9 +52,13 @@ ShellRoot {
                                 view: rail.view, mode: rail.scrollMode,
                                 sel: rail.selectedRaw, key: rail.cursorKey,
                                 ins: rail.insert, ask: !!rail.pendingAsk, stale: !!rail.staleAsk,
+                                q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
                                 row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
+      // Test-only sends, so the harness can drive the steer/queue/abort model.
+      function railSend(t: string): string { if (rail.agentd) rail.agentd.submit(rail.selectedRaw, t); return "ok" }
+      function railQueue(t: string): string { if (rail.agentd) rail.agentd.enqueue(rail.selectedRaw, t); return "ok" }
       // Realized feed rows as y/height/implicitHeight/cardHeight — the only way to see
       // whether chat cards are drawn on top of each other.
       function railGeom(): string { return JSON.stringify(rail.feedGeom()) }

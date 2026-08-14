@@ -99,6 +99,23 @@ def serve(conn):
             except ValueError:
                 continue
             t = m.get("type")
+            if t in ("prompt", "steer"):
+                with open(SOCK + ".answers", "a") as fh:
+                    fh.write(json.dumps(m) + "\n")
+            if t == "stop":
+                with open(SOCK + ".answers", "a") as fh:
+                    fh.write(json.dumps(m) + "\n")
+                sid = m.get("session", "")
+                state["names"] = [n for n in state["names"] if n != sid]
+                if state["streaming"] == sid:
+                    state["streaming"] = None
+                push_roster()
+            if t == "abort":
+                with open(SOCK + ".answers", "a") as fh:
+                    fh.write(json.dumps(m) + "\n")
+                state["streaming"] = None
+                broadcast({"type": "agent_end", "session": m.get("session", "")})
+                push_roster()
             if t == "extension_ui_response":
                 with open(SOCK + ".answers", "a") as fh:
                     fh.write(json.dumps(m) + "\n")

@@ -782,6 +782,27 @@ Item {
     }
   }
 
+  // Live-follow: the agent's edits open in nvim as they happen. Driven from HERE, not
+  // the nvim module — the rail sees every scope's events (a VM ticket lives on another
+  // daemon than nvim's own client) and owns the remote→mirror path mapping. Policy
+  // (don't yank the user off their own file, resolve the hunk line, debounce) stays in
+  // lua where the editor state lives.
+  Connections {
+    target: rail.agentd
+    function onEditSeen(sid, path) {
+      if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
+      var cwd = ""
+      for (var i = 0; i < rail.agentd.sessions.length; i++)
+        if (rail.agentd.sessions[i].id === sid) { cwd = rail.agentd.sessions[i].cwd; break }
+      if (!cwd) return
+      var lcwd = rail._localPath(cwd)
+      var p = rail._localPath(String(path))
+      if (p.charAt(0) !== "/") p = lcwd + "/" + p     // pi may report worktree-relative
+      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
+        'v:lua.require("heidr").follow_remote("' + lcwd + '","' + p + '")'])
+    }
+  }
+
   // While the selected session is mid-turn, re-pull its transcript on a timer. Without
   // this the chat is frozen from whenever the rail last fetched — most visibly when you
   // open heidr while an agent is already working, which reads as "nothing is happening".
@@ -936,17 +957,17 @@ Item {
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
     else if (e.key === Qt.Key_N)  { rail.openNew(); e.accepted = true }      // new session
-    else if (e.key === Qt.Key_X)  {                                          // stop a turn
-      // Act on the row under the CURSOR when the cursor is in the roster — you
-      // highlight with j/k and expect x to hit what you are looking at. Bound to
-      // selectedRaw, this stopped whichever session happened to be OPEN instead of the
-      // highlighted one, which is how it killed the orchestrator mid-roster-browse.
-      var xt = rail.selectedRaw
+    else if (e.key === Qt.Key_X)  {
+      // Two x's, keyed on where the cursor is. On a ROSTER row: kill that session (the
+      // daemon's stop — pi dies, the row goes; you aimed at a session, so act on the
+      // session). Anywhere else: INTERRUPT the open session's turn (pi's abort) — the
+      // session survives, idle, and takes a fresh prompt immediately.
       if (rail.curSection() === "roster") {
         var row = rail.rosterList[rail.curLocal()]
-        if (row) xt = row.rawName || row.name
+        if (row && rail.agentd) rail.agentd.stop(row.rawName || row.name)
+      } else if (rail.agentd && rail.selectedRaw) {
+        rail.agentd.interrupt(rail.selectedRaw)
       }
-      if (rail.agentd && xt) rail.agentd.stop(xt)
       e.accepted = true
     }
     else if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { activateCur(); e.accepted = true }
@@ -992,6 +1013,16 @@ Item {
     // handler would accept them, so a test faithfully exercises the insert guard too.
     else if (k === "y" || k === "n") {
       if (pendingAsk && !(insert && askWantsText)) answerAsk({ confirmed: k === "y" })
+    }
+    else if (k === "x") {
+      if (curSection() === "roster") {
+        var row = rosterList[curLocal()]
+        if (row && agentd) agentd.stop(row.rawName || row.name)
+      } else if (agentd && selectedRaw) agentd.interrupt(selectedRaw)
+    }
+    else if (k === "esc") {
+      if (insert && featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
+      else if (insert) exitInsert()
     }
   }
   // subtle focus accent on the left edge (no full ring)
@@ -1574,6 +1605,33 @@ Item {
       // the family looks consistent. The name matches the inline reference exactly
       // (@.heidr-pastes/img1.png → "img1"), which is what makes "before: img1, after:
       // img2" unambiguous for the agent as well as for you.
+      // Queued-message pill: Ctrl+Enter holds a message for the turn's end; without a
+      // visible trace it reads as "my message vanished".
+      Rectangle {
+        visible: rail.agentd && rail.agentd.queuedGen >= 0 && rail.agentd.queuedFor(rail.selectedRaw) > 0
+        Layout.fillWidth: true
+        implicitHeight: 26
+        radius: 6
+        color: Theme.surface0
+        border.width: 1; border.color: Theme.hairline
+        Row {
+          anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+          spacing: 8
+          Text {
+            text: "⏳"; color: Theme.fg_muted
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          }
+          Text {
+            readonly property int qn: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0
+            text: qn + " queued — sends when the turn ends: “"
+                  + (rail.agentd ? rail.agentd.queuedFirst(rail.selectedRaw) : "").slice(0, 60) + "”"
+            color: Theme.fg_muted
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            elide: Text.ElideRight
+          }
+        }
+      }
+
       Flow {
         Layout.fillWidth: true
         spacing: 16
@@ -1910,6 +1968,25 @@ Item {
             }
             Keys.onPressed: (e) => {
               var ctrl = (e.modifiers & Qt.ControlModifier)
+              // Esc while the agent runs = interrupt it (Claude Code's Esc), keeping
+              // insert — you are about to type what it should do instead. Idle: the
+              // usual leave-insert.
+              if (e.key === Qt.Key_Escape) {
+                if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.interrupt(rail.selectedRaw)
+                else rail.exitInsert()
+                e.accepted = true; return
+              }
+              // Ctrl+Enter = QUEUE: hold the message until the turn ends (or is
+              // aborted), then send it as a fresh prompt. Plain Enter steers the live
+              // turn instead — see onAccepted / submit().
+              if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
+                if (text.trim().length && rail.agentd && rail.selectedRaw) {
+                  rail.agentd.enqueue(rail.selectedRaw, text)
+                  rail.pastedImages = []
+                  text = ""
+                }
+                e.accepted = true; return
+              }
               // Ctrl+V: the clipboard may hold an IMAGE, and we only learn that
               // asynchronously (wl-paste --list-types), so swallow the key and let
               // pasteImage() decide — it falls back to a text paste when there is no
@@ -1944,31 +2021,51 @@ Item {
               visible: !composerInput.text && !composerInput.activeFocus
               text: (rail.pendingAsk && (rail.pendingAsk.method === "input" || rail.pendingAsk.method === "editor"))
                     ? "type your reply…   (⏎ to send · esc cancels)"
-                    : "message " + rail.featured.name + "…   (i to type, / for commands)"
+                    : "message " + rail.featured.name + "…"
               color: Theme.fg_muted; font: composerInput.font
             }
           }
         }
       }
 
-      // Keybind hints (QsLib KeyCap/CapLabel), context-aware.
+      // Keybind hints (QsLib KeyCap/CapLabel) — the chin is the ONE place bindings are
+      // documented, and it follows the state you are actually in: insert shows the
+      // send/steer/queue grammar (which used to be crammed into the placeholder), an ask
+      // shows its answer keys, and normal mode differs between a roster and a feed cursor.
       RowLayout {
         Layout.fillWidth: true
         spacing: 6
-        // opacity, not visible: a hidden row collapses its height, and with a
-        // content-driven chin that made the whole bar jump on every insert toggle.
-        opacity: rail.insert ? 0 : 1
         Item { Layout.fillWidth: true }   // push hint chips to the right
         Repeater {
-          model: [
-            { k: "j/k", l: "move" },
-            { k: "⇥",   l: rail.view === "files" ? "chat" : "files" },
-            { k: "⏎",   l: rail.view === "files" ? "open" : "act" },
-            { k: "y",   l: "copy" },
-            { k: "f",   l: rail.hinting ? "pick" : "links" },
-            { k: "i",   l: "type" },
-            { k: "h",   l: "nvim" }
-          ].concat(rail.featuredStreaming ? [{ k: "x", l: "stop" }] : [])
+          model: {
+            if (rail.pendingAsk && !rail.insert) {
+              var pm = rail.pendingAsk.method
+              if (pm === "confirm") return [{ k: "y", l: "yes" }, { k: "n", l: "no" },
+                                            { k: "t", l: "talk" }, { k: "esc", l: "cancel" }]
+              if (pm === "select")  return [{ k: "1-9", l: "pick" }, { k: "t", l: "talk" },
+                                            { k: "esc", l: "cancel" }]
+              return [{ k: "i", l: "answer" }, { k: "t", l: "talk" }, { k: "esc", l: "cancel" }]
+            }
+            if (rail.insert) {
+              return (rail.featuredStreaming
+                ? [{ k: "⏎", l: "steer" }, { k: "C-⏎", l: "queue" }, { k: "esc", l: "interrupt" }]
+                : [{ k: "⏎", l: "send" }, { k: "/", l: "commands" }, { k: "esc", l: "normal" }])
+                .concat([{ k: "C-v", l: "paste" }])
+            }
+            if (rail.curSection() === "roster") {
+              return [{ k: "j/k", l: "move" }, { k: "⏎", l: "open" }, { k: "n", l: "new" },
+                      { k: "x", l: "kill" }, { k: "C-t", l: "collapse" }, { k: "i", l: "type" },
+                      { k: "h", l: "nvim" }]
+            }
+            return [
+              { k: "j/k", l: "move" },
+              { k: "⇥",   l: rail.view === "files" ? "chat" : "files" },
+              { k: "⏎",   l: rail.view === "files" ? "open" : "copy" },
+              { k: "f",   l: rail.hinting ? "pick" : "links" },
+              { k: "i",   l: "type" },
+              { k: "h",   l: "nvim" }
+            ].concat(rail.featuredStreaming ? [{ k: "x", l: "interrupt" }] : [])
+          }
           RowLayout {
             spacing: 4
             KeyCap { small: true; text: modelData.k }

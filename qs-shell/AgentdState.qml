@@ -87,6 +87,9 @@ Item {
 
   // Pending ask_user questions (extension_ui_request): sid -> request obj
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
+  // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
+  signal editSeen(string sid, string path)
+
   property var asks: ({})
   property int askGen: 0
   function askFor(sid) { return asks[sid] || null }
@@ -156,7 +159,28 @@ Item {
     _push(sid, { kind: "user", text: text })
     _steerPending[sid] = { text: text, at: Date.now() }
   }
-  // A send while the agent is working should redirect it, not queue behind the turn.
+  // Queued prompts. Enter while the agent runs STEERS (redirect the live turn — the
+  // default, it is what you usually mean); Ctrl+Enter QUEUES: the message waits for the
+  // turn to end — a completed turn or an abort, both emit agent_end — then goes out as a
+  // normal prompt. So aborting a turn with something queued picks the queued item up
+  // immediately, the Claude Code model.
+  property var queued: ({})        // sid -> [text, …] in send order
+  property int queuedGen: 0
+  function queuedFor(sid) { return (queued[sid] || []).length }
+  function queuedFirst(sid) { var q = queued[sid] || []; return q.length ? q[0] : "" }
+  function _flushQueue(sid) {
+    var q = queued[sid] || []
+    if (!q.length) return
+    // One per turn boundary: the next flush happens on the next agent_end, so several
+    // queued messages become a conversation, not a pile-up on pi's stdin.
+    var nq = queued; nq[sid] = q.slice(1); if (!nq[sid].length) delete nq[sid]
+    queued = nq; queuedGen++
+    sendPrompt(sid, q[0])
+  }
+  function enqueue(sid, text) {
+    if (!isBusy(sid)) { sendPrompt(sid, text); return }   // nothing to wait for
+    var q = queued; (q[sid] = q[sid] || []).push(text); queued = q; queuedGen++
+  }
   function submit(sid, text) {
     // A prompt IS the answer to a stale ask ("send a prompt with your answer to
     // continue"), so sending one retires the notice — leaving it up read as unanswered.
@@ -177,6 +201,18 @@ Item {
   // prose arrives via get_entries, not via message_* events, so a client that joins
   // mid-turn otherwise shows a frozen snapshot until the turn ends.
   function refreshEntries(sid) { if (sid) send({ type: "get_entries", session: sid }) }
+  // Interrupt = abort the in-flight TURN; the session survives, idle, transcript
+  // intact. This is pi's own rpc `abort` (Esc in its TUI) forwarded by agentd — and it
+  // passes the daemon's blocked-on-a-question bounce, so it is also the escape hatch
+  // for a session parked inside ask_user. Distinct from stop() below, which tears the
+  // whole session down (kills pi, drops it from the roster).
+  function interrupt(sid) {
+    if (!sid) return
+    if (!send({ type: "abort", session: sid })) return
+    delete _steerPending[sid]
+    _clearPending(sid)
+    _push(sid, { kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted" })
+  }
   function stop(sid) {
     send({ type: "stop", session: sid })
     delete _steerPending[sid]      // an aborted turn must not resurrect the steer
@@ -435,6 +471,8 @@ Item {
     if (!sid) return
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
+    // The whole turn is over (completed or aborted) → the next queued message goes out.
+    if (t === "agent_end") root._flushQueue(sid)
     // A daemon bounce (undeliverable prompt, lineage refusal) was invisible — the send
     // echoed optimistically and then nothing. Surface it as a feed row.
     if (t === "error" && m.error) _push(sid, { kind: "cmd", tool: "error", text: String(m.error) })
@@ -467,6 +505,7 @@ Item {
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
                      add: 0, del: 0, id: m.toolCallId })
+        if (args.path) root.editSeen(sid, String(args.path))
       } else {
         // bash/mcp/grep/read/… → one-line hint; keep raw command for "run from message".
         _push(sid, { kind: "cmd", tool: tn, text: toolHint(tn, args),
