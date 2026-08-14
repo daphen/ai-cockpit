@@ -1038,7 +1038,7 @@ Item {
             // Collapsed: index doesn't map to the full list → just focus/expand.
             TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
             RowLayout {
-              anchors { fill: parent; leftMargin: 12 + (modelData.depth || 0) * 20; rightMargin: 14 }
+              anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
               spacing: 8
               // Nesting connector for spawned subagents.
               Text {
@@ -1047,39 +1047,36 @@ Item {
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                 Layout.alignment: Qt.AlignVCenter
               }
-              // Working sessions spin; the rest keep the static glyph. Motion is the
-              // cheapest way to read "busy" across a roster at a glance.
+              // Where the agent actually runs: cloud = a lovbox worktree, laptop =
+              // this machine. Muted on purpose — it's provenance, not status.
+              Icon {
+                // Outline cuts, and both from the 18px set so their stroke weights match —
+                // there is no laptop--outline--12. Drawn at 14 rather than 13 to give the
+                // laptop's outline enough room to read as a laptop and not a rectangle.
+                name: modelData.remote ? "cloud--outline--18" : "laptop--outline--18"
+                width: 14; height: 14
+                Layout.preferredWidth: 14; Layout.preferredHeight: 14
+                Layout.alignment: Qt.AlignVCenter
+                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                opacity: sessRow.cursor ? 0.8 : 0.65
+              }
+              // Spinner sits with the NAME. Not first in the row: as the leading item its
+              // reserved slot made the left inset 20px deeper than the right. After the
+              // provenance icon, the row still starts 14px in, matching the right edge.
+              // The slot is reserved even when idle so the name never shifts as a session
+              // starts or stops working.
               Item {
                 Layout.preferredWidth: 14; Layout.preferredHeight: 14
                 Layout.alignment: Qt.AlignVCenter
-                Icon {
-                  anchors.fill: parent
-                  visible: !sessRow.streaming
-                  name: "filters"
-                  color: sessRow.cursor ? Theme.bg : rail.dotColor(modelData.status)
-                }
-                // The Orb again, now that it scales: at 14px it picks ~8 nodes instead
-                // of 26, so it reads as a spinning wireframe rather than a blob.
+                // At 14px the Orb picks ~8 nodes instead of 26, so it reads as a spinning
+                // wireframe rather than a blob.
                 Orb {
                   anchors.fill: parent
                   visible: sessRow.streaming
                   running: sessRow.streaming
-                  // Electric, not muted: this is the one thing in the row that should
-                  // catch the eye — a session actually doing work.
+                  // Electric, not muted: the one thing in the row that should catch the eye.
                   glow: sessRow.cursor ? Theme.bg : Theme.electric
                 }
-              }
-              // Where the agent actually runs: cloud = a lovbox worktree, laptop =
-              // this machine. Muted on purpose — it's provenance, not status.
-              Icon {
-                // Filled 12px cuts, not the default outlines: at 13px the outline
-                // laptop is indistinguishable from a plain rectangle — a house reads instantly.
-                name: modelData.remote ? "cloud--glyph--12" : "house-2--glyph--12"
-                width: 13; height: 13
-                Layout.preferredWidth: 13; Layout.preferredHeight: 13
-                Layout.alignment: Qt.AlignVCenter
-                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
-                opacity: sessRow.cursor ? 0.8 : 0.65
               }
               Text {
                 text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight
@@ -1091,8 +1088,8 @@ Item {
                 text: modelData.state || modelData.idle || ""
                 Layout.preferredWidth: 74; horizontalAlignment: Text.AlignRight
                 Layout.alignment: Qt.AlignVCenter
-                // One muted colour for every state: the spinning orb on the left already
-                // says "working", so colouring the word too was saying it twice.
+                // One muted colour for every state: the orb by the name already says
+                // "working", so colouring the word too was saying it twice.
                 color: sessRow.cursor ? Theme.bg : Theme.fg_muted
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
               }
