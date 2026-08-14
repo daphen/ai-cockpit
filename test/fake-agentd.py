@@ -11,7 +11,7 @@ import json, os, socket, sys, threading, time
 SOCK = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fake-agentd.sock"
 
 BASE = ["alpha-1000", "every-9001", "zulu-9999"]
-state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0}
+state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0, "transcript_ask": None}
 clients = []
 lock = threading.Lock()
 
@@ -41,6 +41,22 @@ def entries_for(sid):
             "message": {"role": role, "content": [{"type": "text", "text": text}]},
         })
         parent = eid
+    # An ask_user living in the TRANSCRIPT (with or without its result) — what the rail's
+    # stale-notice recovery walks. Distinct from the live extension_ui_request event.
+    if state["transcript_ask"]:
+        eid = f"{sid}-ask"
+        ents.append({"id": eid, "parentId": parent, "type": "message",
+                     "message": {"role": "assistant", "content": [{
+                         "type": "toolCall", "id": "call_fake_ask", "name": "ask_user",
+                         "arguments": {"title": "T-stale: proceed?", "message": "from transcript"}}]}})
+        parent = eid
+        if state["transcript_ask"] == "answered":
+            eid = f"{sid}-askr"
+            ents.append({"id": eid, "parentId": parent, "type": "message",
+                         "message": {"role": "user", "content": [{
+                             "type": "toolResult", "toolCallId": "call_fake_ask",
+                             "content": [{"type": "text", "text": "approved"}]}]}})
+            parent = eid
     return ents, parent
 
 
@@ -83,6 +99,10 @@ def serve(conn):
             except ValueError:
                 continue
             t = m.get("type")
+            if t == "extension_ui_response":
+                with open(SOCK + ".answers", "a") as fh:
+                    fh.write(json.dumps(m) + "\n")
+                broadcast({"type": "turn_end", "session": m.get("session", "every-9001")})
             if t == "get_entries":
                 sid = m.get("session")
 
@@ -132,12 +152,26 @@ def driver():
                 state["streaming"] = "every-9001"
             elif c == "stream_off":
                 state["streaming"] = None
+            elif c == "ask":
+                broadcast({"type": "extension_ui_request", "session": "every-9001",
+                           "method": "confirm", "id": "fake-live-1",
+                           "title": "T-live: proceed?", "message": "live question"})
+            elif c == "ask_in_transcript":
+                state["transcript_ask"] = "open"
+            elif c == "answer_in_transcript":
+                state["transcript_ask"] = "answered"
             elif c.startswith("slow_entries"):
                 parts = c.split()
                 state["entry_delay"] = float(parts[1]) if len(parts) > 1 else 2.0
             elif c == "grow":
                 state["extra_turns"] += 2
+                # Both frames, in pi's order. message_delta ALONE is what the fake used to
+                # send, and the rail ignores it by design (prose is rebuilt from the
+                # authoritative transcript), so new messages only appeared on the rail's 5s
+                # safety poll — which reads on screen as "the chat doesn't follow" and is
+                # not how a real daemon behaves. turn_end is the frame that lands prose.
                 broadcast({"type": "message_delta", "session": "every-9001"})
+                broadcast({"type": "turn_end", "session": "every-9001"})
             push_roster()
             print(f"[fake] {c} -> {state['names']} streaming={state['streaming']} turns={12+state['extra_turns']}", flush=True)
 

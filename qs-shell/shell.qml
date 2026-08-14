@@ -51,12 +51,17 @@ ShellRoot {
         return JSON.stringify({ cur: rail.cur, rSize: rail.rSize, navTotal: rail.navTotal,
                                 view: rail.view, mode: rail.scrollMode,
                                 sel: rail.selectedRaw, key: rail.cursorKey,
+                                ins: rail.insert, ask: !!rail.pendingAsk, stale: !!rail.staleAsk,
                                 row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
       // Realized feed rows as y/height/implicitHeight/cardHeight — the only way to see
       // whether chat cards are drawn on top of each other.
       function railGeom(): string { return JSON.stringify(rail.feedGeom()) }
+      // How far the viewport sits from the live edge, in px. 0 = pinned to the bottom.
+      // "It doesn't scroll down when messages arrive" is exactly this number, and nothing
+      // else reports it: mode says "follow" while the view sits a card and a half behind.
+      function railScroll(): string { return JSON.stringify(rail.feedScrollState()) }
       // Merged roster as "scope/name status" lines — proves which daemon owns what
       // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
       function sessions(): string {

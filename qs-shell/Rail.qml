@@ -987,6 +987,12 @@ Item {
     else if (k === "G") cur = Math.max(0, navTotal - 1)
     else if (k === "enter") activateCur()
     else if (k === "tab") { view = (view === "chat") ? "files" : "chat"; if (cur >= rSize) cur = rSize }
+    else if (k === "i") enterInsert()
+    // Ask answers go through the SAME path as the real keys — but only when the key
+    // handler would accept them, so a test faithfully exercises the insert guard too.
+    else if (k === "y" || k === "n") {
+      if (pendingAsk && !(insert && askWantsText)) answerAsk({ confirmed: k === "y" })
+    }
   }
   // subtle focus accent on the left edge (no full ring)
   Rectangle {

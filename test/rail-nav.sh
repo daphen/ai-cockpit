@@ -162,6 +162,26 @@ check "cursor left the roster"  "$([ "$scur" -ge "$srs" ] && echo yes || echo no
 check "landed on the last row"  "$scur" "$((stot-1))"
 check "following the live edge" "$(field "$sw" mode)" "follow"
 
+say "10. the feed stays pinned to the live edge as messages arrive"
+# "It doesn't scroll down when new messages arrive" has two possible causes and the state
+# probes distinguish neither: the viewport falling behind, or the CONTENT not arriving.
+# railScroll reports both — px behind the edge, and the row count.
+# Select every-9001 explicitly — it is the session the fake streams into, and the earlier
+# steps leave the cursor on another one. Assert on the newest row's TEXT, not the row count:
+# past the 60-message cap the feed slides instead of growing, so a count is no evidence.
+key g; key j; key enter; sleep 3
+key G; sleep 1
+b0=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railScroll 2>/dev/null | tail -1)
+r0=$(field "$(st)" row)
+for _ in 1 2 3; do echo grow >> "$CMD"; sleep 1.2; done
+sleep 2
+b1=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railScroll 2>/dev/null | tail -1)
+r1=$(field "$(st)" row)
+say "  behind $(field "$b0" behind)px -> $(field "$b1" behind)px, mode $(field "$b1" mode)"
+say "  newest row: '$r0' -> '$r1'"
+check "new content arrived"    "$([ "$r0" != "$r1" ] && echo yes || echo no)" "yes"
+check "still at the live edge" "$([ "$(field "$b1" behind)" -le 60 ] && echo yes || echo no)" "yes"
+
 say "9. chat cards never overlap"
 # These cards reach their real height only after their prose Loader realizes (57 -> 144px).
 # Inside a ListView add/displaced transition that growth never reaches the layout, so rows
@@ -178,6 +198,37 @@ PY
 )
 say "  rows measured: $(python3 -c "import json,sys;print(len(json.loads(sys.argv[1] or '[]')))" "$geom")"
 check "overlapping row pairs" "$ov" "0"
+
+say "11. a live ask escapes insert mode, y answers it through the real path"
+# The deadlock this pins: sending leaves the composer in insert on purpose, so an ask
+# landing right after a send arrived with insert still true — the key handler's insert
+# guard then ate y/n while the hidden composer had no focus. Keys went nowhere at all.
+rm -f "$SOCK.answers"
+key i
+check "insert entered" "$(field "$(st)" ins)" "True"
+fake ask
+a1=$(st)
+check "ask arrived"            "$(field "$a1" ask)" "True"
+check "insert escaped on ask"  "$(field "$a1" ins)" "False"
+key y; sleep 2
+ans=$(grep -c '"id": "fake-live-1"' "$SOCK.answers" 2>/dev/null || echo 0)
+check "answer reached the daemon" "$ans" "1"
+check "card cleared"              "$(field "$(st)" ask)" "False"
+
+say "12. the stale notice: never over a streaming session, and self-heals"
+# The ghost this pins: answering a live ask raced the transcript refresh — pi resumed but
+# its toolResult wasn't written yet, so the recovery published 'send your answer to
+# continue' over an agent that was already continuing, and nothing ever retired it.
+fake stream_on 1
+fake ask_in_transcript 1
+fake grow                              # turn_end → transcript refresh, ask open, still streaming
+check "no notice while streaming" "$(field "$(st)" stale)" "False"
+fake stream_off 1
+fake grow                              # refresh again: ask open, session idle → the real case
+check "notice for the idle open ask" "$(field "$(st)" stale)" "True"
+fake answer_in_transcript 1
+fake grow                              # refresh: transcript now shows the answer
+check "notice self-healed" "$(field "$(st)" stale)" "False"
 
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
