@@ -10,7 +10,10 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
-    title: "heidr-qs"   // unique — the old nvim cockpit window title contains "heidr"
+    // Per-mode title (launcher sets HEIDR_TITLE: "heidr-qs · lovable" / "heidr-qs · private")
+    // so two instances can coexist: niri-jump-or-exec cycles every "heidr-qs" match, and
+    // heidr-ipc routes to the instance whose title equals the FOCUSED window's.
+    title: Quickshell.env("HEIDR_TITLE") || "heidr-qs"
     visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
     // Wide by default: the cockpit is two panes (nvim ~60% + rail ~40%), so 1600
     // left the terminal too narrow for real code once the rail took its share.
@@ -43,6 +46,7 @@ ShellRoot {
       function focusLeft(): string  { return win.tryFocus("left") }
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
+      function title(): string      { return win.title }   // heidr-ipc instance routing
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
       // The rail's test interface (test/rail-nav.sh): cursor/scroll behaviour depends on
       // the roster and feed changing UNDER the cursor, which is only assertable from

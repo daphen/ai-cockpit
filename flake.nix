@@ -57,9 +57,22 @@
             shell="$HEIDR_DEV/qs-shell"
           fi
 
-          # Single-instance: focus the existing window if one is mapped (niri),
-          # else launch. Heidr connects to the already-running agentd; no daemon
-          # of its own to spawn.
+          # Per-mode identity: distinct title + qs config path, so a private and a work
+          # cockpit run SIMULTANEOUSLY (Super+y cycles them via niri-jump-or-exec;
+          # heidr-ipc routes to the focused one by title).
+          if [ "''${HEIDR_SCOPE:-lovable}" = "personal" ]; then
+            export HEIDR_TITLE="''${HEIDR_TITLE:-heidr-qs · private}"
+            mirror="$HOME/.local/state/heidr/private-shell-pkg"
+            mkdir -p "$mirror"; rm -f "$mirror"/*.qml
+            for f in "$shell"/*.qml; do ln -sf "$f" "$mirror/$(basename "$f")"; done
+            shell="$mirror"
+          else
+            export HEIDR_TITLE="''${HEIDR_TITLE:-heidr-qs · lovable}"
+          fi
+
+          # Single-instance PER MODE: focus this mode's existing window if one is mapped
+          # (skipped by HEIDR_FORCE_NEW=1 — the Super+Shift+Y always-spawn path). Heidr
+          # connects to the already-running agentd; no daemon of its own to spawn.
           # Put the USER profile first so the wrapped `nvim` (with the full config)
           # wins over the system's unwrapped nvim; keep system bin as a fallback so
           # qs/tools still resolve when launched from a minimal niri env.
@@ -89,8 +102,9 @@
             for sc in $scopes; do socks="''${socks:+$socks,}''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agentd-$sc.sock"; done
             export HEIDR_AGENTD_SOCKS="$socks"
           fi
-          if command -v niri >/dev/null 2>&1 && niri msg --json windows 2>/dev/null | grep -q '"title": *"heidr-qs"'; then
-            niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r '.[]|select(.title=="heidr-qs")|.id' | head -1)" 2>/dev/null || true
+          if [ -z "''${HEIDR_FORCE_NEW:-}" ] && command -v niri >/dev/null 2>&1 \
+             && niri msg --json windows 2>/dev/null | ${pkgs.jq}/bin/jq -e --arg t "$HEIDR_TITLE" '.[]|select(.title==$t)' >/dev/null 2>&1; then
+            niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r --arg t "$HEIDR_TITLE" '.[]|select(.title==$t)|.id' | head -1)" 2>/dev/null || true
             exit 0
           fi
           exec qs -p "$shell"

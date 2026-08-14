@@ -7,22 +7,6 @@ cd "$(dirname "$0")"
 [ -f build/qml/Heidr/libheidr_termplugin.so ] || {
   echo "plugin missing — build first: nix-shell --run 'cmake --build build -j'"; exit 1; }
 
-# Clear any stale cockpit instance for this exact config path (config-scoped,
-# won't touch the bar) so a relaunch always shows the current QML.
-# `qs kill -p` does not always take (and a survivor leaves a second window plus an
-# ambiguous ipc registry entry, which silently breaks Ctrl+l / Super+T). Verify.
-qs kill -p "$PWD/qs-shell" >/dev/null 2>&1 || true
-for _ in 1 2 3 4 5 6; do
-  survivors=$(ps -eo pid=,args= | awk -v p="$PWD/qs-shell" '$0 ~ ("-p " p) && $0 !~ /awk/ {print $1}')
-  [ -z "$survivors" ] && break
-  sleep 0.5
-done
-for pid in ${survivors:-}; do
-  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = "qs" ] ||
-  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = ".quickshell-wra" ] || continue
-  kill "$pid" 2>/dev/null || true
-done
-
 # MODE by launch context. The DEFAULT is PRIVATE: the personal scope only, files and
 # sessions all on this machine. Launching from the lovable workspace is the special
 # case that wires the work cockpit — local lovable scope (orchestrator + PR
@@ -50,9 +34,40 @@ if [ -z "${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "${HEIDR_AGENTD_SOCK:-}" ]; then
   echo "mode=${HEIDR_SCOPE} HEIDR_AGENTD_SOCKS=$HEIDR_AGENTD_SOCKS"
 fi
 
+# Per-mode window identity + qs config-path identity, so a private and a work cockpit
+# can run SIMULTANEOUSLY: same path = the kill-old sweep above takes down the other
+# mode's instance, and identical titles leave heidr-ipc unable to route to the focused
+# window. The private mode runs a symlink MIRROR of qs-shell (same live QML, distinct
+# path — the rail-nav harness pattern).
+shellDir="$PWD/qs-shell"
+if [ "${HEIDR_SCOPE:-lovable}" = "personal" ]; then
+  export HEIDR_TITLE="${HEIDR_TITLE:-heidr-qs · private}"
+  mirror="$HOME/.local/state/heidr/private-shell"
+  mkdir -p "$mirror"; rm -f "$mirror"/*.qml
+  for f in "$PWD"/qs-shell/*.qml; do ln -s "$f" "$mirror/$(basename "$f")"; done
+  shellDir="$mirror"
+else
+  export HEIDR_TITLE="${HEIDR_TITLE:-heidr-qs · lovable}"
+fi
+
+# Clear a stale instance of THIS MODE only (config-path scoped): a relaunch must show
+# the current QML, but the OTHER mode's cockpit keeps running — that is the whole point
+# of per-mode config paths. `qs kill -p` does not always take; verify and escalate.
+qs kill -p "$shellDir" >/dev/null 2>&1 || true
+for _ in 1 2 3 4 5 6; do
+  survivors=$(ps -eo pid=,args= | awk -v p="$shellDir" '$0 ~ ("-p " p) && $0 !~ /awk/ {print $1}')
+  [ -z "$survivors" ] && break
+  sleep 0.5
+done
+for pid in ${survivors:-}; do
+  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = "qs" ] ||
+  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = ".quickshell-wra" ] || continue
+  kill "$pid" 2>/dev/null || true
+done
+
 export QML2_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
 export QML_IMPORT_PATH="$QML2_IMPORT_PATH"
 export LD_LIBRARY_PATH="$PWD/build:${LD_LIBRARY_PATH:-}"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 echo "QML_IMPORT_PATH=$QML_IMPORT_PATH"
-exec qs -p "$PWD/qs-shell"
+exec qs -p "$shellDir"
