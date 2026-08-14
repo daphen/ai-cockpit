@@ -985,6 +985,10 @@ Item {
     cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
   }
 
+  // Blink probes (debug): delegate/dot creations — streaming must not grow these.
+  property int probeCardCreates: 0
+  property int probeDotCreates: 0
+  property int probeFullResets: 0
   // Ground-truth key trace (debug): what key arrived, and what state met it.
   property var keyLog: []
   function _klog(e) {
@@ -1192,6 +1196,7 @@ Item {
   function syncFeedModel() {
     var arr = groupedFeed
     if (_feedReset || arr.length < feedModel.count) {
+      if (!_feedReset) probeFullResets++   // a SHRINK forced a full rebuild (blink source)
       _feedReset = false
       feedModel.clear()
       for (var a = 0; a < arr.length; a++) feedModel.append({ d: arr[a], sig: _turnSig(arr[a]) })
@@ -1430,6 +1435,7 @@ Item {
         id: turnDel
         width: feedView.width
         implicitHeight: card.implicitHeight
+        Component.onCompleted: rail.probeCardCreates++
         // Streaming content arrived as a hard pop; fade each row in on its own (see the
         // note above on why this is not a ListView `add` transition).
         opacity: 0
@@ -1628,6 +1634,7 @@ Item {
               model: (rail.rosterList || []).filter(s => (s.rawName || s.name) !== rail.selectedRaw)
               Item {
                 width: 12; height: 12
+                Component.onCompleted: rail.probeDotCreates++
                 Spinner {
                   anchors.centerIn: parent; visible: modelData.status === "streaming"
                   running: visible; color: Theme.green; dotSize: 2.0
