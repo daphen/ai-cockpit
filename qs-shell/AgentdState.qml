@@ -561,8 +561,18 @@ Item {
   // it only if it is the transcript's final tool call — work after it means the agent
   // moved on and the question no longer needs anyone.
   function _applyRecoveredAsk(sid, open, lastCallId) {
-    if (!open) return
-    if (lastCallId && open.id !== lastCallId) return
+    // Publish only for an IDLE session. While pi streams, an open-looking transcript ask
+    // is either genuinely pending — the daemon replays those as ANSWERABLE cards now — or
+    // already answered with the toolResult not yet written: the 5s refresh raced a live
+    // answer and raised "send your answer to continue" over an agent that was already
+    // continuing. Idle + open is the one case the resolver is really gone.
+    var live = open && (!lastCallId || open.id === lastCallId) && !isBusy(sid)
+    if (!live) {
+      // Self-heal a published notice the moment the transcript (or status) moves on —
+      // it used to linger until manually dismissed even after the ask was answered.
+      if (staleAsks[sid]) { var n = staleAsks; delete n[sid]; staleAsks = n; staleAskGen++ }
+      return
+    }
     _publishStaleAsk(sid, open)
   }
 
