@@ -9,6 +9,10 @@ import QsLib
 // (drives feed + composer target), i enters the composer, Esc/Ctrl+h/h leave to nvim.
 Item {
   id: rail
+  // The roster sheet bleeds 1px past both sides (and one radius above) to hide its
+  // rounded corners + side hairlines; without clipping that bleed renders next to
+  // the term/rail divider as a double line.
+  clip: true
 
   property var agentd: null
   // Set by shell.qml from TermView.nvimSocket — the socket THIS instance's nvim listens
