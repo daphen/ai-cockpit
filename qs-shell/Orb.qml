@@ -13,10 +13,13 @@ Item {
   implicitHeight: 26
   visible: running
 
-  // Node count scales with size. At roster size the 26-node mesh collapsed into a
-  // dark blob: R is ~5px there, the edge threshold spans almost the whole disc, so
-  // all ~325 pairs drew a line. Fewer nodes keeps it legible as a wireframe.
-  property int nodes: width >= 22 ? 26 : Math.max(6, Math.round(width * 0.55))
+  // Node count scales with size. At roster size the 26-node mesh collapsed into a dark
+  // blob: R is ~5px there, the edge threshold spans almost the whole disc, so all ~325
+  // pairs drew a line. But 0.55 overshot the other way — 8 nodes at 14px read as thin
+  // and scattered. 0.93 puts the roster orb at 13, which holds together as a mesh
+  // (chosen against a true-size side-by-side; a scaled preview magnifies the Canvas
+  // raster and tells you nothing).
+  property int nodes: width >= 22 ? 26 : Math.max(6, Math.round(width * 0.93))
 
   property var _pts: []
   property real rot: 0
