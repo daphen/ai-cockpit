@@ -142,10 +142,19 @@ Item {
     if (!pendingSends[sid]) return
     var p = Object.assign({}, pendingSends); delete p[sid]; pendingSends = p; pendingGen++
   }
+  // Local echoes that must SURVIVE transcript rebuilds. A steered message sits in pi's
+  // queue until the next tool boundary, so it is absent from get_entries for seconds to
+  // minutes — and the rebuild wiped the optimistic row, making mid-turn sends silently
+  // vanish and then "all show up at once" when pi finally consumed them.
+  property var _localEcho: ({})   // sid -> [text, …] not yet seen in the transcript
+  function _echoTrack(sid, text) {
+    var m = _localEcho; (m[sid] = m[sid] || []).push(text); _localEcho = m
+  }
   function sendPrompt(sid, text) {
     // agentd/pi expect `message`, not `text`.
     if (!send({ type: "prompt", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text })   // optimistic echo; get_entries refreshes it
+    _echoTrack(sid, text)
     var p = Object.assign({}, pendingSends); p[sid] = true; pendingSends = p; pendingGen++
   }
   // Mid-turn redirect. pi's steer is BEST-EFFORT: if the turn ends within a moment of
@@ -157,6 +166,7 @@ Item {
   function steer(sid, text) {
     if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text })
+    _echoTrack(sid, text)
     _steerPending[sid] = { text: text, at: Date.now() }
   }
   // Queued prompts. Enter while the agent runs STEERS (redirect the live turn — the
@@ -538,6 +548,28 @@ Item {
     var esid = m.session
     if (!esid) return
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
+    // Re-append local echoes the transcript has not caught up with, dropping the ones it
+    // has (containment, not equality: pi may wrap a steered message when recording it).
+    var q = _localEcho[esid] || []
+    if (q.length) {
+      var corpus = []
+      for (var i = 0; i < m.data.entries.length; i++) {
+        var msg = (m.data.entries[i] || {}).message
+        if (msg && msg.role === "user")
+          for (var c = 0; c < (msg.content || []).length; c++)
+            if (msg.content[c].type === "text") corpus.push(String(msg.content[c].text || ""))
+      }
+      var joined = corpus.join("\n\u0000")
+      var left = []
+      for (var qi = 0; qi < q.length; qi++) {
+        if (joined.indexOf(q[qi]) >= 0) continue          // transcript caught up
+        left.push(q[qi])
+        feeds[esid].push({ kind: "user", text: q[qi] })   // keep it on screen
+      }
+      var le = _localEcho
+      if (left.length) le[esid] = left; else delete le[esid]
+      _localEcho = le
+    }
     feedGen++
     _recoverAsk(esid, m.data.entries)
   }

@@ -273,6 +273,16 @@ qp2=$(grep -c '"message": "do this next"' "$SOCK.answers" 2>/dev/null)
 check "abort flushed the queued item" "${qp2:-0}" "1"
 check "queue empty" "$(field "$(st)" q)" "0"
 
+say "15. a steered message stays visible until the transcript catches up"
+# Steered messages sit in pi's queue until a tool boundary: absent from get_entries for a
+# while. The optimistic row used to be wiped by the next rebuild — sends silently
+# vanished, then all appeared at once when pi consumed the queue.
+fake stream_on
+ipc_send railSend "steer me visible"; sleep 1
+fake grow                              # turn_end → full transcript rebuild, steer NOT in it
+vis=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom >/dev/null 2>&1; st)
+key G
+check "echo survived the rebuild" "$(field "$(st)" row | grep -c "steer me visible")" "1"
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
 check "error lines" "$errs" "0"
