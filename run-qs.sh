@@ -23,20 +23,31 @@ for pid in ${survivors:-}; do
   kill "$pid" 2>/dev/null || true
 done
 
-# Default the rail to every agentd we can see: the local `lovable` scope (the
-# orchestrator + PR reviewers) first, then the tunneled lovbox if its socket is
-# up. Order matters — on a name collision the earlier socket wins, which is what
-# keeps the LOCAL `lovable` in the rail instead of the box's base session.
+# MODE by launch context. The DEFAULT is PRIVATE: the personal scope only, files and
+# sessions all on this machine. Launching from the lovable workspace is the special
+# case that wires the full work cockpit — local lovable scope (orchestrator + PR
+# reviewers) first, the tunneled VM work scope, then personal LAST: on a name
+# collision the earlier socket wins, and ticket names must stay addressable.
 if [ -z "${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "${HEIDR_AGENTD_SOCK:-}" ]; then
+  ws=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true)
+  case "${ws:-}" in
+    lovable*)
+      scopes="lovable work personal"
+      export HEIDR_SCOPE="${HEIDR_SCOPE:-lovable}"
+      export HEIDR_NEW_CWD="${HEIDR_NEW_CWD:-$HOME/work/lovable}"
+      ;;
+    *)
+      scopes="personal"
+      export HEIDR_SCOPE="${HEIDR_SCOPE:-personal}"
+      export HEIDR_NEW_CWD="${HEIDR_NEW_CWD:-$HOME/personal}"
+      ;;
+  esac
   socks=""
-  # personal LAST: on a name collision the earlier socket wins, and work scopes are
-  # the ones whose names (tickets) must stay addressable.
-  for sc in lovable work personal; do
-    s="${XDG_RUNTIME_DIR}/agentd-${sc}.sock"
-    [ -S "$s" ] && socks="${socks:+$socks,}$s"
-  done
-  [ -n "$socks" ] && export HEIDR_AGENTD_SOCKS="$socks"
-  echo "HEIDR_AGENTD_SOCKS=${HEIDR_AGENTD_SOCKS:-<none found>}"
+  # Paths included even before the daemon binds: the rail re-dials every 2s, so a
+  # cold daemon just connects late instead of being silently absent forever.
+  for sc in $scopes; do socks="${socks:+$socks,}${XDG_RUNTIME_DIR}/agentd-${sc}.sock"; done
+  export HEIDR_AGENTD_SOCKS="$socks"
+  echo "mode=${HEIDR_SCOPE} HEIDR_AGENTD_SOCKS=$HEIDR_AGENTD_SOCKS"
 fi
 
 export QML2_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"

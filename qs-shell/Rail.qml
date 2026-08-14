@@ -727,8 +727,11 @@ Item {
       vmWt.command = ["vm-wt", n]
       vmWt.running = true
     } else if (agentd) {
+      // The launcher exports the mode's home dir: ~/work/lovable in the work cockpit,
+      // ~/personal in the private one — a hardcoded lovable path spawned private
+      // sessions into the work checkout.
       agentd.send({ type: "spawn", session: n.toLowerCase(),
-                    cwd: Quickshell.env("HOME") + "/work/lovable" })
+                    cwd: Quickshell.env("HEIDR_NEW_CWD") || (Quickshell.env("HOME") + "/work/lovable") })
     }
     closeNew()
   }

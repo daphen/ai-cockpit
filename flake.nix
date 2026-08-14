@@ -65,6 +65,30 @@
           # qs/tools still resolve when launched from a minimal niri env.
           _u=$(id -un)
           export PATH="/etc/profiles/per-user/$_u/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
+
+          # MODE by launch context (mirrors run-qs.sh): DEFAULT = PRIVATE, personal
+          # scope only, everything on this machine. The lovable workspace is the
+          # special case that wires the full work cockpit (lovable + VM work +
+          # personal; ticket names win collisions). Previously this launcher set no
+          # sockets at all, so the rail silently fell back to lovable-only.
+          if [ -z "''${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "''${HEIDR_AGENTD_SOCK:-}" ]; then
+            ws=$(niri msg --json workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true)
+            case "''${ws:-}" in
+              lovable*)
+                scopes="lovable work personal"
+                export HEIDR_SCOPE="''${HEIDR_SCOPE:-lovable}"
+                export HEIDR_NEW_CWD="''${HEIDR_NEW_CWD:-$HOME/work/lovable}"
+                ;;
+              *)
+                scopes="personal"
+                export HEIDR_SCOPE="''${HEIDR_SCOPE:-personal}"
+                export HEIDR_NEW_CWD="''${HEIDR_NEW_CWD:-$HOME/personal}"
+                ;;
+            esac
+            socks=""
+            for sc in $scopes; do socks="''${socks:+$socks,}''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agentd-$sc.sock"; done
+            export HEIDR_AGENTD_SOCKS="$socks"
+          fi
           if command -v niri >/dev/null 2>&1 && niri msg --json windows 2>/dev/null | grep -q '"title": *"heidr-qs"'; then
             niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r '.[]|select(.title=="heidr-qs")|.id' | head -1)" 2>/dev/null || true
             exit 0
