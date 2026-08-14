@@ -542,6 +542,15 @@ Item {
     return agentd.askFor(selectedRaw)
   }
   function answerAsk(payload) { if (agentd && pendingAsk) agentd.answerAsk(selectedRaw, payload) }
+  // A question the agent stopped on, found in the transcript. It cannot be answered from
+  // here (the resolver died with the process that asked), so it is a notice, not a card —
+  // the way forward is a fresh prompt carrying the decision.
+  readonly property var staleAsk: {
+    if (!agentd || !selectedRaw) return null
+    agentd.staleAskGen   // reactive dependency
+    return agentd.staleAskFor(selectedRaw)
+  }
+  function dismissStaleAsk() { if (agentd && selectedRaw) agentd.dismissStaleAsk(selectedRaw) }
   // The whole point of an ask is that it blocks: pull focus to the rail the moment
   // one lands, and for a free-text answer enter insert so the input is already yours.
   onPendingAskChanged: {
@@ -780,6 +789,7 @@ Item {
     // Ctrl+j → jump into the main view (chat/files); Ctrl+k → back to roster top.
     if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); e.accepted = true; return }
     if (ctrl && e.key === Qt.Key_K) { cur = 0; e.accepted = true; return }
+    if (ctrl && e.key === Qt.Key_D && staleAsk) { dismissStaleAsk(); e.accepted = true; return }
     if (ctrl && e.key === Qt.Key_T) { rosterOverride = !rosterExpanded; e.accepted = true; return }
     if (e.key === Qt.Key_I)      { enterInsert(); e.accepted = true }
     else if (e.key === Qt.Key_H || e.key === Qt.Key_Escape) { rail.focusNvim(); e.accepted = true }
@@ -1427,6 +1437,56 @@ Item {
         }
       }
 
+
+    // A turn that stopped on a question. Deliberately NOT the ask card: it is not
+    // answerable, so it states what happened and gets out of the way (Ctrl+d dismisses).
+    Rectangle {
+      visible: rail.staleAsk !== null && !rail.pendingAsk && rail.view === "chat"
+      Layout.fillWidth: true
+      implicitHeight: staleCol.implicitHeight + 20
+      radius: 12
+      color: Theme.surface
+      border.width: 1
+      border.color: Theme.hairline
+      z: 11
+
+      ColumnLayout {
+        id: staleCol
+        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter
+                  leftMargin: 14; rightMargin: 14 }
+        spacing: 3
+        RowLayout {
+          spacing: 6
+          Icon {
+            name: "clock"
+            width: 13; height: 13
+            Layout.preferredWidth: 13; Layout.preferredHeight: 13
+            Layout.alignment: Qt.AlignVCenter
+            color: Theme.fg_muted
+          }
+          Text {
+            Layout.fillWidth: true
+            text: "stopped on a question — send a prompt with your answer to continue"
+            color: Theme.fg_muted
+            font.pixelSize: rail.fsMeta
+            font.family: Theme.fontFamily
+            elide: Text.ElideRight
+          }
+          KeyCap { small: true; text: "C-d" }
+          CapLabel { text: "dismiss" }
+        }
+        Text {
+          Layout.fillWidth: true
+          text: rail.staleAsk ? rail.staleAsk.title : ""
+          color: Theme.fg
+          font.pixelSize: rail.fsBody
+          font.family: Theme.fontFamily
+          wrapMode: Text.WordWrap
+          maximumLineCount: 2
+          elide: Text.ElideRight
+        }
+      }
+    }
 
     // ask_user card — mirrors the nvim rail's "needs your input" approval: a
     // bordered card that TAKES OVER the composer's slot — same bottom edge as the input,

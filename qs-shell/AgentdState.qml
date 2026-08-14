@@ -524,30 +524,40 @@ Item {
     _applyRecoveredAsk(sid, open, lastCallId)
   }
 
-  // Shared by the inline path and the worker: decide whether an unanswered ask_user is
-  // a LIVE question and publish or clear it accordingly.
+  // An ask rebuilt from a transcript is NOT answerable. pi mints the request id with
+  // crypto.randomUUID() and keeps the resolver in the live process's memory (rpc-mode's
+  // createDialogPromise), so that id never reaches the transcript and dies with the
+  // process. Answering a recovered card therefore sent an id pi had never heard of: it
+  // was ignored, the transcript stayed unanswered, and the next 5s refresh republished
+  // the SAME question — a card that came back forever no matter how often you answered.
+  // So recovered asks go here, separate from the answerable `asks`, and surface as a
+  // dismissible notice instead.
+  property var staleAsks: ({})        // sid -> {id, title, message}
+  property int staleAskGen: 0
+  property var _askDismissed: ({})    // ask id -> true, so a dismissal survives refreshes
+  function staleAskFor(sid) { return staleAsks[sid] || null }
+  function dismissStaleAsk(sid) {
+    var a = staleAsks[sid]
+    if (!a) return
+    var d = _askDismissed; d[a.id] = true; _askDismissed = d
+    var n = staleAsks; delete n[sid]; staleAsks = n; staleAskGen++
+  }
+  function _publishStaleAsk(sid, open) {
+    if (_askDismissed[open.id]) return
+    if (staleAsks[sid] && staleAsks[sid].id === open.id) return
+    var a = open.arguments || {}
+    var n = staleAsks
+    n[sid] = { id: open.id, title: a.title || "", message: a.message || "" }
+    staleAsks = n; staleAskGen++
+  }
+
+  // An unanswered ask_user in the transcript means a turn STOPPED on a question. Surface
+  // it only if it is the transcript's final tool call — work after it means the agent
+  // moved on and the question no longer needs anyone.
   function _applyRecoveredAsk(sid, open, lastCallId) {
     if (!open) return
-    // It must be the transcript's final tool call. Work after an unanswered ask means the
-    // agent moved on — or, for a session respawned under the same name, that the question
-    // belongs to a dead pi process. Clear any card recovered under looser rules.
-    if (lastCallId && open.id !== lastCallId) {
-      if (asks[sid] && asks[sid].id === open.id) {
-        var da = asks; delete da[sid]; asks = da; askGen++
-      }
-      return
-    }
-    // Only while the session is genuinely blocked on it.
-    var busy = false
-    for (var k = 0; k < sessions.length; k++)
-      if (sessions[k].name === sid) { busy = sessions[k].status === "streaming"; break }
-    if (!busy) return
-    if (asks[sid] && asks[sid].id === open.id) return   // already on screen
-    var a = open.arguments || {}
-    var na = asks
-    na[sid] = { id: open.id, method: a.kind || "input", title: a.title || "",
-                message: a.message || "", options: a.options || [] }
-    asks = na; askGen++
+    if (lastCallId && open.id !== lastCallId) return
+    _publishStaleAsk(sid, open)
   }
 
   // One Socket per scope, each in its own Loader so a re-dial gets a fresh object
