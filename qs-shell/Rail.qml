@@ -707,6 +707,7 @@ Item {
                  // there — an orchestrator, a one-off — must not claim one.
                  devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || ""),
                  remote: rail._isRemote(s.cwd), scope: s.scope || "",
+                 profile: s.profile || "",   // agentd role (…-orchestrator/worker/…)
                  depth: Math.min(depth, 1) })  // one level deep only
       var kids = children[s.name] || []
       for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1)
