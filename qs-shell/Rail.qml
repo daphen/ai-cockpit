@@ -1205,7 +1205,7 @@ Item {
       Layout.leftMargin: 20; Layout.rightMargin: 20
       clip: true
       z: 2   // the chat slides UNDER the rounded bottom edge (negative top margin below)
-      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 16
+      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 28   // 20 top + 8 bottom
                                           : glanceCol.implicitHeight + 28   // extra room below the glance
       Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.InOutQuad } }
       // A flush TOP SHEET: full width, square at the top (the strip below covers the
@@ -1261,7 +1261,9 @@ Item {
         opacity: rail.rosterExpanded ? 1 : 0
         visible: opacity > 0.01
         Behavior on opacity { NumberAnimation { duration: 120 } }
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 8 }
+        // Top matches the visual weight of the sides/bottom: flush against the window
+        // edge, 8px read as none — the first pill needs real breathing room up there.
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 20 }
         spacing: 3
         Repeater {
           model: rosterModel
