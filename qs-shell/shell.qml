@@ -27,6 +27,11 @@ ShellRoot {
     // Returns "consumed" if it moved internal focus, "passed" if already at the
     // edge (the niri script then does its normal window focus).
     function tryFocus(dir) {
+      // Heal a pane/focus desync first: a QML hot-reload rebuilds the window tree and
+      // can leave `pane` claiming the rail while the keyboard truly sits in the
+      // terminal — the cross then answers "passed" and Ctrl+l goes dead. Reality wins.
+      if (term.activeFocus && win.pane !== "nvim") win.pane = "nvim"
+      else if (rail.activeFocus && win.pane !== "rail") win.pane = "rail"
       if (dir === "right") {
         if (win.pane === "nvim") { win.pane = "rail"; return "consumed" }
         return "passed"
