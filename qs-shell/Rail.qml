@@ -989,6 +989,7 @@ Item {
   property int probeCardCreates: 0
   property int probeDotCreates: 0
   property int probeFullResets: 0
+  property int probeActCreates: 0
   // Ground-truth key trace (debug): what key arrived, and what state met it.
   property var keyLog: []
   function _klog(e) {
@@ -2359,6 +2360,7 @@ Item {
         model: expanded ? items : []
         Loader {
           width: actCol.width
+          Component.onCompleted: rail.probeActCreates++
           property var entry: modelData
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
