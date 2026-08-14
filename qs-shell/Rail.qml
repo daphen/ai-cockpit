@@ -1223,6 +1223,11 @@ Item {
         height: parent.radius
         color: parent.color
       }
+      // The Rectangle's own border follows its ROUNDED shape, so in the squared top
+      // zone the side hairline was the (now hidden) corner arc — the vertical lines
+      // only began below the radius. Draw the missing top segments explicitly.
+      Rectangle { anchors { top: parent.top; left: parent.left }  width: 1; height: parent.radius; color: Theme.hairlineSoft }
+      Rectangle { anchors { top: parent.top; right: parent.right } width: 1; height: parent.radius; color: Theme.hairlineSoft }
 
       // Collapsed glance: active session name + a per-session status strip
       // (spinner while working, dot otherwise) + the toggle hint.
