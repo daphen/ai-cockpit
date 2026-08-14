@@ -721,7 +721,13 @@ Item {
     _prevSelected = selectedRaw
     _feedReset = true
     Qt.callLater(rail.syncFeedModel)
-    var want = _seenAt[selectedRaw]
+    // Only restore a saved spot on a session that is NOT working. A streaming session
+    // should track its live edge — parking you where you last read means "no live follow"
+    // on exactly the session you switched to in order to watch it.
+    var busy = false
+    for (var b = 0; b < (agentd ? agentd.sessions.length : 0); b++)
+      if (agentd.sessions[b].id === selectedRaw) { busy = agentd.sessions[b].status === "streaming"; break }
+    var want = busy ? "" : _seenAt[selectedRaw]
     if (want) {
       // Park the anchor and let onGroupedFeedChanged land on it once the transcript arrives.
       cursorFeedKey = want
