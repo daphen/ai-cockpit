@@ -29,7 +29,9 @@ done
 # keeps the LOCAL `lovable` in the rail instead of the box's base session.
 if [ -z "${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "${HEIDR_AGENTD_SOCK:-}" ]; then
   socks=""
-  for sc in lovable work; do
+  # personal LAST: on a name collision the earlier socket wins, and work scopes are
+  # the ones whose names (tickets) must stay addressable.
+  for sc in lovable work personal; do
     s="${XDG_RUNTIME_DIR}/agentd-${sc}.sock"
     [ -S "$s" ] && socks="${socks:+$socks,}$s"
   done
