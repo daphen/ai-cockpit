@@ -1573,8 +1573,10 @@ Item {
           // Cursor gets a pronounced fill (surface2 pops in both light+dark) plus
           // a strong fg-alpha hairpin — the dsqrd message-cursor grammar.
           color: turnDel.cursor ? Theme.surface2 : (turnDel.isUser ? Theme.surface0 : Theme.surface)
-          border.width: 1   // always outline the card (surface≈bg, so fill alone is invisible)
-          border.color: turnDel.cursor ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45) : Theme.hairline
+          // Borderless: the bgDim ground makes the surface fill read on its own;
+          // the cursor keeps its fg-alpha hairpin as the only outline.
+          border.width: turnDel.cursor ? 1 : 0
+          border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
           HoverHandler { id: fhov }
           TapHandler { onTapped: rail.clickAt(rail.rSize + turnDel.rowIndex) }
 
