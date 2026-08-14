@@ -98,7 +98,9 @@ private:
   GhosttyTerminal term_ = nullptr;
   GhosttyRenderState renderState_ = nullptr;  // for the cursor's visual shape (DECSCUSR)
   int cursorShape_ = 1;          // GhosttyRenderStateCursorVisualStyle; 1 = BLOCK
-  int master_ = -1;              // PTY master fd (worker-thread owner)
+  std::atomic<int> master_{-1};  // PTY master fd (spawned on the GUI thread at first
+                                 // paint, read by the worker's poll loop — hence atomic)
+  bool spawnPending_ = true;     // pty+nvim deferred until the true DPR is known
   pid_t child_ = -1;             // forkpty child (session leader) — killed on teardown
   QFileSystemWatcher *themeWatcher_ = nullptr;  // ~/.config/theme_mode → live light/dark flip
   QFont font_;

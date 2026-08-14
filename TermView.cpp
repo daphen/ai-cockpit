@@ -1,3 +1,4 @@
+#include <QTimer>
 #include "TermView.h"
 
 #include <QPainter>
@@ -217,7 +218,31 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     });
   }
 
-  spawnPty();
+  // NO spawnPty() here: the pty (and nvim in it) is deferred until the first
+  // paint hands us the real device-pixel ratio. Spawning at the constructor's
+  // ratio-1 metrics meant nvim booted into a grid that was about to be rebuilt
+  // under it — the DPR flip invalidated every kitty image placement (#73: the
+  // masthead rendered at spawn, then died on the first resize). The worker's
+  // poll() runs fine with master_ = -1 (POSIX ignores negative fds).
+  //
+  // Fallback: a window mapped onto a BACKGROUND workspace never paints, so the
+  // deferral would hold nvim hostage until first view — spawn after 1.5s with
+  // the screen's ratio instead (the old behavior, only for unexposed spawns).
+  QTimer::singleShot(1500, this, [this] {
+    if (!spawnPending_) return;
+    spawnPending_ = false;
+    const qreal scr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
+    guiDpr_ = scr > 0 ? scr : 1.0;
+    applyMetrics(guiDpr_);
+    relayoutGrid();
+    spawnPty();
+    {
+      std::lock_guard<std::mutex> lk(cmdMtx_);
+      resize_ = { true, cols_, rows_, (int)width(), (int)height(), guiDpr_ };
+    }
+    wakeWorker();
+    emit dprChanged();
+  });
 
   // Worker thread owns the PTY read loop + ghostty + rasterization. A self-pipe
   // lets the GUI thread break the worker's blocking poll() to deliver commands.
@@ -375,8 +400,10 @@ void TermView::spawnPty() {
   struct winsize ws = {};
   ws.ws_col = cols_;
   ws.ws_row = rows_;
-  pid_t pid = forkpty(&master_, nullptr, nullptr, &ws);
+  int m = -1;
+  pid_t pid = forkpty(&m, nullptr, nullptr, &ws);
   if (pid < 0) { qFatal("forkpty failed"); }
+  master_.store(m);
   if (pid > 0) child_ = pid;   // remember it so teardown can take the shell tree with us
   if (pid == 0) {
     // child: exec the login shell
@@ -716,6 +743,17 @@ void TermView::paint(QPainter *outP) {
       // resizes the window.
       applyMetrics(guiDpr_);
       relayoutGrid();
+      // First real ratio → NOW spawn the pty. nvim boots straight into the final
+      // metrics, so its kitty placements are never invalidated by a DPR flip.
+      if (spawnPending_) {
+        spawnPending_ = false;
+        spawnPty();
+        {
+          std::lock_guard<std::mutex> lk(cmdMtx_);
+          resize_ = { true, cols_, rows_, (int)width(), (int)height(), guiDpr_ };
+        }
+        wakeWorker();
+      }
       emit dprChanged();
     }, Qt::QueuedConnection);
   }
