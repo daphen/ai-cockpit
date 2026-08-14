@@ -50,7 +50,13 @@ ShellRoot {
       target: "heidr"
       function focusLeft(): string  { return win.tryFocus("left") }
       function focusRight(): string { return win.tryFocus("right") }
-      function pane(): string       { return win.pane }
+      function pane(): string {
+        // Report reality, not the cached property: hot-reloads leave win.pane stale
+        // ("rail" while the keyboard truly sits in the terminal), and Super+T's
+        // "already on the rail?" check then hopped cockpits straight from the terminal.
+        if (term.activeFocus && win.pane !== "nvim") win.pane = "nvim"
+        return win.pane
+      }
       function title(): string      { return win.title }   // heidr-ipc instance routing
       // Parent binding for the pane's nvim: its NVIM_LISTEN_ADDRESS is unique to THIS
       // instance, so heidr-cross can target its own heidr without asking niri anything.
