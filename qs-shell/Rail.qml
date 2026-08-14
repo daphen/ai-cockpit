@@ -160,7 +160,7 @@ Item {
     if (!s || !s.length) return
     Quickshell.execDetached(["wl-copy", "--", String(s)])
     var t = String(s).replace(/\s+/g, " ").trim()
-    feedbackPill.show("copied — " + (t.length > 40 ? t.slice(0, 37) + "…" : t))
+    feedbackPill.show("✓ copied — " + (t.length > 40 ? t.slice(0, 37) + "…" : t))
   }
 
   // ── slash commands ─────────────────────────────────────────────────────────
@@ -261,8 +261,9 @@ Item {
     var labels = [], chars = hintChars.replace("y", "")   // y is reserved for yy
     for (var i = 0; i < targets.length; i++) labels.push(chars.charAt(i % chars.length))
     hintTargets = targets; hintLabels = labels; hintIdx = idx; hinting = true; yankMode = true
-    feedbackPill.show(targets.length ? "yank: label copies · yy whole message · esc"
-                                     : "yank: yy copies the message · esc")
+    // A MODE banner, not a confirmation — "label copies" read as "copied".
+    feedbackPill.show(targets.length ? "YANK MODE — press a yellow [letter] · yy = all · esc"
+                                     : "YANK MODE — no code/links here · yy = all · esc")
   }
   function cancelHints() { hinting = false; yankMode = false; hintLabels = []; hintTargets = []; hintIdx = -1 }
   function hintKey(ch) {
@@ -980,7 +981,15 @@ Item {
     cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
   }
 
+  // Ground-truth key trace (debug): what key arrived, and what state met it.
+  property var keyLog: []
+  function _klog(e) {
+    var l = keyLog.slice(-7)
+    l.push({ k: e.key, t: String(e.text || ""), hint: hinting, yank: yankMode, ins: insert, cur: cur })
+    keyLog = l
+  }
   Keys.onPressed: (e) => {
+    _klog(e)
     // BEFORE the insert guard: the stale-ask notice advertises C-d while the composer is
     // focused (its whole point is "type your answer instead"), so the binding must work in
     // insert too. The composer doesn't consume Ctrl+D, so it bubbles up to here.
@@ -1010,6 +1019,9 @@ Item {
     if (hinting) {
       if (e.key === Qt.Key_Escape) { cancelHints(); e.accepted = true; return }
       if (e.text && /^[a-z]$/.test(e.text)) { hintKey(e.text); e.accepted = true; return }
+      // A lone modifier (Ctrl/Shift/Alt/Super) is not a choice — the mode was
+      // dying to a reflexive Ctrl before the user ever saw the labels.
+      if (e.key === Qt.Key_Control || e.key === Qt.Key_Shift || e.key === Qt.Key_Alt || e.key === Qt.Key_Meta) return
       cancelHints()   // fall through: the key does its normal thing
     }
     // A pending question owns the keyboard: y/n (confirm), 1–9 (select),

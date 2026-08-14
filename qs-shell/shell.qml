@@ -87,6 +87,7 @@ ShellRoot {
                                 ins: rail.insert, ask: !!rail.pendingAsk, stale: !!rail.staleAsk,
                                 q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
                                 hint: rail.hinting, yank: rail.yankMode, labels: rail.hintLabels.length,
+                                keys: rail.keyLog,
                                 row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
