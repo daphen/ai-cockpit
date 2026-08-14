@@ -62,6 +62,9 @@ ShellRoot {
       // instance, so heidr-cross can target its own heidr without asking niri anything.
       function nvimSock(): string   { return term.nvimSocket }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
+      // `i` on the nvim dashboard: jump straight into the rail composer instead of
+      // erroring on the read-only buffer. callLater lets the pane switch settle first.
+      function focusComposer(): string { win.pane = "rail"; Qt.callLater(rail.enterInsert); return "ok" }
       // Super+T's whole in-window decision as ONE call (it was pane + railState +
       // focusRoster — three qs spawns): land on this window's roster unless the cursor
       // is genuinely parked there in normal mode, in which case report "parked" so the

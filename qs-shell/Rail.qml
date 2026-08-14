@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -236,22 +237,51 @@ Item {
     for (var i = 0; i < urls.length; i++) labels.push(hintChars.charAt(i % hintChars.length))
     hintTargets = urls; hintLabels = labels; hintIdx = idx; hinting = true
   }
-  function cancelHints() { hinting = false; hintLabels = []; hintTargets = []; hintIdx = -1 }
+  // Yank-hints (mlqs's y, on the f-hint chassis): label the COPYABLE units of the
+  // focused message — fenced code blocks, inline code, links — and a letter copies
+  // that unit; `yy` copies the whole message. ONE regex is shared by the extractor
+  // and the badge pass (hintify), so labels and targets can never drift apart.
+  property bool yankMode: false
+  function _yankRe() {
+    return /```[a-zA-Z]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
+  }
+  function startYank() {
+    if (view !== "chat" || cur < rSize) return
+    var idx = cur - rSize
+    var txt = String(feedCopyTarget(groupedFeed[idx]) || "")
+    var re = _yankRe(), m, targets = []
+    while ((m = re.exec(txt)) !== null) targets.push(m[1] || m[2] || m[3] || m[4] || m[0])
+    // No units still enters the mode: yy (whole message) is always on the table.
+    var labels = [], chars = hintChars.replace("y", "")   // y is reserved for yy
+    for (var i = 0; i < targets.length; i++) labels.push(chars.charAt(i % chars.length))
+    hintTargets = targets; hintLabels = labels; hintIdx = idx; hinting = true; yankMode = true
+  }
+  function cancelHints() { hinting = false; yankMode = false; hintLabels = []; hintTargets = []; hintIdx = -1 }
   function hintKey(ch) {
     var i = hintLabels.indexOf(ch)
-    var url = i >= 0 ? hintTargets[i] : ""
+    var t = i >= 0 ? hintTargets[i] : ""
+    var wasYank = yankMode, idx = hintIdx
     cancelHints()
-    if (url) Quickshell.execDetached(["xdg-open", url])
+    if (wasYank) {
+      if (t) copyText(t)
+      else if (ch === "y") copyText(String(feedCopyTarget(groupedFeed[idx]) || ""))
+    } else if (t) Quickshell.execDetached(["xdg-open", t])
   }
   // Qt IGNORES Text.linkColor for MarkdownText (links stay the default dark blue,
   // invisible on the dark card), so colour the link's visible text inline instead.
   // Underline is left to the anchor, so links still read as links.
   readonly property string summaryHex: rail._hex(summaryColor)
   function colorizeLinks(t) {
-    return String(t || "").replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g,
+    var out = String(t || "").replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g,
       function (all, label, url) {
         return "[<font color=\"" + rail.summaryHex + "\"><u>" + label + "</u></font>](" + url + ")"
       })
+    // Bare URLs too: Qt autolinks them but paints with the PALETTE link color
+    // (near-invisible dark blue on the dark ground), ignoring linkColor — so wrap
+    // them into explicit colored markdown links ourselves.
+    return out.replace(/(^|[\s])(https?:\/\/[^\s)<>"]+)/g, function (all, pre, url) {
+      return pre + "[<font color=\"" + rail.summaryHex + "\"><u>" + url + "</u></font>](" + url + ")"
+    })
   }
   // Inline hint badge. Qt's MARKDOWN path passes <font color> through but STRIPS
   // `style` attributes, so an inline background (a real cap) is impossible here —
@@ -266,6 +296,17 @@ Item {
     return "<font color=\"" + rail._hex(Theme.yellow) + "\"><b>["
          + label + "]</b></font>&#8201;"
   }
+  // Pasted-image references ride the prompt as @.heidr-pastes/<file> but should
+  // read as attachments, not paths. Markdown strips style attrs (see _hintBadge),
+  // so the badge is a colored bold token, numbered per message in paste order —
+  // matching the composer chips.
+  function badgeAttachments(t) {
+    var n = 0
+    return String(t || "").replace(/@?\.heidr-pastes\/\S+/g, function () {
+      n++
+      return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>&#128206;&#8201;image " + n + "</b></font>"
+    })
+  }
   function _hex(c) {
     function h(v) { var s = Math.round(v * 255).toString(16); return s.length < 2 ? "0" + s : s }
     return "#" + h(c.r) + h(c.g) + h(c.b)
@@ -274,9 +315,12 @@ Item {
   function hintify(t, rowIdx) {
     if (!hinting || rowIdx !== hintIdx) return t
     var n = 0, labels = hintLabels
-    return String(t || "").replace(_linkRe(), function (all) {
+    return String(t || "").replace(yankMode ? _yankRe() : _linkRe(), function (all) {
       var l = labels[n]; n++
-      return l ? (rail._hintBadge(l) + all) : all
+      if (!l) return all
+      // A fence must stay at line start — its badge sits on its own line above.
+      if (rail.yankMode && all.slice(0, 3) === "```") return rail._hintBadge(l) + "\n\n" + all
+      return rail._hintBadge(l) + all
     })
   }
   // On open, land nvim in the active session's worktree + its plan (if any),
@@ -346,7 +390,13 @@ Item {
   // a file plus an @mention. The file is written into the SELECTED SESSION's cwd
   // (via the mirror for remote work) so mutagen carries it to the box and pi can
   // actually open it — a local /tmp path would not exist over there.
-  property var pastedImages: []   // filenames pasted this session, for the strip below
+  property var pastedImages: []   // filenames pasted this session, shown as composer chips
+  // pi still needs the @references in the prompt; they ride along at send time so
+  // the user never sees the paths in the composer.
+  function attachRefs(t) {
+    var refs = (pastedImages || []).map(n => "@.heidr-pastes/" + n).join(" ")
+    return refs.length ? (t.trim().length ? t.trim() + " " + refs : refs) : t
+  }
   property string pasteDirFor: {
     var cwd = ""
     if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
@@ -359,9 +409,9 @@ Item {
       onStreamFinished: {
         var out = String(this.text || "").trim()
         if (!out || out === "NOIMAGE") { composerInput.paste(); return }   // no image → normal text paste
-        var ref = "@.heidr-pastes/" + out + " "
-        composerInput.insert(composerInput.cursorPosition, ref)
-        rail.pastedImages = rail.pastedImages.concat([out])   // for the thumbnail strip
+        // No @path typed into the message — the chip is the visible trace, and the
+        // references are appended to the prompt at send time (attachRefs).
+        rail.pastedImages = rail.pastedImages.concat([out])
         rail._pushPasteRemote(out)
       }
     }
@@ -849,6 +899,10 @@ Item {
   // hidden and typing belongs to the ask, so `i` must land there instead.
   readonly property bool askWantsText: pendingAsk && (pendingAsk.method === "input" || pendingAsk.method === "editor")
   function enterInsert() {
+    // A blocking confirm/select ask owns the keyboard and HIDES the composer —
+    // entering insert would focus an invisible input and strand every key
+    // (selecting a session that already had an ask pending hit exactly this).
+    if (pendingAsk && !askWantsText) { exitInsert(); return }
     insert = true
     if (newOpen && newMode !== "") newInput.forceActiveFocus()
     else if (askWantsText) askInput.forceActiveFocus()
@@ -882,8 +936,9 @@ Item {
     var l = curLocal()
     if (curSection() === "roster") {
       activate(l)
-      // Selecting a session means you're about to TALK to it: land in the composer
-      // directly (insert), not in the chat list — j/k browsing is still one Esc away.
+      // Selecting a session means you're about to TALK to it: the roster compacts
+      // and you land in the composer directly (insert) — j/k browsing is one Esc away.
+      rosterOverride = false
       Qt.callLater(rail.enterInsert)
       return
     }
@@ -916,10 +971,18 @@ Item {
     if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_D && staleAsk) {
       dismissStaleAsk(); e.accepted = true; return
     }
-    // Ctrl+T toggles the roster from ANY state — insert included; the composer doesn't
-    // consume it, so it bubbles up here like Ctrl+D does.
+    // Ctrl+T = the in-app Super+T, from ANY state (insert included — the composer
+    // doesn't consume it): open the roster and park the cursor on the active row.
+    // Pressed again while already parked there, it puts the roster away and drops
+    // you back into the composer.
     if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_T) {
-      rosterOverride = !rosterExpanded; e.accepted = true; return
+      if (rosterExpanded && !insert && cur < rSize) {
+        rosterOverride = false
+        Qt.callLater(rail.enterInsert)
+      } else {
+        focusRoster()
+      }
+      e.accepted = true; return
     }
     // A confirm/select ask overrides a stale insert flag: the composer is hidden while
     // the ask card holds the chin, so there is nothing to type into anyway — fall
@@ -982,6 +1045,7 @@ Item {
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
     else if (e.key === Qt.Key_Y)  { var it = curItem(); if (it) rail.copyText(rail.feedCopyTarget(it)); e.accepted = true }
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
+    else if (e.key === Qt.Key_Y)  { rail.startYank(); e.accepted = true }    // yank-hints (yy = whole message)
     else if (e.key === Qt.Key_N)  { rail.openNew(); e.accepted = true }      // new session
     else if (e.key === Qt.Key_X)  {
       // x kills the session under the ROSTER cursor (the daemon's stop — pi dies, the
@@ -1189,261 +1253,25 @@ Item {
 
   ColumnLayout {
     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: chin.top }
-    // Full-bleed: the roster is a flush top sheet (no side insets, no top gap); the
-    // chat views carry their own 20px insets instead.
     anchors.margins: 0
-    anchors.bottomMargin: 0   // feed clips at chin.top (under the fade's full-opacity edge), no hard cut
+    // The feed ENDS at the sheet's top — no slide-under. Sliding beneath the rounded
+    // corners forced the fade to a full-opacity band across the notch zone, and that
+    // band smoked the text above the sheet; ending here leaves clean ground behind
+    // the corner arcs and lets the fade stay a gentle dissolve.
+    anchors.bottomMargin: 0
     spacing: 0
-
-    // Roster — all sessions in one discrete card. Rows are full-bleed within it;
-    // the cursor row is an inverted ink pill, the selected session a faint tint.
-    Rectangle {
-      id: rosterCard
-      Layout.fillWidth: true
-      // Full-bleed: 1px past the window sides so the vertical hairlines are
-      // offscreen and only the bottom rounded seam carries a line.
-      Layout.leftMargin: -1; Layout.rightMargin: -1
-      // Square top WITHOUT painting over the border: the card extends one radius above
-      // the window, so its top rounding is offscreen and the visible edge is the native
-      // hairline, unbroken. (The strip+patch approach mixed an antialiased rounded
-      // border with crisp hand-drawn segments — two line weights meeting mid-edge.)
-      Layout.topMargin: -radius
-      clip: true
-      z: 2   // the chat slides UNDER the rounded bottom edge (negative top margin below)
-      implicitHeight: radius + (rail.rosterExpanded ? rosterInner.implicitHeight + 28   // 20 top + 8 bottom
-                                                    : glanceCol.implicitHeight + 28)  // extra room below the glance
-      Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.InOutQuad } }
-      // A flush TOP SHEET: full width, square at the top (the strip below covers the
-      // top rounding), rounded only where it meets the chat. No border, no divider —
-      // the bottom radius is the whole seam.
-      radius: 20 + 8   // (rowHeight/2) + padding → concentric with the pill rows
-      color: Theme.surface0            // subtler than surface (barely-there tint)
-      border.color: Theme.hairlineSoft; border.width: 1
-
-      // Collapsed glance: active session name + a per-session status strip
-      // (spinner while working, dot otherwise) + the toggle hint.
-      Column {
-        id: glanceCol
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 16; rightMargin: 16; topMargin: 14 + rosterCard.radius }
-        spacing: 13
-        opacity: rail.rosterExpanded ? 0 : 1
-        visible: opacity > 0.01
-        Behavior on opacity { NumberAnimation { duration: 120 } }
-        Text {
-          anchors.horizontalCenter: parent.horizontalCenter
-          text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
-          color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
-        }
-        Row {
-          anchors.horizontalCenter: parent.horizontalCenter   // centered strip
-          spacing: 12
-          Repeater {
-            model: rail.rosterList
-            Item {
-              width: 12; height: 12
-              Spinner {
-                anchors.centerIn: parent; visible: modelData.status === "streaming"
-                running: visible; color: Theme.green; dotSize: 2.0
-              }
-              Rectangle {
-                anchors.centerIn: parent; visible: modelData.status !== "streaming"
-                width: 7; height: 7; radius: 3.5; color: rail.dotColor(modelData.status)
-              }
-            }
-          }
-        }
-      }
-
-      ColumnLayout {
-        id: rosterInner
-        opacity: rail.rosterExpanded ? 1 : 0
-        visible: opacity > 0.01
-        Behavior on opacity { NumberAnimation { duration: 120 } }
-        // Top matches the visual weight of the sides/bottom: flush against the window
-        // edge, 8px read as none — the first pill needs real breathing room up there.
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 20 + rosterCard.radius }
-        spacing: 3
-        Repeater {
-          model: rosterModel
-          Rectangle {
-            id: sessRow
-            // Republish the row's data under the name the delegate already uses, so the
-            // switch from an array model to a ListModel touches one line, not thirty.
-            readonly property var modelData: model.d
-            Layout.fillWidth: true
-            implicitHeight: 40
-            radius: height / 2   // pill rows (as before)
-            // `!rail.insert` matters: the cursor fill means "keyboard is here", so
-            // it must clear while the composer owns input (the feed + files
-            // delegates already guard this way).
-            readonly property bool cursor: rail.focused && !rail.insert && rail.cur === index
-            readonly property bool selected: (modelData.rawName || modelData.name) === rail.selectedRaw
-            readonly property bool streaming: modelData.status === "streaming"
-            color: cursor ? Theme.fg
-                 : selected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
-                 : hov.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.04) : "transparent"
-            HoverHandler { id: hov }
-            // Collapsed: index doesn't map to the full list → just focus/expand.
-            TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
-            RowLayout {
-              anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
-              spacing: 8
-              // Nesting connector for spawned subagents.
-              Text {
-                visible: (modelData.depth || 0) > 0
-                text: "↳"; color: sessRow.cursor ? Theme.bg : Theme.fg_muted
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsName
-                Layout.alignment: Qt.AlignVCenter
-              }
-              // Where the agent actually runs: cloud = a lovbox worktree, laptop =
-              // this machine. Same ink as the name it sits next to.
-              Icon {
-                // Outline cuts, and both from the 18px set so their stroke weights match —
-                // there is no laptop--outline--12. Drawn at 14 rather than 13 to give the
-                // laptop's outline enough room to read as a laptop and not a rectangle.
-                name: modelData.remote ? "cloud--outline--18" : "laptop--outline--18"
-                width: 14; height: 14
-                Layout.preferredWidth: 14; Layout.preferredHeight: 14
-                Layout.alignment: Qt.AlignVCenter
-                color: sessRow.cursor ? Theme.bg : Theme.fg
-              }
-              Text {
-                text: modelData.name
-                // Content-sized, so the spinner hugs the name's right edge instead of being
-                // pushed to the row's edge. The cap comes from the ROW, never from this
-                // item's own implicitWidth: capping a text by its own width — which is then
-                // what elide reacts to — is self-referential and settles arbitrarily (it ate
-                // the last glyph of the SHORT name while longer ones were fine). 190 is the
-                // rest of the row: margins 28 + icon 14 + orb 16 + status 74 + devenv 15 +
-                // five 8px gaps.
-                Layout.fillWidth: false
-                // The role badge eats from the NAME's budget, never from the orb/status
-                // slots to its right — a long ticket name with a badge otherwise squeezed
-                // the working orb.
-                Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20
-                                              - (roleBadge.visible ? roleBadge.width + 8 : 0))
-                elide: Text.ElideRight
-                color: sessRow.cursor ? Theme.bg : Theme.fg
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsName
-                // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
-                // meant two rows shouting at once with no way to tell which you were on.
-                font.weight: sessRow.selected ? 600 : 400
-              }
-              // Role badge (agentd profiles): orchestrator / worker / reviewer / watcher.
-              // The daemon reports "profile" like "lovable-orchestrator" — show the last
-              // segment, muted, so identity reads without shouting over the name.
-              CapLabel {
-                id: roleBadge
-                visible: text.length > 0
-                text: {
-                  var p = String(sessRow.modelData.profile || sessRow.modelData.role || "")
-                  if (!p.length) return ""
-                  var seg = p.split("-")
-                  return seg[seg.length - 1]
-                }
-                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
-              }
-              // Spinner immediately right of the name. The slot is reserved even when idle
-              // so nothing shifts as a session starts or stops working. 20px is free (the
-              // row is a fixed 40px tall) and 20 is what it takes to LOOK bigger: the box
-              // draws a sphere ~0.83 of its size, so a 16px box was only ~13px of visible
-              // mesh next to 14px icons.
-              Item {
-                Layout.preferredWidth: 20; Layout.preferredHeight: 20
-                Layout.alignment: Qt.AlignVCenter
-                Orb {
-                  anchors.fill: parent
-                  visible: sessRow.streaming
-                  running: sessRow.streaming
-                  // Pinned to 13 rather than letting the size rule pick 15 for 16px — 13 is
-                  // the density that was judged right, and this keeps it while growing.
-                  nodes: 13
-                  // Electric, not muted: the one thing in the row that should catch the eye.
-                  glow: sessRow.cursor ? Theme.bg : Theme.electric
-                }
-              }
-              Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
-              Text {
-                text: modelData.state || modelData.idle || ""
-                // Sub-agents (linked rows) carry no status word at all — the orb says
-                // "working", and an idle watcher needs no label to say it's waiting.
-                visible: !modelData.linked
-                Layout.preferredWidth: visible ? 74 : 0; horizontalAlignment: Text.AlignRight
-                Layout.alignment: Qt.AlignVCenter
-                // One muted colour for every state: the orb by the name already says
-                // "working", so colouring the word too was saying it twice.
-                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-              }
-              Icon {
-                // Only MARKED when the session actually has a devenv slice (it used to go
-                // green for every top-level session, so a main-checkout session looked
-                // like it owned a slice it never had) — but the slot is always reserved,
-                // via opacity rather than visible, so the status text stays on one
-                // vertical line down the roster instead of shifting per row.
-                opacity: modelData.devenv === true ? 1 : 0
-                name: "plug-2"; width: 15; height: 15
-                Layout.preferredWidth: 15; Layout.preferredHeight: 15   // equal dims → no squish
-                Layout.alignment: Qt.AlignVCenter
-                color: sessRow.cursor ? Theme.bg : Theme.green
-              }
-            }
-          }
-        }
-        // new session — inside the roster card, below the sessions: this is where you
-        // look when you want to start something. Not a roster ROW though; a session is a
-        // thing that exists, this is a verb, and rendering it as a pill row made it look
-        // like an agent sitting idle.
-        Item {
-          Layout.fillWidth: true
-          implicitHeight: 34
-          Rectangle {
-            id: newBtn
-            anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
-            implicitWidth: newBtnRow.implicitWidth + 20
-            width: implicitWidth
-            height: 26
-            radius: height / 2
-            color: nsHov.hovered ? Theme.surface2 : "transparent"
-            border.width: 1
-            border.color: nsHov.hovered ? Theme.electric : Theme.hairline
-            Row {
-              id: newBtnRow
-              anchors.centerIn: parent
-              spacing: 7
-              Icon {
-                name: "plus"; width: 11; height: 11
-                anchors.verticalCenter: parent.verticalCenter
-                color: nsHov.hovered ? Theme.fg : Theme.fg_muted
-              }
-              Text {
-                text: "new session"
-                color: nsHov.hovered ? Theme.fg : Theme.fg_muted
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                anchors.verticalCenter: parent.verticalCenter
-              }
-              KeyCap { small: true; text: "n"; anchors.verticalCenter: parent.verticalCenter }
-            }
-            HoverHandler { id: nsHov }
-            TapHandler { onTapped: { rail.requestFocus(); rail.openNew() } }
-          }
-        }
-      }
-    }
-
 
     // Files view — full changed-files list for the selected session.
     ListView {
       id: changesView
       Layout.fillWidth: true
       Layout.leftMargin: 20; Layout.rightMargin: 20
-      Layout.topMargin: -rosterCard.radius   // slide under the roster sheet's rounded edge
       Layout.fillHeight: rail.view === "files"
       visible: rail.view === "files"
       clip: true
       activeFocusOnTab: false
       model: rail.changesList
-      header: Item { width: changesView.width; height: rosterCard.radius + 12 }   // clear the sheet at rest
+      header: Item { width: changesView.width; height: 12 }
       boundsBehavior: Flickable.StopAtBounds
       ScrollFeel { flick: changesView }
       delegate: Rectangle {
@@ -1476,10 +1304,6 @@ Item {
       id: feedView
       Layout.fillWidth: true
       Layout.leftMargin: 20; Layout.rightMargin: 20
-      // Under the sheet's rounded bottom: the chat's top edge lives beneath the roster
-      // card (z 2 above), so content scrolls up INTO the corner notches — the radius IS
-      // the seam, no divider, no gap.
-      Layout.topMargin: -rosterCard.radius
       Layout.fillHeight: rail.view === "chat"
       visible: rail.view === "chat"
       clip: true
@@ -1503,7 +1327,7 @@ Item {
       }
       // At-rest content clears the sheet (radius + one gap); SCROLLED content slides up
       // underneath it — the header scrolls with the feed, which is the whole trick.
-      header: Item { width: feedView.width; height: rosterCard.radius + feedView.spacing }
+      header: Item { width: feedView.width; height: feedView.spacing }
       footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
       // Edge fades, fixed to the view (non-delegate children of a ListView paint above
       // its content). The top one is opaque through the sheet's corner-notch zone — the
@@ -1511,11 +1335,10 @@ Item {
       // above the composer, only while content remains below the viewport.
       Rectangle {
         anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: rosterCard.radius + 44
+        height: 44
         z: 2
         gradient: Gradient {
           GradientStop { position: 0.0; color: Theme.bgDim }
-          GradientStop { position: rosterCard.radius / (rosterCard.radius + 44); color: Theme.bgDim }
           GradientStop { position: 1.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
         }
       }
@@ -1605,7 +1428,7 @@ Item {
             Text {
               visible: turnDel.isUser
               width: cardCol.width
-              text: turnDel.isUser ? rail.colorizeLinks(turnDel.turn.text) : ""
+              text: turnDel.isUser ? rail.colorizeLinks(rail.badgeAttachments(turnDel.turn.text)) : ""
               color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
               linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
               wrapMode: Text.WordWrap; textFormat: Text.MarkdownText
@@ -1667,12 +1490,19 @@ Item {
 
 
 
-  // Chin: an opaque bottom bar (composer + hints) anchored to the rail bottom,
-  // like the sibling apps' statusbar. The feed is bounded to chin.top, so chat
-  // rows can never bleed under the input/hints.
+  // Chin: the bottom SHEET — roster + composer in one container, anchored to the
+  // rail bottom. Bleeds 1px past the sides and one radius below the window, so only
+  // the rounded TOP corners and their hairline are visible (mirror of the old top
+  // sheet). The feed is bounded to chin.top, so chat rows can never bleed under it.
   Rectangle {
     id: chin
     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+    // Inset from the sides so the sheet's own hairline never doubles up against the
+    // term/rail divider; still bleeds one radius below the window for a square bottom.
+    anchors.leftMargin: 8; anchors.rightMargin: 8
+    anchors.bottomMargin: -radius
+    radius: 20 + 8
+    border.color: Theme.hairlineSoft; border.width: 1
     // 108 = composer + hints + padding, stable across the insert toggle. A pending
     // ask_user expands the chin to hold it, so the question takes over the input
     // instead of floating over the feed — animated so the jump is legible.
@@ -1680,20 +1510,217 @@ Item {
     // contains — composer, ask card, new-session panel — it grows upward from a fixed
     // bottom edge with no arithmetic. (This used to be a hardcoded 108 plus per-panel
     // fudge factors, which is how the new-session card ended up overflowing.)
-    height: chinCol.implicitHeight + chinCol.anchors.topMargin + 14
-    Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
-    color: Theme.bgDim   // the rail's ground, so the chin melts into it
+    clip: true
+    height: chinCol.implicitHeight + 28 + radius   // 14 top pad + 14 visible bottom pad
+    color: Theme.surface0
 
     ColumnLayout {
       id: chinCol
-      anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 14 }
+      // Bottom-anchored so the composer + hints stay put and the roster grows UPWARD
+      // when it expands (the sheet's top edge rises; the input never moves).
+      anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20; bottomMargin: 14 + chin.radius }
       spacing: 10
 
 
-      // Attachment chips — same shape as dsqrd/slqs/mlqs (paperclip + name + ✕), so
-      // the family looks consistent. The name matches the inline reference exactly
-      // (@.heidr-pastes/img1.png → "img1"), which is what makes "before: img1, after:
-      // img2" unambiguous for the agent as well as for you.
+      // Roster — inside the bottom sheet, above the composer. The chin carries the
+      // card styling; this block is just the rows (or the collapsed dots glance).
+      Item {
+        id: rosterCard
+        Layout.fillWidth: true
+        clip: true
+        // The ONE geometry animation. The sheet has no Behavior of its own — its
+        // height binding follows this frame-by-frame, so container and content can
+        // never separate; rows are revealed by this clip and fade in slower.
+        implicitHeight: (rail.rosterExpanded ? rosterInner.implicitHeight : glanceCol.implicitHeight) + 8
+        Behavior on implicitHeight { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+
+        // Collapsed glance: active session name on the left (the roster row grammar),
+        // status dots for the OTHER sessions on the right.
+        Item {
+          id: glanceCol
+          anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
+          implicitHeight: 32
+          opacity: rail.rosterExpanded ? 0 : 1
+          visible: opacity > 0.01
+          Behavior on opacity { NumberAnimation { duration: 220 } }
+          Row {
+            anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
+            spacing: 9
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
+              color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
+            }
+            // The "thinking" signifier lives HERE now (the floating pill is gone):
+            // same orb grammar as the expanded rows.
+            Orb {
+              anchors.verticalCenter: parent.verticalCenter
+              // The one "thinking" signifier since the floating pill left — big
+              // enough to read from the corner of the eye.
+              width: 30; height: 30
+              visible: rail.featuredStreaming
+              running: rail.featuredStreaming
+              nodes: 16
+              glow: Theme.electric
+            }
+          }
+          Row {
+            anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+            spacing: 12
+            Repeater {
+              model: (rail.rosterList || []).filter(s => (s.rawName || s.name) !== rail.selectedRaw)
+              Item {
+                width: 12; height: 12
+                Spinner {
+                  anchors.centerIn: parent; visible: modelData.status === "streaming"
+                  running: visible; color: Theme.green; dotSize: 2.0
+                }
+                Rectangle {
+                  anchors.centerIn: parent; visible: modelData.status !== "streaming"
+                  width: 7; height: 7; radius: 3.5; color: rail.dotColor(modelData.status)
+                }
+              }
+            }
+          }
+        }
+
+        ColumnLayout {
+          id: rosterInner
+          opacity: rail.rosterExpanded ? 1 : 0
+          visible: opacity > 0.01
+          Behavior on opacity { NumberAnimation { duration: 220 } }
+          anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
+          spacing: 3
+          Repeater {
+            model: rosterModel
+            Rectangle {
+              id: sessRow
+              // Republish the row's data under the name the delegate already uses, so the
+              // switch from an array model to a ListModel touches one line, not thirty.
+              readonly property var modelData: model.d
+              Layout.fillWidth: true
+              implicitHeight: 40
+              radius: height / 2   // pill rows (as before)
+              // `!rail.insert` matters: the cursor fill means "keyboard is here", so
+              // it must clear while the composer owns input (the feed + files
+              // delegates already guard this way).
+              readonly property bool cursor: rail.focused && !rail.insert && rail.cur === index
+              readonly property bool selected: (modelData.rawName || modelData.name) === rail.selectedRaw
+              readonly property bool streaming: modelData.status === "streaming"
+              color: cursor ? Theme.fg
+                   : selected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
+                   : hov.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.04) : "transparent"
+              HoverHandler { id: hov }
+              // Collapsed: index doesn't map to the full list → just focus/expand.
+              TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
+              RowLayout {
+                anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
+                spacing: 8
+                // Nesting connector for spawned subagents.
+                Text {
+                  visible: (modelData.depth || 0) > 0
+                  text: "↳"; color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsName
+                  Layout.alignment: Qt.AlignVCenter
+                }
+                // Where the agent actually runs: cloud = a lovbox worktree, laptop =
+                // this machine. Same ink as the name it sits next to.
+                Icon {
+                  // Outline cuts, and both from the 18px set so their stroke weights match —
+                  // there is no laptop--outline--12. Drawn at 14 rather than 13 to give the
+                  // laptop's outline enough room to read as a laptop and not a rectangle.
+                  name: modelData.remote ? "cloud--outline--18" : "laptop--outline--18"
+                  width: 14; height: 14
+                  Layout.preferredWidth: 14; Layout.preferredHeight: 14
+                  Layout.alignment: Qt.AlignVCenter
+                  color: sessRow.cursor ? Theme.bg : Theme.fg
+                }
+                Text {
+                  text: modelData.name
+                  // Content-sized, so the spinner hugs the name's right edge instead of being
+                  // pushed to the row's edge. The cap comes from the ROW, never from this
+                  // item's own implicitWidth: capping a text by its own width — which is then
+                  // what elide reacts to — is self-referential and settles arbitrarily (it ate
+                  // the last glyph of the SHORT name while longer ones were fine). 190 is the
+                  // rest of the row: margins 28 + icon 14 + orb 16 + status 74 + devenv 15 +
+                  // five 8px gaps.
+                  Layout.fillWidth: false
+                  // The role badge eats from the NAME's budget, never from the orb/status
+                  // slots to its right — a long ticket name with a badge otherwise squeezed
+                  // the working orb.
+                  Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20
+                                                - (roleBadge.visible ? roleBadge.width + 8 : 0))
+                  elide: Text.ElideRight
+                  color: sessRow.cursor ? Theme.bg : Theme.fg
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsName
+                  // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
+                  // meant two rows shouting at once with no way to tell which you were on.
+                  font.weight: sessRow.selected ? 600 : 400
+                }
+                // Role badge (agentd profiles): orchestrator / worker / reviewer / watcher.
+                // The daemon reports "profile" like "lovable-orchestrator" — show the last
+                // segment, muted, so identity reads without shouting over the name.
+                CapLabel {
+                  id: roleBadge
+                  visible: text.length > 0
+                  text: {
+                    var p = String(sessRow.modelData.profile || sessRow.modelData.role || "")
+                    if (!p.length) return ""
+                    var seg = p.split("-")
+                    return seg[seg.length - 1]
+                  }
+                  color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                }
+                // Spinner immediately right of the name. The slot is reserved even when idle
+                // so nothing shifts as a session starts or stops working. 20px is free (the
+                // row is a fixed 40px tall) and 20 is what it takes to LOOK bigger: the box
+                // draws a sphere ~0.83 of its size, so a 16px box was only ~13px of visible
+                // mesh next to 14px icons.
+                Item {
+                  Layout.preferredWidth: 20; Layout.preferredHeight: 20
+                  Layout.alignment: Qt.AlignVCenter
+                  Orb {
+                    anchors.fill: parent
+                    visible: sessRow.streaming
+                    running: sessRow.streaming
+                    // Pinned to 13 rather than letting the size rule pick 15 for 16px — 13 is
+                    // the density that was judged right, and this keeps it while growing.
+                    nodes: 13
+                    // Electric, not muted: the one thing in the row that should catch the eye.
+                    glow: sessRow.cursor ? Theme.bg : Theme.electric
+                  }
+                }
+                Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
+                Text {
+                  text: modelData.state || modelData.idle || ""
+                  // Sub-agents (linked rows) carry no status word at all — the orb says
+                  // "working", and an idle watcher needs no label to say it's waiting.
+                  visible: !modelData.linked
+                  Layout.preferredWidth: visible ? 74 : 0; horizontalAlignment: Text.AlignRight
+                  Layout.alignment: Qt.AlignVCenter
+                  // One muted colour for every state: the orb by the name already says
+                  // "working", so colouring the word too was saying it twice.
+                  color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                }
+                Icon {
+                  // Only MARKED when the session actually has a devenv slice (it used to go
+                  // green for every top-level session, so a main-checkout session looked
+                  // like it owned a slice it never had) — but the slot is always reserved,
+                  // via opacity rather than visible, so the status text stays on one
+                  // vertical line down the roster instead of shifting per row.
+                  opacity: modelData.devenv === true ? 1 : 0
+                  name: "plug-2"; width: 15; height: 15
+                  Layout.preferredWidth: 15; Layout.preferredHeight: 15   // equal dims → no squish
+                  Layout.alignment: Qt.AlignVCenter
+                  color: sessRow.cursor ? Theme.bg : Theme.green
+                }
+              }
+            }
+          }
+        }
+      }
+
       // Queued-message pill: Ctrl+Enter holds a message for the turn's end; without a
       // visible trace it reads as "my message vanished".
       Rectangle {
@@ -1717,59 +1744,6 @@ Item {
             color: Theme.fg_muted
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             elide: Text.ElideRight
-          }
-        }
-      }
-
-      Flow {
-        Layout.fillWidth: true
-        spacing: 16
-        visible: rail.pastedImages.length > 0
-        Repeater {
-          model: rail.pastedImages
-          Rectangle {
-            id: attachChip
-            readonly property string imgName: String(modelData)
-            readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
-            // A real badge surface (dsqrd's chip is a bare row, but on the rail's chin
-            // it needs a ground of its own to read as an attachment).
-            implicitWidth: chipRow.implicitWidth + 18
-            height: 24
-            radius: 6
-            color: Theme.surface0
-            border.width: 1
-            border.color: referenced ? Theme.electric : Theme.hairline
-            Row {
-            id: chipRow
-            anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8 }
-            spacing: 6
-            Icon {
-              name: "paperclip"; width: 13; height: 13
-              color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
-              anchors.verticalCenter: parent.verticalCenter
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              // "image 1", "image 2" … by position in THIS message (pastedImages clears
-              // on send). The file keeps a unique name on disk so earlier messages'
-              // attachments stay readable, but the label you see is per-message.
-              text: "image " + (index + 1)
-              color: attachChip.referenced ? Theme.fg : Theme.fg_muted
-              font.family: Theme.fontFamily; font.hintingPreference: Font.PreferNoHinting
-              font.pixelSize: rail.fsMeta
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              text: "  ✕"; color: Theme.fg_muted
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-              TapHandler {
-                onTapped: {
-                  composerInput.text = composerInput.text.replace("@.heidr-pastes/" + attachChip.imgName + " ", "")
-                  rail.pastedImages = rail.pastedImages.filter(function (m) { return m !== attachChip.imgName })
-                }
-              }
-            }
-            }
           }
         }
       }
@@ -2019,30 +1993,106 @@ Item {
       Rectangle {
         Layout.fillWidth: true
         visible: !rail.pendingAsk && !rail.newOpen
-        implicitHeight: 52   // extra vertical padding
-        radius: height / 2   // fully rounded input
+        // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
+        // Flickable scrolls the caret into view.
+        implicitHeight: Math.max(52, Math.min(composerInput.implicitHeight + 30, 94))
+        radius: Math.min(height / 2, 26)   // pill at one line, rounded card when grown
         color: Theme.surface0
         border.color: rail.insert ? Theme.electric : Theme.hairline
         border.width: 1
         RowLayout {
           anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
           spacing: 8
-          Icon { name: "chevron-right"; width: 14; height: 14; color: Theme.electric }
-          TextInput {
+          Icon {
+            name: "chevron-right"; width: 14; height: 14; color: Theme.electric
+            // Centered on the FIRST text line, derived from the real line height
+            // (cursorRectangle) instead of a hand-tuned constant — the guess drifted
+            // off-center the moment the TextArea's metrics differed from TextInput's.
+            Layout.alignment: Qt.AlignTop
+            Layout.topMargin: composerFlick.Layout.topMargin + Math.max(0, (composerInput.cursorRectangle.height - height) / 2)
+          }
+          // Attachment chips as input TOKENS — inside the composer's fixed height, so
+          // pasting an image never grows the sheet. Chip = paperclip + index + ✕; the
+          // index matches the "image N" reference in the message text.
+          Row {
+            spacing: 6
+            visible: rail.pastedImages.length > 0
+            Layout.alignment: Qt.AlignTop
+            Layout.topMargin: composerFlick.Layout.topMargin + Math.max(0, (composerInput.cursorRectangle.height - 24) / 2)
+            Repeater {
+              model: rail.pastedImages
+              Rectangle {
+                id: attachChip
+                readonly property string imgName: String(modelData)
+                readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
+                implicitWidth: chipRow.implicitWidth + 14
+                height: 24
+                radius: 6
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.surface2
+                border.width: 1
+                border.color: referenced ? Theme.electric : Theme.hairline
+                Row {
+                  id: chipRow
+                  anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 7 }
+                  spacing: 5
+                  Icon {
+                    name: "paperclip"; width: 13; height: 13
+                    color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: String(index + 1)
+                    color: attachChip.referenced ? Theme.fg : Theme.fg_muted
+                    font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✕"; color: Theme.fg_muted
+                    font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                    TapHandler {
+                      onTapped: {
+                        composerInput.text = composerInput.text.replace("@.heidr-pastes/" + attachChip.imgName + " ", "")
+                        rail.pastedImages = rail.pastedImages.filter(n => String(n) !== attachChip.imgName)
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+          Flickable {
+            id: composerFlick
+            Layout.fillWidth: true; Layout.fillHeight: true
+            Layout.topMargin: 15; Layout.bottomMargin: 15
+            contentHeight: composerInput.implicitHeight; clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            // keep the caret in view once the text grows past the 3-line cap
+            function ensureVisible(r) {
+              if (contentY >= r.y) contentY = r.y
+              else if (contentY + height <= r.y + r.height) contentY = r.y + r.height - height
+            }
+          TextArea {
             id: composerInput
-            Layout.fillWidth: true
+            width: composerFlick.width
+            padding: 0
+            background: null
+            wrapMode: TextArea.Wrap
             color: Theme.fg
             font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-            clip: true
-            verticalAlignment: TextInput.AlignVCenter
+            onCursorRectangleChanged: composerFlick.ensureVisible(cursorRectangle)
             // Orange blinking caret, matching the sibling apps (Theme.cursor).
             cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible ? 1 : 0 }
-            onAccepted: {
+            // TextArea has no onAccepted — plain Enter routes here from Keys below.
+            // Shift+Enter falls through to the default handler = a newline.
+            function sendNow() {
               var pa = rail.pendingAsk
               if (pa && (pa.method === "input" || pa.method === "editor")) {
                 if (text.trim().length) rail.answerAsk({ value: text })
-              } else if (text.trim().length && rail.agentd) {
-                rail.agentd.submit(rail.selectedRaw, text)
+              } else if ((text.trim().length || rail.pastedImages.length) && rail.agentd) {
+                rail.agentd.submit(rail.selectedRaw, rail.attachRefs(text))
+                rail.rosterOverride = false   // sending = focus the conversation; roster compacts
               }
               rail.pastedImages = []      // attachments belong to the message just sent
               // No settle burst on a send: the rows are already sized, so re-pinning
@@ -2057,6 +2107,14 @@ Item {
             }
             Keys.onPressed: (e) => {
               var ctrl = (e.modifiers & Qt.ControlModifier)
+              // Plain Enter sends (the TextInput's onAccepted, relocated); Shift+Enter
+              // is left to the default handler and inserts a newline.
+              if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !ctrl && !(e.modifiers & Qt.ShiftModifier)) {
+                // Slash palette: Enter on a partial command completes instead (below).
+                if (!(rail.slashOpen && rail.composerText.slice(1) !== rail.commandMatches[rail.slashCur])) {
+                  composerInput.sendNow(); e.accepted = true; return
+                }
+              }
               // Esc while the agent runs = interrupt it (Claude Code's Esc), keeping
               // insert — you are about to type what it should do instead. Idle: the
               // usual leave-insert.
@@ -2069,8 +2127,9 @@ Item {
               // aborted), then send it as a fresh prompt. Plain Enter steers the live
               // turn instead — see onAccepted / submit().
               if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
-                if (text.trim().length && rail.agentd && rail.selectedRaw) {
-                  rail.agentd.enqueue(rail.selectedRaw, text)
+                if ((text.trim().length || rail.pastedImages.length) && rail.agentd && rail.selectedRaw) {
+                  rail.agentd.enqueue(rail.selectedRaw, rail.attachRefs(text))
+                  rail.rosterOverride = false
                   rail.pastedImages = []
                   text = ""
                 }
@@ -2113,6 +2172,7 @@ Item {
                     : "message " + rail.featured.name + "…"
               color: Theme.fg_muted; font: composerInput.font
             }
+          }
           }
         }
       }
@@ -2227,60 +2287,6 @@ Item {
     }
   }
 
-  // Fade the feed into the chin: a gradient from bg (bottom) to transparent (top)
-  // sitting just above the chin, so messages dissolve behind the floating pill.
-  Rectangle {
-    id: feedFade
-    // Soften the feed's bottom into the chin only when content actually runs
-    // under it — at the bottom (atYEnd) the last message already clears the
-    // chin, so the fade would just dim it for no reason.
-    // Hidden at the end AND when the cursor is on the last message — the 56px
-    // footer means atYEnd isn't reached even when the last card is fully shown.
-    opacity: (rail.view === "chat" && !feedView.atYEnd && rail.cur < rail.navTotal - 1) ? 1 : 0
-    visible: opacity > 0.01
-    Behavior on opacity { NumberAnimation { duration: 350; easing.type: Easing.InOutQuad } }
-    anchors { left: parent.left; right: parent.right; bottom: chin.top; leftMargin: 3 }  // clear the focus accent
-    height: 100
-    z: 9   // below the left focus accent (z:10) so it never paints over it
-    gradient: Gradient {
-      GradientStop { position: 0.0; color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.0) }
-      GradientStop { position: 1.0; color: Theme.bg }
-    }
-  }
-
-  // Floating "thinking" pill — centered above the composer, overlaying the chat
-  // (does NOT scroll with it). The feed's bottom spacer keeps messages clear of it.
-  Rectangle {
-    id: thinkPill
-    opacity: (rail.view === "chat" && rail.featuredStreaming) ? 1 : 0
-    visible: opacity > 0.01
-    Behavior on opacity { NumberAnimation { duration: 250; easing.type: Easing.InOutQuad } }
-    // Sits lower, closer to the composer. The fade gradient anchors to chin.top
-    // separately, so this margin moves ONLY the pill.
-    anchors { horizontalCenter: parent.horizontalCenter; bottom: chin.top; bottomMargin: 4 }
-    implicitWidth: pillRow.implicitWidth + 22
-    height: 40
-    radius: height / 2
-    color: Theme.surface0
-    border.color: Theme.hairline; border.width: 1
-    z: 20
-    RowLayout {
-      id: pillRow
-      anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 8 }
-      spacing: 9
-      Orb { running: thinkPill.visible; glow: Theme.fg; Layout.preferredWidth: 26; Layout.preferredHeight: 26 }
-      Text {
-        text: "thinking…"; color: Theme.fg_secondary; rightPadding: 4
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-        SequentialAnimation on opacity {
-          running: thinkPill.visible; loops: Animation.Infinite
-          NumberAnimation { from: 0.5; to: 1.0; duration: 900; easing.type: Easing.InOutSine }
-          NumberAnimation { from: 1.0; to: 0.5; duration: 900; easing.type: Easing.InOutSine }
-        }
-      }
-    }
-  }
-
   // Feed row variants
   Component {
     id: groupRow
@@ -2347,13 +2353,58 @@ Item {
   }
   Component {
     id: cmdRow
-    RowLayout {
-      spacing: 8
-      Icon { name: rail.toolIcon(entry.tool); width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
-      Text {
-        text: entry.text; color: Theme.fg_secondary
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; elide: Text.ElideRight
-        Layout.fillWidth: true
+    Column {
+      id: cmdCol
+      width: parent ? parent.width : 400
+      spacing: 6
+      // Errors are the one row you must be able to READ: full text, wrapped, red.
+      readonly property bool isErr: entry.tool === "error"
+      // Bash rows carry the raw command — tap toggles it open underneath.
+      readonly property bool canExpand: !isErr && String(entry.command || "").length > 0
+      readonly property bool open: canExpand && typeof gkey !== "undefined" && rail.expandedGroups[gkey] === true
+      RowLayout {
+        width: cmdCol.width
+        spacing: 8
+        Icon {
+          name: rail.toolIcon(entry.tool); width: 13; height: 13
+          color: cmdCol.isErr ? Theme.red : Theme.fg_muted
+          Layout.alignment: Qt.AlignTop
+          Layout.topMargin: Math.max(0, Math.round(rail.fsBody * 1.3 - 13) / 2)
+        }
+        Text {
+          text: entry.text
+          color: cmdCol.isErr ? Theme.red : Theme.fg_secondary
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+          wrapMode: cmdCol.isErr ? Text.WordWrap : Text.NoWrap
+          elide: cmdCol.isErr ? Text.ElideNone : Text.ElideRight
+          maximumLineCount: cmdCol.isErr ? 9999 : 1
+          lineHeight: 1.3
+          Layout.fillWidth: true
+        }
+        Icon {
+          visible: cmdCol.canExpand
+          name: cmdCol.open ? "chevron-down" : "chevron-right"
+          width: 11; height: 11; color: Theme.fg_muted
+          Layout.alignment: Qt.AlignVCenter
+        }
+        TapHandler { enabled: cmdCol.canExpand && typeof gkey !== "undefined"; onTapped: rail.toggleGroupKey(gkey) }
+      }
+      // The full command, monospace on its own ground — selectable-by-eye, wraps.
+      Rectangle {
+        visible: cmdCol.open
+        width: cmdCol.width
+        implicitHeight: cmdFull.implicitHeight + 16
+        radius: 8
+        color: Theme.bgDim
+        Text {
+          id: cmdFull
+          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
+          text: String(entry.command || "")
+          color: Theme.fg_secondary
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          wrapMode: Text.WrapAnywhere; lineHeight: 1.35
+        }
+        TapHandler { onTapped: rail.copyText(String(entry.command || "")) }
       }
     }
   }
@@ -2395,7 +2446,7 @@ Item {
       Text {
         visible: proseCol._body.length > 0
         width: parent.width
-        text: rail.colorizeLinks(rail.hintify(proseCol._body, rowIndex)); color: Theme.fg
+        text: rail.colorizeLinks(rail.hintify(rail.badgeAttachments(proseCol._body), rowIndex)); color: Theme.fg
         linkColor: rail.summaryColor   // links match the summary hue; underline keeps them scannable
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: Text.WordWrap; lineHeight: 1.35
@@ -2405,7 +2456,7 @@ Item {
       Text {
         visible: proseCol._summary.length > 0
         width: parent.width
-        text: rail.colorizeLinks(proseCol._summary); color: rail.summaryColor
+        text: rail.colorizeLinks(rail.badgeAttachments(proseCol._summary)); color: rail.summaryColor
         linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: Text.WordWrap; lineHeight: 1.35
