@@ -950,7 +950,14 @@ Item {
     if (ctrl && e.key === Qt.Key_K) { cur = 0; e.accepted = true; return }
     if (ctrl && e.key === Qt.Key_T) { rosterOverride = !rosterExpanded; e.accepted = true; return }
     if (e.key === Qt.Key_I)      { enterInsert(); e.accepted = true }
-    else if (e.key === Qt.Key_H || e.key === Qt.Key_Escape) { rail.focusNvim(); e.accepted = true }
+    else if (e.key === Qt.Key_Escape) {
+      // Esc = interrupt, everywhere (composer already does this): abort the open
+      // session's turn if it is running; idle keeps the old escape-to-nvim.
+      if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.interrupt(rail.selectedRaw)
+      else rail.focusNvim()
+      e.accepted = true
+    }
+    else if (e.key === Qt.Key_H) { rail.focusNvim(); e.accepted = true }
     else if (e.key === Qt.Key_J)  { rail.moveDown(); e.accepted = true }
     else if (e.key === Qt.Key_K)  { rail.moveUp(); e.accepted = true }
     else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
@@ -958,15 +965,12 @@ Item {
     else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
     else if (e.key === Qt.Key_N)  { rail.openNew(); e.accepted = true }      // new session
     else if (e.key === Qt.Key_X)  {
-      // Two x's, keyed on where the cursor is. On a ROSTER row: kill that session (the
-      // daemon's stop — pi dies, the row goes; you aimed at a session, so act on the
-      // session). Anywhere else: INTERRUPT the open session's turn (pi's abort) — the
-      // session survives, idle, and takes a fresh prompt immediately.
+      // x kills the session under the ROSTER cursor (the daemon's stop — pi dies, the
+      // row goes) and does nothing anywhere else: interrupting a turn is Esc, and a
+      // kill should require aiming at the session you mean.
       if (rail.curSection() === "roster") {
         var row = rail.rosterList[rail.curLocal()]
         if (row && rail.agentd) rail.agentd.stop(row.rawName || row.name)
-      } else if (rail.agentd && rail.selectedRaw) {
-        rail.agentd.interrupt(rail.selectedRaw)
       }
       e.accepted = true
     }
@@ -1018,10 +1022,10 @@ Item {
       if (curSection() === "roster") {
         var row = rosterList[curLocal()]
         if (row && agentd) agentd.stop(row.rawName || row.name)
-      } else if (agentd && selectedRaw) agentd.interrupt(selectedRaw)
+      }
     }
     else if (k === "esc") {
-      if (insert && featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
+      if (featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
       else if (insert) exitInsert()
     }
   }
@@ -2064,7 +2068,7 @@ Item {
               { k: "f",   l: rail.hinting ? "pick" : "links" },
               { k: "i",   l: "type" },
               { k: "h",   l: "nvim" }
-            ].concat(rail.featuredStreaming ? [{ k: "x", l: "interrupt" }] : [])
+            ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }] : [])
           }
           RowLayout {
             spacing: 4

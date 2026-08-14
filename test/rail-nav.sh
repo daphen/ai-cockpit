@@ -244,6 +244,8 @@ check "Esc sent the abort"          "${ab:-0}" "1"
 check "session survived interrupt"  "$(field "$(st)" rSize)" "3"
 key esc                              # now idle: Esc = plain leave-insert
 check "second Esc left insert"      "$(field "$(st)" ins)" "False"
+key G; key x; sleep 1                # x outside the roster must do NOTHING now
+check "feed-x is inert (roster intact)" "$(field "$(st)" rSize)" "3"
 key g; key j; key j                  # roster cursor onto zulu-9999
 key x; sleep 2                       # roster-x = kill THAT session
 kl=$(grep -c '"type": "stop", "session": "zulu-9999"' "$SOCK.answers" 2>/dev/null)
@@ -265,8 +267,8 @@ ipc_send railQueue "do this next"; sleep 1
 check "message queued" "$(field "$(st)" q)" "1"
 qp=$(grep -c '"type": "prompt".*do this next' "$SOCK.answers" 2>/dev/null)
 check "not sent yet" "${qp:-0}" "0"
-key G                                  # cursor into the feed — roster-x would KILL, not interrupt
-key x; sleep 3
+key G                                  # cursor into the feed
+key esc; sleep 3                       # esc = interrupt, everywhere
 qp2=$(grep -c '"message": "do this next"' "$SOCK.answers" 2>/dev/null)
 check "abort flushed the queued item" "${qp2:-0}" "1"
 check "queue empty" "$(field "$(st)" q)" "0"
