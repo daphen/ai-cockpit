@@ -156,7 +156,12 @@ Item {
   property var rosterOverride: true   // true = expanded (default), false = collapsed glance
   readonly property bool rosterExpanded: rosterOverride !== null ? rosterOverride : focused
 
-  function copyText(s) { if (s && s.length) Quickshell.execDetached(["wl-copy", "--", String(s)]) }
+  function copyText(s) {
+    if (!s || !s.length) return
+    Quickshell.execDetached(["wl-copy", "--", String(s)])
+    var t = String(s).replace(/\s+/g, " ").trim()
+    feedbackPill.show("copied — " + (t.length > 40 ? t.slice(0, 37) + "…" : t))
+  }
 
   // ── slash commands ─────────────────────────────────────────────────────────
   // The composer advertised "/ for commands" with nothing behind it. pi's command
@@ -255,6 +260,8 @@ Item {
     var labels = [], chars = hintChars.replace("y", "")   // y is reserved for yy
     for (var i = 0; i < targets.length; i++) labels.push(chars.charAt(i % chars.length))
     hintTargets = targets; hintLabels = labels; hintIdx = idx; hinting = true; yankMode = true
+    feedbackPill.show(targets.length ? "yank: label copies · yy whole message · esc"
+                                     : "yank: yy copies the message · esc")
   }
   function cancelHints() { hinting = false; yankMode = false; hintLabels = []; hintTargets = []; hintIdx = -1 }
   function hintKey(ch) {
@@ -2292,6 +2299,11 @@ Item {
         TapHandler { onTapped: { rail.slashCur = slashRow.index; rail.acceptSlash(); composerInput.forceActiveFocus() } }
       }
     }
+  }
+
+  FeedbackPill {
+    id: feedbackPill
+    anchors { horizontalCenter: parent.horizontalCenter; bottom: chin.top; bottomMargin: 10 }
   }
 
   // Feed row variants
