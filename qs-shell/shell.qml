@@ -88,7 +88,7 @@ ShellRoot {
                                 q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
                                 hint: rail.hinting, yank: rail.yankMode, labels: rail.hintLabels.length,
                                 keys: rail.keyLog, lastCancel: rail.lastCancel,
-                                pCards: rail.probeCardCreates, pDots: rail.probeDotCreates, pResets: rail.probeFullResets, pActs: rail.probeActCreates,
+                                pCards: rail.probeCardCreates, pDots: rail.probeDotCreates, pResets: rail.probeFullResets, pActs: rail.probeActCreates, im: rail.imode,
                                 row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
