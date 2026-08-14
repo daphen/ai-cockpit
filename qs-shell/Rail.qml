@@ -1200,12 +1200,13 @@ Item {
     Rectangle {
       id: rosterCard
       Layout.fillWidth: true
+      // Inset to the chat cards' outer edges — the sheet spans the same column as the
+      // feed instead of full-bleed.
+      Layout.leftMargin: 20; Layout.rightMargin: 20
       clip: true
       z: 2   // the chat slides UNDER the rounded bottom edge (negative top margin below)
-      // 8 top + 20 bottom: the bottom pad matches the 20px side insets, so the last
-      // pill floats off the rounded seam the same distance it sits from the edges.
-      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 28
-                                          : glanceCol.implicitHeight + 34   // extra room below the glance
+      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 16
+                                          : glanceCol.implicitHeight + 28   // extra room below the glance
       Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.InOutQuad } }
       // A flush TOP SHEET: full width, square at the top (the strip below covers the
       // top rounding), rounded only where it meets the chat. No border, no divider —
@@ -1260,9 +1261,7 @@ Item {
         opacity: rail.rosterExpanded ? 1 : 0
         visible: opacity > 0.01
         Behavior on opacity { NumberAnimation { duration: 120 } }
-        // 20 + 18 mirrors the chat exactly: pills align with the cards' outer edges
-        // (view inset 20), row content with the cards' inner text (card margin 18).
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 8 }
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 8 }
         spacing: 3
         Repeater {
           model: rosterModel
@@ -1287,7 +1286,7 @@ Item {
             // Collapsed: index doesn't map to the full list → just focus/expand.
             TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
             RowLayout {
-              anchors { fill: parent; leftMargin: 18 + (modelData.depth || 0) * 20; rightMargin: 18 }
+              anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
               spacing: 8
               // Nesting connector for spawned subagents.
               Text {
