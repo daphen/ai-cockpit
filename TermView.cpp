@@ -9,6 +9,7 @@
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QFileSystemWatcher>
+#include <QLocalSocket>
 #include <QQuickWindow>
 #include <QString>
 #include <cmath>
@@ -88,12 +89,26 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setFocus(true);
 
   // Decided before the pty is forked: the child exports it as NVIM_LISTEN_ADDRESS and the
-  // rail reads it back off this item, so both sides always agree on one path per instance.
+  // rail reads it back off this item, so both sides always agree on the path.
+  //
+  // Normally the STABLE name, so an nvim that outlives heidr (crash, kill -9 — teardown's
+  // killpg never ran) is still reachable from the next launch, and the path can be driven
+  // by hand with `nvim --server`. A dead socket file left there is not a problem: nvim
+  // unlinks a stale one itself and binds over it.
+  //
+  // If something LIVE answers, it is another cockpit's (or an orphan's) nvim. Taking that
+  // path anyway would point rail-follow at a window this instance does not own, and nvim
+  // would refuse to bind (0.12 exits on a live address), so fall back to a private name.
   {
     const QByteArray rt = qgetenv("XDG_RUNTIME_DIR");
-    nvimSocket_ = QStringLiteral("%1/heidr-nvim-%2.sock")
-                    .arg(rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt))
-                    .arg(static_cast<qint64>(::getpid()));
+    const QString base = rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt);
+    nvimSocket_ = base + QStringLiteral("/heidr-nvim.sock");
+    QLocalSocket probe;
+    probe.connectToServer(nvimSocket_);
+    if (probe.waitForConnected(150)) {
+      probe.abort();
+      nvimSocket_ = base + QStringLiteral("/heidr-nvim-%1.sock").arg(static_cast<qint64>(::getpid()));
+    }
   }
 
   // Match the RAIL's text rendering so the two panes look like one app: same family,
@@ -346,18 +361,17 @@ void TermView::spawnPty() {
     setenv("COLORTERM", "truecolor", 1);  // let nvim enable termguicolors → full theme
     setenv("HEIDR_COCKPIT", "1", 1);  // nvim uses this to enable rail-crossing keymaps
     // nvim RPC socket so the rail can open files in the running nvim (nvim-follow).
-    // PER INSTANCE: the launch command has to rm the path before binding, so a shared
-    // name meant every new heidr unlinked the socket the previous instance's nvim was
-    // still listening on — that nvim stayed alive believing it was reachable, and every
-    // session switch fired an RPC into a path with no inode, silently (execDetached
-    // reports nothing). Keyed by the heidr pid, launches cannot collide.
     setenv("NVIM_LISTEN_ADDRESS", nvimSocket_.toUtf8().constData(), 1);
     // Auto-launch nvim in the pane; drop to a login shell when it exits.
     // Override the command with HEIDR_COCKPIT_CMD.
-    // Launch nvim with an explicit --listen (NVIM_LISTEN_ADDRESS is deprecated in
-    // 0.12 and doesn't reliably bind), so the rail can open files via --remote.
+    // No unlink before binding. The `rm -f "$NVIM_LISTEN_ADDRESS"` that used to sit here
+    // was the whole bug: it deleted the socket a live nvim was listening on, that nvim kept
+    // running believing it was reachable, and every session-switch RPC then vanished into a
+    // path with no inode — silently, since execDetached reports nothing. It bought nothing
+    // either: nvim 0.12 unlinks a stale socket by itself, and the live case is already
+    // handled by picking a private path above.
     const char *cmd = getenv("HEIDR_COCKPIT_CMD");
-    if (!cmd || !*cmd) cmd = "rm -f \"$NVIM_LISTEN_ADDRESS\" 2>/dev/null; nvim --listen \"$NVIM_LISTEN_ADDRESS\" -c 'set shortmess+=I'; exec \"$SHELL\" -l";
+    if (!cmd || !*cmd) cmd = "nvim --listen \"$NVIM_LISTEN_ADDRESS\" -c 'set shortmess+=I'; exec \"$SHELL\" -l";
     execl(sh, sh, "-l", "-c", cmd, (char *)nullptr);
     _exit(127);
   }
