@@ -52,6 +52,9 @@ ShellRoot {
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string       { return win.pane }
       function title(): string      { return win.title }   // heidr-ipc instance routing
+      // Parent binding for the pane's nvim: its NVIM_LISTEN_ADDRESS is unique to THIS
+      // instance, so heidr-cross can target its own heidr without asking niri anything.
+      function nvimSock(): string   { return term.nvimSocket }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
       // The rail's test interface (test/rail-nav.sh): cursor/scroll behaviour depends on
       // the roster and feed changing UNDER the cursor, which is only assertable from
