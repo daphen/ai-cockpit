@@ -29,7 +29,10 @@ Item {
     if (rosterOverride === false) rosterOverride = true
     exitInsert()
     _wasInsert = false
-    cur = 0
+    // Land on the ACTIVE session's row, not row 0 — Super+T means "show me where I am",
+    // and the top row was usually somebody else.
+    var i = _rosterIndexOf(selectedRaw)
+    cur = i >= 0 ? i : 0
     requestFocus()
   }
 
@@ -872,7 +875,9 @@ Item {
     var l = curLocal()
     if (curSection() === "roster") {
       activate(l)
-      if (rSize < navTotal) cur = rSize    // selecting a session drops you into its chat
+      // Selecting a session means you're about to TALK to it: land in the composer
+      // directly (insert), not in the chat list — j/k browsing is still one Esc away.
+      Qt.callLater(rail.enterInsert)
       return
     }
     if (view === "files") {
