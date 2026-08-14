@@ -2378,10 +2378,12 @@ Item {
         TapHandler { onTapped: rail.toggleGroupKey(grpCol.myKey) }
       }
       Repeater {
-        model: expanded ? entry.cmds : []
+        // Count model for the same reason as the activity list: the cmds array is
+        // rebuilt per stream update, and an array model would recreate every line.
+        model: expanded ? entry.cmds.length : 0
         Text {
           x: 26
-          text: modelData.text; color: Theme.fg_muted
+          text: (entry.cmds[index] || {}).text || ""; color: Theme.fg_muted
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           elide: Text.ElideRight; width: 340
         }
