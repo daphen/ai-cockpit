@@ -56,7 +56,7 @@ Item {
   function _rosterSig(x) {
     if (!x) return ""
     return [x.name, x.rawName, x.status, x.idle, x.remote === true, x.devenv === true,
-            x.depth || 0, x.linked === true].join("|")
+            x.depth || 0, x.linked === true, x.profile || x.role || ""].join("|")
   }
   function syncRosterModel() {
     var arr = rosterList || []
@@ -1304,6 +1304,19 @@ Item {
                 // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
                 // meant two rows shouting at once with no way to tell which you were on.
                 font.weight: sessRow.selected ? 600 : 400
+              }
+              // Role badge (agentd profiles): orchestrator / worker / reviewer / watcher.
+              // The daemon reports "profile" like "lovable-orchestrator" — show the last
+              // segment, muted, so identity reads without shouting over the name.
+              CapLabel {
+                visible: text.length > 0
+                text: {
+                  var p = String(sessRow.modelData.profile || sessRow.modelData.role || "")
+                  if (!p.length) return ""
+                  var seg = p.split("-")
+                  return seg[seg.length - 1]
+                }
+                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
               }
               // Spinner immediately right of the name. The slot is reserved even when idle
               // so nothing shifts as a session starts or stops working. 20px is free (the
