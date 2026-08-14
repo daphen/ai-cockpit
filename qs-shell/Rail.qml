@@ -946,8 +946,10 @@ Item {
       var cf = changesList[l]
       if (cf) openInNvim(cf.path)
     } else {
+      // Enter on a turn opens/closes its collapsed tool activity ("N bash · …") —
+      // copying moved to Y / yank-hints. Same key the activity Loader builds.
       var it = groupedFeed[l]
-      copyText(feedCopyTarget(it))   // Enter on a turn copies its text
+      if (it) toggleGroupKey("turn-" + (it.key || l))
     }
   }
   // Is the cursor'd feed card at least partly in the viewport?
