@@ -52,6 +52,9 @@ Item {
   Canvas {
     id: canvas
     anchors.fill: parent
+    // Paint on the render thread: under streaming load the cooperative main-thread
+    // repaints starved and the orb visibly stuttered/blanked.
+    renderStrategy: Canvas.Threaded
     onPaint: {
       var ctx = getContext("2d")
       ctx.reset()

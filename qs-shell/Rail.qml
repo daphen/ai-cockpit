@@ -1196,13 +1196,16 @@ Item {
   }
   function syncFeedModel() {
     var arr = groupedFeed
-    if (_feedReset || arr.length < feedModel.count) {
-      if (!_feedReset) probeFullResets++   // a SHRINK forced a full rebuild (blink source)
+    if (_feedReset) {
       _feedReset = false
       feedModel.clear()
       for (var a = 0; a < arr.length; a++) feedModel.append({ d: arr[a], sig: _turnSig(arr[a]) })
       return
     }
+    // Shrink (a transient regroup, a daemon rebuild): drop tail rows only — every row
+    // above the cut survives untouched. This used to clear the ENTIRE model, which
+    // faded the whole chat back in at once — the biggest single blink source.
+    while (feedModel.count > arr.length) { probeFullResets++; feedModel.remove(feedModel.count - 1) }
     for (var i = 0; i < arr.length; i++) {
       var sig = _turnSig(arr[i])
       if (i < feedModel.count) {
@@ -1631,17 +1634,24 @@ Item {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
             Repeater {
-              model: (rail.rosterList || []).filter(s => (s.rawName || s.name) !== rail.selectedRaw)
+              // rosterModel, NOT a filtered array: the array's identity changed on every
+              // roster push, so every dot (and running spinner) was destroyed and rebuilt
+              // several times a second while anything streamed — the "blinking dots".
+              // Rows update in place via setProperty; the selected session's slot hides.
+              model: rosterModel
               Item {
+                readonly property var md: model.d
+                readonly property bool self: (md.rawName || md.name) === rail.selectedRaw
+                visible: !self
                 width: 12; height: 12
                 Component.onCompleted: rail.probeDotCreates++
                 Spinner {
-                  anchors.centerIn: parent; visible: modelData.status === "streaming"
+                  anchors.centerIn: parent; visible: parent.visible && md.status === "streaming"
                   running: visible; color: Theme.green; dotSize: 2.0
                 }
                 Rectangle {
-                  anchors.centerIn: parent; visible: modelData.status !== "streaming"
-                  width: 7; height: 7; radius: 3.5; color: rail.dotColor(modelData.status)
+                  anchors.centerIn: parent; visible: parent.visible && md.status !== "streaming"
+                  width: 7; height: 7; radius: 3.5; color: rail.dotColor(md.status)
                 }
               }
             }
@@ -2357,15 +2367,19 @@ Item {
         TapHandler { onTapped: rail.toggleGroupKey(ekey) }
       }
       Repeater {
-        model: expanded ? items : []
+        // An INT model, not the array: an array-model Repeater destroys and recreates
+        // EVERY row when the array identity changes — which is every stream update on
+        // the auto-expanded live turn, i.e. the chat "blinking". With a count model,
+        // growth instantiates only the new indexes and existing rows rebind in place.
+        model: expanded ? items.length : 0
         Loader {
           width: actCol.width
           Component.onCompleted: rail.probeActCreates++
-          property var entry: modelData
+          property var entry: items[index]
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
           sourceComponent: {
-            var k = modelData.kind
+            var k = (entry || {}).kind
             if (k === "edit")  return editRow
             if (k === "think") return thinkRow
             if (k === "group") return groupRow
