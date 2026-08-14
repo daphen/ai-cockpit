@@ -255,6 +255,24 @@ Item {
 
   // Mirror of the nvim rail's tool_hint: name + the bit that matters. MCP calls
   // become "mcp <server> <tool>" / "mcp <server> search:<x>" — not "bash mcp".
+  // Normalize an ask_user result into the words the user chose: {"confirmed":true}
+  // reads as approved, a typed value reads as itself.
+  function _askAnswerText(r) {
+    if (r === undefined || r === null) return ""
+    if (typeof r === "string") {
+      try { r = JSON.parse(r) } catch (e) { return r }
+    }
+    if (r && r.content) {
+      var out = []
+      for (var i = 0; i < r.content.length; i++)
+        if (r.content[i].type === "text") out.push(String(r.content[i].text || ""))
+      return _askAnswerText(out.join("\n"))
+    }
+    if (r && r.cancelled) return "cancelled"
+    if (r && r.confirmed !== undefined) return r.confirmed ? "approved" : "declined"
+    if (r && r.value !== undefined) return String(r.value)
+    return typeof r === "object" ? JSON.stringify(r) : String(r)
+  }
   function toolHint(name, a) {
     a = a || {}
     if (name === "read" || name === "apply_patch") {
@@ -383,6 +401,15 @@ Item {
             if (a.old_string) del += String(a.old_string).split("\n").length
           }
           items.push({ kind: "edit", tool: name, file: _base(p), path: p, add: add, del: del })
+        } else if (name === "ask_user") {
+          // The QUESTION AND ANSWER live here in the transcript (the answer is the
+          // tool call's result) — render them as a persistent row, or the answered
+          // question only ever existed as an optimistic push the next rebuild ate.
+          var q = String(a.title || a.message || "question")
+          var ans = _askAnswerText(b.result)
+          items.push({ kind: "cmd", tool: "ask",
+                       text: ans ? ("❯ " + q + "  ↳ " + _clip(ans)) : ("❯ " + q),
+                       command: ans.length > 72 ? ans : "" })
         } else {
           items.push({ kind: "cmd", tool: name, text: toolHint(name, a),
                        command: (name === "bash" || name === "shell") ? (a.command || a.cmd || "") : "" })
