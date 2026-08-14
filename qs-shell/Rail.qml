@@ -384,7 +384,6 @@ Item {
     // Build a vimscript chain that prefers the worktree plan, then the vault, then
     // the session dashboard — filereadable() runs inside nvim, which is the only
     // side that can actually test the paths.
-    var m = String(sid).match(/every-(\d+)/i)
     // The dashboard needs a git worktree. A remote session's mirror deliberately has no
     // .git (a worktree's .git is a FILE holding a VM-absolute gitdir), so pointing the
     // dashboard at the mirror renders an almost-empty buffer — the "giant whitespace".
@@ -393,14 +392,11 @@ Item {
     var dashAt = function (d) { return 'execute(\'lua require("heidr").dashboard("' + d + '")\')' }
     var dash = '((isdirectory("' + cwd + '/.git") || filereadable("' + cwd + '/.git")) ? '
              + dashAt(cwd) + ' : ' + dashAt(repo) + ')'
+    // Always the DASHBOARD, never the plan. The dashboard is the session's home — it's
+    // where the app, the tickets and the plan are all reachable from — so opening the plan
+    // buffer instead dropped you somewhere you then had to navigate out of. Read the plan
+    // from the dashboard when you want it.
     var open = dash
-    if (m) {
-      var key = "EVERY-" + m[1]
-      var wtPlan    = cwd + "/.plans/" + key + ".md"
-      var vaultPlan = Quickshell.env("HOME") + "/personal/notes/storage/plans/" + key + ".md"
-      open = '(filereadable("' + wtPlan + '") ? execute("edit ' + wtPlan + '")'
-           + ' : (filereadable("' + vaultPlan + '") ? execute("edit ' + vaultPlan + '") : ' + dash + '))'
-    }
     // Guard the cd: a session whose worktree isn't mirrored locally (the VM's main
     // checkout, an unsynced tree) maps to a path that does not exist here, and cd'ing
     // there left nvim on an empty buffer staring at nothing.
