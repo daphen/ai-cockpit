@@ -109,6 +109,13 @@ private:
   // identical glyphs rasterized at different subpixel offsets — some stems crisp,
   // others smeared. Snapping makes every cell origin a real pixel boundary.
   qreal cellW_ = 9, cellH_ = 18, ascent_ = 14;
+  // DEVICE-pixel twins, used exclusively by the worker's painter (which runs at
+  // identity transform — Qt disables font hinting under any scale, so painting in
+  // logical coords through a DPR transform rendered every glyph unhinted: the
+  // permanent softness). Integers by construction; logical mirrors above = D/dpr.
+  int cellWD_ = 9, cellHD_ = 18, ascD_ = 14;
+  int padTD_ = 18, padRD_ = 16, padBD_ = 0, padLD_ = 10;
+  QFont fontD_, iconFontD_;   // device-sized faces the worker rasterizes with
   qreal baseCellW_ = 9, baseCellH_ = 18, baseAscent_ = 14;   // unsnapped, from QFontMetricsF
   void applyMetrics(qreal dpr);   // snap metrics + padding for this ratio
   void centerGrid(qreal viewH, int rows);  // share the row remainder top/bottom

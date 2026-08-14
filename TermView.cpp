@@ -338,11 +338,23 @@ void TermView::syncTextureSize(qreal dpr) {
 
 void TermView::applyMetrics(qreal dpr) {
   if (dpr <= 0) dpr = 1.0;
-  auto snap = [dpr](qreal v) { return std::max(1.0, std::round(v * dpr)) / dpr; };
-  cellW_  = snap(baseCellW_);
-  cellH_  = snap(baseCellH_);
-  ascent_ = std::round(baseAscent_ * dpr) / dpr;
-  padT_ = snap(18); padR_ = snap(16); padB_ = 0; padL_ = snap(10);
+  // Metrics are measured on the DEVICE-sized font and kept as integers; the logical
+  // mirrors are exact divisions. Measuring at the render size (instead of scaling
+  // logical measurements) is kitty's model — a face's advance at 30px is not 1.75x
+  // its advance at 17px, and the mismatch is where fractional cell drift came from.
+  fontD_ = font_;
+  fontD_.setPixelSize(std::max(1, (int)std::round(font_.pixelSize() * dpr)));
+  iconFontD_ = iconFont_;
+  iconFontD_.setPixelSize(fontD_.pixelSize());
+  QFontMetricsF dm(fontD_);
+  const qreal natural = dm.height();
+  cellWD_ = std::max(1, (int)std::round(dm.horizontalAdvance(QChar('M'))));
+  cellHD_ = std::max(1, (int)std::round(natural * 1.25));   // kitty modify_font cell_height 125%
+  ascD_   = (int)std::round(dm.ascent() + (cellHD_ - natural) / 2.0);  // center glyph in cell
+  padTD_  = (int)std::round(18 * dpr); padRD_ = (int)std::round(16 * dpr);
+  padBD_  = 0; padLD_ = (int)std::round(10 * dpr);
+  cellW_  = cellWD_ / dpr;  cellH_ = cellHD_ / dpr;  ascent_ = ascD_ / dpr;
+  padT_   = padTD_ / dpr;   padR_  = padRD_ / dpr;   padB_ = 0; padL_ = padLD_ / dpr;
   basePadT_ = padT_; basePadB_ = padB_;
 }
 
@@ -420,6 +432,10 @@ void TermView::centerGrid(qreal viewH, int rows) {
   const qreal half = std::floor(slack / 2.0);
   padT_ = basePadT_ + half;
   padB_ = basePadB_ + (slack - half);
+  // The worker paints with the DEVICE pads — keep them in step with the centering.
+  const qreal d = guiDpr_ > 0 ? guiDpr_ : 1.0;
+  padTD_ = (int)std::round(padT_ * d);
+  padBD_ = (int)std::round(padB_ * d);
 }
 
 void TermView::wakeWorker() {
@@ -463,13 +479,16 @@ void TermView::workerLoop() {
     if (doResize) {
       if (rz.cols != lastCols || rz.rows != lastRows) {
         cols_ = rz.cols; rows_ = rz.rows;
+        // DEVICE cell sizes: kitty-graphics placements compute pixel rects from these,
+        // and the worker now paints in device pixels — logical here would blit images
+        // at 1/dpr scale.
         ghostty_terminal_resize(term_, (uint16_t)cols_, (uint16_t)rows_,
-                                (uint32_t)cellW_, (uint32_t)cellH_);
+                                (uint32_t)cellWD_, (uint32_t)cellHD_);
         if (master_ >= 0) {
           struct winsize ws = {};
           ws.ws_col = (unsigned short)cols_;   ws.ws_row = (unsigned short)rows_;
-          ws.ws_xpixel = (unsigned short)(cols_ * cellW_);
-          ws.ws_ypixel = (unsigned short)(rows_ * cellH_);
+          ws.ws_xpixel = (unsigned short)(cols_ * cellWD_);
+          ws.ws_ypixel = (unsigned short)(rows_ * cellHD_);
           ioctl(master_, TIOCSWINSZ, &ws);  // SIGWINCH → shell/nvim reflow
         }
         lastCols = cols_; lastRows = rows_;
@@ -564,10 +583,10 @@ bool TermView::drawBoxChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QCo
   // One antialiased pen for EVERY segment (straight, tee, corner) so lines and
   // corners have identical weight — kitty-style uniform box-drawing. Pixel-snap
   // the center lines (+0.5) so 1px strokes stay crisp.
-  const qreal t = std::max(1.0, cellW_ / 8);
-  const qreal mx = std::floor(x + cellW_ / 2.0) + 0.5;
-  const qreal my = std::floor(y + cellH_ / 2.0) + 0.5;
-  const qreal x0 = x, x2 = x + cellW_, y0 = y, y2 = y + cellH_;
+  const qreal t = std::max<qreal>(1.0, cellWD_ / 8.0);
+  const qreal mx = std::floor(x + cellWD_ / 2.0) + 0.5;
+  const qreal my = std::floor(y + cellHD_ / 2.0) + 0.5;
+  const qreal x0 = x, x2 = x + cellWD_, y0 = y, y2 = y + cellHD_;
   p->save();
   p->setRenderHint(QPainter::Antialiasing, true);
   QPen pen(fg); pen.setWidthF(t); pen.setCapStyle(Qt::FlatCap); pen.setJoinStyle(Qt::MiterJoin);
@@ -589,7 +608,7 @@ bool TermView::drawBoxChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QCo
     case 0x253C: H(x0, x2); V(y0, y2); break;            // ┼
     case 0x256D: case 0x256E: case 0x256F: case 0x2570: {   // ╭ ╮ ╯ ╰ rounded
       pen.setJoinStyle(Qt::RoundJoin); p->setPen(pen);
-      const qreal r = std::min(cellW_, cellH_) * 0.4;
+      const qreal r = std::min(cellWD_, cellHD_) * 0.4;
       QPainterPath pp;
       if (cp == 0x256D)      { pp.moveTo(x2, my); pp.lineTo(mx + r, my); pp.arcTo(QRectF(mx, my, 2 * r, 2 * r), 90, 90);          pp.lineTo(mx, y2); }
       else if (cp == 0x256E) { pp.moveTo(x0, my); pp.lineTo(mx - r, my); pp.arcTo(QRectF(mx - 2 * r, my, 2 * r, 2 * r), 90, -90);  pp.lineTo(mx, y2); }
@@ -605,33 +624,33 @@ bool TermView::drawBoxChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QCo
 }
 
 bool TermView::drawBlockChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg) {
-  const int x2 = x + cellW_, y2 = y + cellH_;
-  const int midx = x + cellW_ / 2, midy = y + cellH_ / 2;
+  const int x2 = x + cellWD_, y2 = y + cellHD_;
+  const int midx = x + cellWD_ / 2, midy = y + cellHD_ / 2;
   switch (cp) {
-    case 0x2588: p->fillRect(x, y, cellW_, cellH_, fg); return true;         // █ full
-    case 0x2580: p->fillRect(x, y, cellW_, cellH_ / 2, fg); return true;     // ▀ upper half
-    case 0x2584: p->fillRect(x, midy, cellW_, y2 - midy, fg); return true;   // ▄ lower half
-    case 0x2590: p->fillRect(midx, y, x2 - midx, cellH_, fg); return true;   // ▐ right half
+    case 0x2588: p->fillRect(x, y, cellWD_, cellHD_, fg); return true;         // █ full
+    case 0x2580: p->fillRect(x, y, cellWD_, cellHD_ / 2, fg); return true;     // ▀ upper half
+    case 0x2584: p->fillRect(x, midy, cellWD_, y2 - midy, fg); return true;   // ▄ lower half
+    case 0x2590: p->fillRect(midx, y, x2 - midx, cellHD_, fg); return true;   // ▐ right half
     case 0x2591: case 0x2592: case 0x2593: {                                 // ░ ▒ ▓ shades
       QColor c = fg; c.setAlphaF(cp == 0x2591 ? 0.25 : cp == 0x2592 ? 0.5 : 0.75);
-      p->fillRect(x, y, cellW_, cellH_, c); return true;
+      p->fillRect(x, y, cellWD_, cellHD_, c); return true;
     }
     case 0x2589: case 0x258A: case 0x258B: case 0x258C:                      // ▉▊▋▌▍▎▏ left
     case 0x258D: case 0x258E: case 0x258F: {
-      int w = std::max(1, (int)qRound(cellW_ * ((0x2590 - cp) / 8.0)));
-      p->fillRect(x, y, w, cellH_, fg); return true;
+      int w = std::max(1, (int)qRound(cellWD_ * ((0x2590 - cp) / 8.0)));
+      p->fillRect(x, y, w, cellHD_, fg); return true;
     }
     case 0x2581: case 0x2582: case 0x2583: case 0x2585:                      // ▁▂▃▄▅▆▇ lower
     case 0x2586: case 0x2587: {
-      int h = std::max(1, (int)qRound(cellH_ * ((cp - 0x2580) / 8.0)));
-      p->fillRect(x, y2 - h, cellW_, h, fg); return true;
+      int h = std::max(1, (int)qRound(cellHD_ * ((cp - 0x2580) / 8.0)));
+      p->fillRect(x, y2 - h, cellWD_, h, fg); return true;
     }
     default: return false;   // quadrants/eighths (2594-259F) are rare → font glyph
   }
 }
 
 bool TermView::drawPowerline(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg) {
-  const qreal w = cellW_, h = cellH_;
+  const qreal w = cellWD_, h = cellHD_;
   const qreal x0 = x, x1 = x + w, y0 = y, y1 = y + h, ym = y + h / 2.0;
   p->save();
   p->setRenderHint(QPainter::Antialiasing, true);
@@ -711,7 +730,8 @@ QImage TermView::renderFrame() {
   QImage img(QSize(std::max(1, (int)std::round(vw * ratio)),
                    std::max(1, (int)std::round(vh * ratio))),
              QImage::Format_RGB32);   // OPAQUE: alpha blending softens glyph edges
-  img.setDevicePixelRatio(ratio);
+  // IDENTITY transform: the DPR tag is applied after painting ends. Painting through a
+  // scale silently disables font hinting in Qt, which is the root of the softness.
   img.fill(toQ(defBg_));   // the bg is repainted below; this seeds an opaque surface
   QPainter localPainter(&img);
   QPainter *p = &localPainter;
@@ -723,7 +743,7 @@ QImage TermView::renderFrame() {
   ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_COLOR_CURSOR, &curD);
   const QColor defFg = toQ(fgD), defBg = toQ(bgD), curColor = toQ(curD);
 
-  p->fillRect(QRectF(0, 0, vw, vh), defBg);
+  p->fillRect(QRect(0, 0, img.width(), img.height()), defBg);
 
   uint16_t cx = 0, cy = 0;
   bool cvis = true;
@@ -782,7 +802,7 @@ QImage TermView::renderFrame() {
                                    (fg.green() + effBg.green()) / 2,
                                    (fg.blue() + effBg.blue()) / 2);
 
-      const qreal x = padL_ + col * cellW_, y = padT_ + row * cellH_;
+      const qreal x = padLD_ + col * cellWD_, y = padTD_ + row * cellHD_;
       // Backgrounds accumulate into RUNS instead of one rect per cell. Per-cell fills
       // leave a hairline seam wherever a cell edge lands off the device-pixel grid, which
       // is what striped the markdown heading blocks with vertical gaps. One rect per run
@@ -792,14 +812,14 @@ QImage TermView::renderFrame() {
           runEndCol = col;                       // extend
         } else {
           if (runActive)
-            p->fillRect(padL_ + runStartCol * cellW_, padT_ + runRow * cellH_,
-                        (runEndCol - runStartCol + 1) * cellW_, cellH_, runColor);
+            p->fillRect(padLD_ + runStartCol * cellWD_, padTD_ + runRow * cellHD_,
+                        (runEndCol - runStartCol + 1) * cellWD_, cellHD_, runColor);
           runActive = true; runColor = effBg; runRow = row;
           runStartCol = col; runEndCol = col;
         }
       } else if (runActive) {
-        p->fillRect(padL_ + runStartCol * cellW_, padT_ + runRow * cellH_,
-                    (runEndCol - runStartCol + 1) * cellW_, cellH_, runColor);
+        p->fillRect(padLD_ + runStartCol * cellWD_, padTD_ + runRow * cellHD_,
+                    (runEndCol - runStartCol + 1) * cellWD_, cellHD_, runColor);
         runActive = false;
       }
 
@@ -817,8 +837,8 @@ QImage TermView::renderFrame() {
   }
 
   if (runActive)                                  // flush a run that ended at the last cell
-    p->fillRect(padL_ + runStartCol * cellW_, padT_ + runRow * cellH_,
-                (runEndCol - runStartCol + 1) * cellW_, cellH_, runColor);
+    p->fillRect(padLD_ + runStartCol * cellWD_, padTD_ + runRow * cellHD_,
+                (runEndCol - runStartCol + 1) * cellWD_, cellHD_, runColor);
 
   for (const Glyph &g : glyphs) {
     if (g.cp >= 0x2500 && g.cp <= 0x257F && drawBoxChar(p, g.x, g.y, g.cp, g.fg))
@@ -830,32 +850,32 @@ QImage TermView::renderFrame() {
     // U+E000-U+E4FF = the QsIcons range (see the ctor); everything else uses the
     // text face. Mirrors kitty's symbol_map so the rail's icons match the editor's.
     const bool isIcon = g.cp >= 0xE000 && g.cp <= 0xE4FF;
-    QFont f = isIcon ? iconFont_ : font_;
+    QFont f = isIcon ? iconFontD_ : fontD_;
     if (!isIcon) f.setBold(g.bold);
     // Italics off entirely: the GeistMono italic face slants past the cell's
     // right edge and gets clipped, so render italic-attributed cells upright.
     p->setFont(f);
     p->setPen(g.fg);
-    p->drawText(QPointF(g.x, g.y + ascent_),
+    p->drawText(QPointF(g.x, g.y + ascD_),
                 QString::fromUcs4(reinterpret_cast<const char32_t *>(&g.cp), 1));
   }
 
   // Cursor: honor the app's requested shape (nvim swaps block/beam by mode).
   if (cvis && active_.load() && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
-    const qreal x = padL_ + cx * cellW_, y = padT_ + cy * cellH_;
+    const qreal x = padLD_ + cx * cellWD_, y = padTD_ + cy * cellHD_;
     switch (cursorShape_) {
       case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR:
-        p->fillRect(x, y, 2, cellH_, curColor);  // beam (insert mode)
+        p->fillRect(x, y, std::max(1, (int)std::round(2 * ratio)), cellHD_, curColor);  // beam (insert mode)
         break;
       case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE:
-        p->fillRect(x, y + cellH_ - 2, cellW_, 2, curColor);
+        p->fillRect(x, y + cellHD_ - std::max(1, (int)std::round(2 * ratio)), cellWD_, std::max(1, (int)std::round(2 * ratio)), curColor);
         break;
       case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW:
         p->setPen(curColor);
-        p->drawRect(x, y, cellW_ - 1, cellH_ - 1);
+        p->drawRect(x, y, cellWD_ - 1, cellHD_ - 1);
         break;
       default: {  // BLOCK: fill, redraw the glyph under it in the bg color
-        p->fillRect(x, y, cellW_, cellH_, curColor);
+        p->fillRect(x, y, cellWD_, cellHD_, curColor);
         GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
         GhosttyPoint pt;
         pt.tag = GHOSTTY_POINT_TAG_ACTIVE;
@@ -869,9 +889,9 @@ QImage TermView::renderFrame() {
             if (has) {
               uint32_t cp = 0;
               ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CODEPOINT, &cp);
-              p->setFont(font_);
+              p->setFont(fontD_);
               p->setPen(defBg);
-              p->drawText(QPointF(x, y + ascent_),
+              p->drawText(QPointF(x, y + ascD_),
                           QString::fromUcs4(reinterpret_cast<const char32_t *>(&cp), 1));
             }
           }
@@ -920,8 +940,8 @@ QImage TermView::renderFrame() {
           QImage srcImg = kittyImageView(im);
           if (srcImg.isNull()) continue;
           QRectF srcR(ri.source_x, ri.source_y, ri.source_width, ri.source_height);
-          QRectF dstR(padL_ + (qreal)ri.viewport_col * cellW_,
-                      padT_ + (qreal)ri.viewport_row * cellH_,
+          QRectF dstR(padLD_ + (qreal)ri.viewport_col * cellWD_,
+                      padTD_ + (qreal)ri.viewport_row * cellHD_,
                       ri.pixel_width, ri.pixel_height);
           p->setRenderHint(QPainter::SmoothPixmapTransform, true);
           p->drawImage(dstR, srcImg, srcR);
@@ -987,7 +1007,7 @@ QImage TermView::renderFrame() {
             if (!nc || !nr || (uint32_t)imgCol >= nc || (uint32_t)imgRow >= nr) continue;
             const qreal sw = (qreal)srcImg.width() / nc, sh = (qreal)srcImg.height() / nr;
             QRectF srcR(imgCol * sw, imgRow * sh, sw, sh);
-            QRectF dstR(padL_ + (qreal)col * cellW_, padT_ + (qreal)row * cellH_, cellW_, cellH_);
+            QRectF dstR(padLD_ + (qreal)col * cellWD_, padTD_ + (qreal)row * cellHD_, cellWD_, cellHD_);
             p->drawImage(dstR, srcImg, srcR);
             dbgBlit++;
           }
@@ -999,6 +1019,7 @@ QImage TermView::renderFrame() {
   }
 
   localPainter.end();
+  img.setDevicePixelRatio(ratio);   // paint() blits this 1:1 onto the item texture
   return img;
 }
 
