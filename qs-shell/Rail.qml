@@ -247,6 +247,9 @@ Item {
   // that unit; `yy` copies the whole message. ONE regex is shared by the extractor
   // and the badge pass (hintify), so labels and targets can never drift apart.
   property bool yankMode: false
+  onCurChanged: if (hinting) cancelHints()
+  onSelectedRawChanged: if (hinting) cancelHints()
+  onViewChanged: if (hinting) cancelHints()
   function _yankRe() {
     return /```[a-zA-Z]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
   }
@@ -398,11 +401,14 @@ Item {
   // (via the mirror for remote work) so mutagen carries it to the box and pi can
   // actually open it — a local /tmp path would not exist over there.
   property var pastedImages: []   // filenames pasted this session, shown as composer chips
-  // pi still needs the @references in the prompt; they ride along at send time so
-  // the user never sees the paths in the composer.
+  // pi needs @references in the prompt: each [image N] token is replaced IN PLACE
+  // by its file ref at send time. A token the user deleted sends nothing — deletion
+  // is the drop gesture.
   function attachRefs(t) {
-    var refs = (pastedImages || []).map(n => "@.heidr-pastes/" + n).join(" ")
-    return refs.length ? (t.trim().length ? t.trim() + " " + refs : refs) : t
+    return String(t || "").replace(/\[image (\d+)\]/g, function (all, n) {
+      var f = pastedImages[parseInt(n) - 1]
+      return f ? "@.heidr-pastes/" + f : all
+    })
   }
   property string pasteDirFor: {
     var cwd = ""
@@ -416,9 +422,11 @@ Item {
       onStreamFinished: {
         var out = String(this.text || "").trim()
         if (!out || out === "NOIMAGE") { composerInput.paste(); return }   // no image → normal text paste
-        // No @path typed into the message — the chip is the visible trace, and the
-        // references are appended to the prompt at send time (attachRefs).
+        // A short [image N] token lands AT THE CARET — the reference then replaces it
+        // in place at send time (attachRefs), so the image sits where you pasted it,
+        // for you and for the agent. Deleting the token drops the image from the send.
         rail.pastedImages = rail.pastedImages.concat([out])
+        composerInput.insert(composerInput.cursorPosition, "[image " + rail.pastedImages.length + "] ")
         rail._pushPasteRemote(out)
       }
     }
@@ -1462,7 +1470,7 @@ Item {
             Text {
               visible: turnDel.isUser
               width: cardCol.width
-              text: turnDel.isUser ? rail.colorizeLinks(rail.badgeAttachments(turnDel.turn.text)) : ""
+              text: turnDel.isUser ? rail.colorizeLinks(rail.hintify(rail.badgeAttachments(turnDel.turn.text), turnDel.rowIndex)) : ""
               color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
               linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
               wrapMode: Text.WordWrap; textFormat: Text.MarkdownText
@@ -2044,57 +2052,6 @@ Item {
             // off-center the moment the TextArea's metrics differed from TextInput's.
             Layout.alignment: Qt.AlignTop
             Layout.topMargin: composerFlick.Layout.topMargin + Math.max(0, (composerInput.cursorRectangle.height - height) / 2)
-          }
-          // Attachment chips as input TOKENS — inside the composer's fixed height, so
-          // pasting an image never grows the sheet. Chip = paperclip + index + ✕; the
-          // index matches the "image N" reference in the message text.
-          Row {
-            spacing: 6
-            visible: rail.pastedImages.length > 0
-            Layout.alignment: Qt.AlignTop
-            Layout.topMargin: composerFlick.Layout.topMargin + Math.max(0, (composerInput.cursorRectangle.height - 24) / 2)
-            Repeater {
-              model: rail.pastedImages
-              Rectangle {
-                id: attachChip
-                readonly property string imgName: String(modelData)
-                readonly property bool referenced: rail.composerText.indexOf(imgName) >= 0
-                implicitWidth: chipRow.implicitWidth + 14
-                height: 24
-                radius: 6
-                anchors.verticalCenter: parent.verticalCenter
-                color: Theme.surface2
-                border.width: 1
-                border.color: referenced ? Theme.electric : Theme.hairline
-                Row {
-                  id: chipRow
-                  anchors { verticalCenter: parent.verticalCenter; left: parent.left; leftMargin: 7 }
-                  spacing: 5
-                  Icon {
-                    name: "paperclip"; width: 13; height: 13
-                    color: attachChip.referenced ? Theme.electric : Theme.fg_secondary
-                    anchors.verticalCenter: parent.verticalCenter
-                  }
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: String(index + 1)
-                    color: attachChip.referenced ? Theme.fg : Theme.fg_muted
-                    font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                  }
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "✕"; color: Theme.fg_muted
-                    font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                    TapHandler {
-                      onTapped: {
-                        composerInput.text = composerInput.text.replace("@.heidr-pastes/" + attachChip.imgName + " ", "")
-                        rail.pastedImages = rail.pastedImages.filter(n => String(n) !== attachChip.imgName)
-                      }
-                    }
-                  }
-                }
-              }
-            }
           }
           Flickable {
             id: composerFlick
