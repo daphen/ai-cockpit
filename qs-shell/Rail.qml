@@ -1435,11 +1435,10 @@ Item {
         id: turnDel
         width: feedView.width
         implicitHeight: card.implicitHeight
-        Component.onCompleted: rail.probeCardCreates++
         // Streaming content arrived as a hard pop; fade each row in on its own (see the
         // note above on why this is not a ListView `add` transition).
         opacity: 0
-        Component.onCompleted: opacity = 1
+        Component.onCompleted: { opacity = 1; rail.probeCardCreates++ }
         Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
         property int rowIndex: index
         readonly property real cardHeight: card.height   // for the feedGeom probe
