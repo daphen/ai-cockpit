@@ -247,8 +247,6 @@ Item {
   // that unit; `yy` copies the whole message. ONE regex is shared by the extractor
   // and the badge pass (hintify), so labels and targets can never drift apart.
   property bool yankMode: false
-  onCurChanged: if (hinting) cancelHints()
-  onSelectedRawChanged: if (hinting) cancelHints()
   onViewChanged: if (hinting) cancelHints()
   function _yankRe() {
     return /```[a-zA-Z]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
@@ -819,6 +817,7 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
+    if (hinting) cancelHints()   // hint mode is per-row; a session switch orphans it
     if (_prevSelected) {
       var m = _seenAt
       if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
@@ -1087,6 +1086,7 @@ Item {
 
   // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
+    if (hinting) cancelHints()   // any cursor move invalidates the labeled row
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
     else if (view === "chat" && cur >= rSize)

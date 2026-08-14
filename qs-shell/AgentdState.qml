@@ -565,6 +565,12 @@ Item {
     var esid = m.session
     if (!esid) return
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
+    // Interrupt markers FIRST, echoes second: both re-append at the end, and the
+    // user's just-steered message is the newest thing they did — an old ⏹ marker
+    // landing below it read as "the send interrupted something".
+    var mks = _marks[esid] || []
+    for (var mi = 0; mi < mks.length; mi++)
+      feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi] })
     // Re-append local echoes the transcript has not caught up with, dropping the ones it
     // has (containment, not equality: pi may wrap a steered message when recording it).
     var q = _localEcho[esid] || []
@@ -587,9 +593,6 @@ Item {
       if (left.length) le[esid] = left; else delete le[esid]
       _localEcho = le
     }
-    var mks = _marks[esid] || []
-    for (var mi = 0; mi < mks.length; mi++)
-      feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi] })
     feedGen++
     _recoverAsk(esid, m.data.entries)
   }
