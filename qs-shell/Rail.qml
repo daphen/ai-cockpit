@@ -1254,7 +1254,9 @@ Item {
         opacity: rail.rosterExpanded ? 1 : 0
         visible: opacity > 0.01
         Behavior on opacity { NumberAnimation { duration: 120 } }
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 8 }
+        // 20 + 18 mirrors the chat exactly: pills align with the cards' outer edges
+        // (view inset 20), row content with the cards' inner text (card margin 18).
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 20; rightMargin: 20; topMargin: 8 }
         spacing: 3
         Repeater {
           model: rosterModel
@@ -1279,7 +1281,7 @@ Item {
             // Collapsed: index doesn't map to the full list → just focus/expand.
             TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
             RowLayout {
-              anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
+              anchors { fill: parent; leftMargin: 18 + (modelData.depth || 0) * 20; rightMargin: 18 }
               spacing: 8
               // Nesting connector for spawned subagents.
               Text {
