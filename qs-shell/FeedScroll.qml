@@ -116,6 +116,15 @@ QtObject {
     if (following) _toEnd()
   }
 
+  // Stay where the caller is about to put us: no seek, no follow. Used when switching to a
+  // session whose reading position we remember — the restore itself is the rail's anchor
+  // machinery, which only runs while free.
+  function hold() {
+    _mode = "free"
+    _pendingEnd = false
+    _settleWanted = false
+  }
+
   // Jump to the newest content. `settle` re-pins through async delegate sizing — true
   // for a session switch (rows unsized), false for a send (rows already sized, where
   // the extra re-pins were visible as a flicker).

@@ -112,8 +112,17 @@ Item {
   // Only while READING (free): following wants the newest row, and a session switch is
   // seeking to the end — neither should be dragged back to a stale anchor.
   onGroupedFeedChanged: {
-    if (cur < rSize || feedScroll.mode !== "free") return
+    if (feedScroll.mode !== "free") return
     var i = _feedIndexOf(cursorFeedKey)
+    if (_restoring) {
+      // Restoring a remembered position: the row may not be in the transcript any more
+      // (trimmed, or the session moved on) — then fall back to the newest message rather
+      // than leaving the cursor on whatever index it happened to hold.
+      if (i >= 0) { cur = rSize + i; _restoring = false }
+      else if (groupedFeed.length) { _restoring = false; feedScroll.toEnd(false) }
+      return
+    }
+    if (cur < rSize) return          // cursor is in the roster; feed order can't affect it
     if (i >= 0 && rSize + i !== cur) cur = rSize + i
   }
   property bool insert: false
@@ -398,6 +407,23 @@ Item {
     var expr = 'isdirectory("' + cwd + '") ? (execute("cd ' + cwd + '") . ' + open + ') : ""' 
     if (!nvimSock.length) return
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", expr])
+    _alignMirror(sid)
+  }
+
+  // A remote session's local mirror carries files but not git history, so the moment the
+  // agent commits or rebases on the box, the mirror's HEAD is stale and git blames every
+  // upstream commit that came down on YOUR diff (one rebase read as 5376 files in lualine).
+  // `vm-sync --align` moves HEAD + index only — no checkout, no clean, no file touched —
+  // so it is safe to fire on every switch. It exits immediately when already aligned.
+  function _alignMirror(sid) {
+    var cwd = ""
+    for (var i = 0; i < agentd.sessions.length; i++)
+      if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; break }
+    if (!cwd || !rail._isRemote(cwd)) return
+    var m = String(sid).match(/([a-z]+-\d+)/i)
+    if (!m) return
+    Quickshell.execDetached([Quickshell.env("HOME") + "/.config/niri/scripts/vm-sync",
+                             "--align", m[1]])
   }
 
   function openInNvim(path) {
@@ -673,10 +699,33 @@ Item {
     closeNew()
   }
   Process { id: vmWt; running: false }
+  // Per-session reading position: the message key you were parked on, remembered only when
+  // you had actually scrolled away from the live edge. Switching back restores it; a session
+  // you were following (or have never opened) still lands on its newest message.
+  property var _seenAt: ({})
+  property string _prevSelected: ""
+  property bool _restoring: false
+
   onSelectedRawChanged: {
+    if (_prevSelected) {
+      var m = _seenAt
+      if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
+      else delete m[_prevSelected]          // was following → follow again next time
+      _seenAt = m
+    }
+    _prevSelected = selectedRaw
     _feedReset = true
     Qt.callLater(rail.syncFeedModel)
-    feedScroll.toEnd(true)   // settle: the switched-in transcript's rows aren't sized yet
+    var want = _seenAt[selectedRaw]
+    if (want) {
+      // Park the anchor and let onGroupedFeedChanged land on it once the transcript arrives.
+      cursorFeedKey = want
+      _restoring = true
+      feedScroll.hold()
+    } else {
+      _restoring = false
+      feedScroll.toEnd(true)   // settle: the switched-in transcript's rows aren't sized yet
+    }
     if (agentd) agentd.select(selectedRaw)
     // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
     // every switch, so the editor always tracks the session you're viewing.
