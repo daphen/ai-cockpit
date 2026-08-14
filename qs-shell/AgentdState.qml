@@ -592,10 +592,23 @@ Item {
     var esid = m.session
     if (!esid) return
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
-    // Interrupt markers FIRST, echoes second: both re-append at the end, and the
-    // user's just-steered message is the newest thing they did — an old ⏹ marker
-    // landing below it read as "the send interrupted something".
+    // Interrupt markers are a BRIDGE, not history: pi records the aborted turn
+    // itself (stopReason → the "⏹ interrupted" item), so once the rebuilt feed
+    // carries any interrupt row the marks are duplicates — drop them for good.
+    // Before that they re-append FIRST, echoes second: the user's just-steered
+    // message is the newest thing they did.
     var mks = _marks[esid] || []
+    if (mks.length) {
+      var caughtUp = false
+      for (var fi = 0; fi < feeds[esid].length && !caughtUp; fi++) {
+        var its = feeds[esid][fi].items || []
+        for (var ii = 0; ii < its.length; ii++)
+          if (String(its[ii].text || "").indexOf("⏹ interrupted") === 0) { caughtUp = true; break }
+      }
+      if (caughtUp) {
+        var nm = _marks; delete nm[esid]; _marks = nm; mks = []
+      }
+    }
     for (var mi = 0; mi < mks.length; mi++)
       feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi] })
     // Re-append local echoes the transcript has not caught up with, dropping the ones it
