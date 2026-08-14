@@ -1636,6 +1636,20 @@ Item {
   }
 
 
+  // Elevation: a dark gradient leaking out from under the roster sheet into the chat,
+  // so content dims as it slides beneath the rounded seam. Sibling of the layout with
+  // z above it, starting exactly at the sheet's (animated) bottom edge.
+  Rectangle {
+    x: 20; width: parent.width - 40
+    y: rosterCard.height
+    height: 44
+    z: 1
+    gradient: Gradient {
+      GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.38) }
+      GradientStop { position: 1.0; color: "transparent" }
+    }
+  }
+
   // Chin: an opaque bottom bar (composer + hints) anchored to the rail bottom,
   // like the sibling apps' statusbar. The feed is bounded to chin.top, so chat
   // rows can never bleed under the input/hints.
