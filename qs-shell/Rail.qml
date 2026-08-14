@@ -1185,23 +1185,32 @@ Item {
 
   ColumnLayout {
     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: chin.top }
-    anchors.margins: 20
-    anchors.topMargin: 18     // just the inter-message gap above the roster card (no ROSTER header)
+    // Full-bleed: the roster is a flush top sheet (no side insets, no top gap); the
+    // chat views carry their own 20px insets instead.
+    anchors.margins: 0
     anchors.bottomMargin: 0   // feed clips at chin.top (under the fade's full-opacity edge), no hard cut
-    spacing: 18
+    spacing: 0
 
     // Roster — all sessions in one discrete card. Rows are full-bleed within it;
     // the cursor row is an inverted ink pill, the selected session a faint tint.
     Rectangle {
+      id: rosterCard
       Layout.fillWidth: true
       clip: true
+      z: 2   // the chat slides UNDER the rounded bottom edge (negative top margin below)
       implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 16
                                           : glanceCol.implicitHeight + 28   // extra room below the glance
       Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.InOutQuad } }
-      // Item pills drive the container: container radius = item radius + padding.
+      // A flush TOP SHEET: full width, square at the top (the strip below covers the
+      // top rounding), rounded only where it meets the chat. No border, no divider —
+      // the bottom radius is the whole seam.
       radius: 20 + 8   // (rowHeight/2) + padding → concentric with the pill rows
       color: Theme.surface0            // subtler than surface (barely-there tint)
-      border.color: Theme.hairlineSoft; border.width: 1
+      Rectangle {   // square the top corners (same fill, painted under the content)
+        anchors { top: parent.top; left: parent.left; right: parent.right }
+        height: parent.radius
+        color: parent.color
+      }
 
       // Collapsed glance: active session name + a per-session status strip
       // (spinner while working, dot otherwise) + the toggle hint.
@@ -1414,11 +1423,14 @@ Item {
     ListView {
       id: changesView
       Layout.fillWidth: true
+      Layout.leftMargin: 20; Layout.rightMargin: 20
+      Layout.topMargin: -rosterCard.radius   // slide under the roster sheet's rounded edge
       Layout.fillHeight: rail.view === "files"
       visible: rail.view === "files"
       clip: true
       activeFocusOnTab: false
       model: rail.changesList
+      header: Item { width: changesView.width; height: rosterCard.radius + 12 }   // clear the sheet at rest
       boundsBehavior: Flickable.StopAtBounds
       ScrollFeel { flick: changesView }
       delegate: Rectangle {
@@ -1450,6 +1462,11 @@ Item {
     ListView {
       id: feedView
       Layout.fillWidth: true
+      Layout.leftMargin: 20; Layout.rightMargin: 20
+      // Under the sheet's rounded bottom: the chat's top edge lives beneath the roster
+      // card (z 2 above), so content scrolls up INTO the corner notches — the radius IS
+      // the seam, no divider, no gap.
+      Layout.topMargin: -rosterCard.radius
       Layout.fillHeight: rail.view === "chat"
       visible: rail.view === "chat"
       clip: true
@@ -1471,14 +1488,10 @@ Item {
         flick: feedView
         onScrolled: (up) => feedScroll.userScrolled(up)
       }
-      header: Item { width: feedView.width; height: feedView.spacing }   // top gap == inter-message gap, so the first card clears the chat-title hairline
+      // At-rest content clears the sheet (radius + one gap); SCROLLED content slides up
+      // underneath it — the header scrolls with the feed, which is the whole trick.
+      header: Item { width: feedView.width; height: rosterCard.radius + feedView.spacing }
       footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
-      // Hairline pinned to the feed's top edge (fixed overlay, not a scrolling
-      // delegate) — marks where the chat clips, no layout-spacing hacks.
-      Rectangle {
-        anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: 1; color: Theme.hairline; z: 2
-      }
       onCountChanged: feedScroll.contentChanged()
       // Streaming content arrived as a hard pop. Fade added rows in — short enough
       // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
