@@ -1298,7 +1298,11 @@ Item {
                 // rest of the row: margins 28 + icon 14 + orb 16 + status 74 + devenv 15 +
                 // five 8px gaps.
                 Layout.fillWidth: false
-                Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20)
+                // The role badge eats from the NAME's budget, never from the orb/status
+                // slots to its right — a long ticket name with a badge otherwise squeezed
+                // the working orb.
+                Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20
+                                              - (roleBadge.visible ? roleBadge.width + 8 : 0))
                 elide: Text.ElideRight
                 color: sessRow.cursor ? Theme.bg : Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName
@@ -1310,6 +1314,7 @@ Item {
               // The daemon reports "profile" like "lovable-orchestrator" — show the last
               // segment, muted, so identity reads without shouting over the name.
               CapLabel {
+                id: roleBadge
                 visible: text.length > 0
                 text: {
                   var p = String(sessRow.modelData.profile || sessRow.modelData.role || "")
