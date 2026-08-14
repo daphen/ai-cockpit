@@ -144,6 +144,41 @@ else
   say "  ✗ expected the row to slide up, got $acur -> $bcur"; fail=$((fail+1))
 fi
 
+say "8. selecting a session lands the cursor in ITS feed, never on a roster row"
+# The failure this pins: a pending jump-to-end was spent on a synced() triggered by ANOTHER
+# session's stream tick, during the window where the switched-in transcript has not loaded.
+# With no feed rows, "the end" is the last ROSTER row — so Enter dropped the cursor onto an
+# unrelated session and every later signal was unforced, so nothing moved it back.
+fake "slow_entries 2.5" 1          # hold the new transcript back to WIDEN that window
+key g                             # roster row 0
+key j; key j                      # cursor onto the third session
+key enter
+for _ in 1 2 3 4 5 6; do echo grow >> "$CMD"; done   # ticks land while the feed is empty
+sleep 8
+fake "slow_entries 0" 1
+sw=$(st); scur=$(field "$sw" cur); srs=$(field "$sw" rSize); stot=$(field "$sw" navTotal)
+say "  cur $scur (rSize $srs, navTotal $stot), mode $(field "$sw" mode)"
+check "cursor left the roster"  "$([ "$scur" -ge "$srs" ] && echo yes || echo no)" "yes"
+check "landed on the last row"  "$scur" "$((stot-1))"
+check "following the live edge" "$(field "$sw" mode)" "follow"
+
+say "9. chat cards never overlap"
+# These cards reach their real height only after their prose Loader realizes (57 -> 144px).
+# Inside a ListView add/displaced transition that growth never reaches the layout, so rows
+# were positioned as 57px and painted over each other — visible on screen, invisible to
+# every state probe. Assert on the delegates' own geometry instead.
+geom=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom 2>/dev/null | tail -1)
+ov=$(python3 - "$geom" <<'PY'
+import json, sys
+rows = json.loads(sys.argv[1] or "[]")
+bad = [(a["i"], b["i"], (a["y"] + a["h"]) - b["y"])
+       for a, b in zip(rows, rows[1:]) if b["y"] < a["y"] + a["h"]]
+print(len(bad) if not bad else f"{len(bad)} ({bad[:3]})")
+PY
+)
+say "  rows measured: $(python3 -c "import json,sys;print(len(json.loads(sys.argv[1] or '[]')))" "$geom")"
+check "overlapping row pairs" "$ov" "0"
+
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
 check "error lines" "$errs" "0"

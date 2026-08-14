@@ -135,7 +135,11 @@ Item {
     streaming: rail.featuredStreaming
     chatVisible: rail.view === "chat"
     onWantCursorAtEnd: (force) => {
-      if (force || rail.cur >= rail.rSize) rail.cur = Math.max(0, rail.navTotal - 1)
+      // "The end" is the end of the FEED. With no feed rows, navTotal - 1 is the last
+      // roster row, and honouring it here is what dropped the cursor onto an unrelated
+      // session on every switch.
+      if (rail.navTotal <= rail.rSize) return
+      if (force || rail.cur >= rail.rSize) rail.cur = rail.navTotal - 1
     }
   }
   property string activeRaw: ""
@@ -716,7 +720,11 @@ Item {
     }
     _prevSelected = selectedRaw
     _feedReset = true
-    Qt.callLater(rail.syncFeedModel)
+    // Report the rebuild, don't just do it: synced() is what consumes a pending jump, and
+    // it was only ever reached from the stream debounce. Switching to an IDLE session on a
+    // quiet daemon produced no further ticks, so the jump queued below never ran at all —
+    // the feed sat wherever the last session left it.
+    Qt.callLater(rail._resyncFeed)
     // Only restore a saved spot on a session that is NOT working. A streaming session
     // should track its live edge — parking you where you last read means "no live follow"
     // on exactly the session you switched to in order to watch it.
@@ -990,6 +998,25 @@ Item {
     }
   }
 
+  // Per-row geometry of the realized feed rows, for asserting that cards do not OVERLAP.
+  // "Cards on top of each other" is invisible to every other probe — the model, the cursor
+  // and the mode all read as correct while the rows are drawn over one another — so read the
+  // delegates' own y/height instead of reasoning about which child under-reports its size.
+  function feedGeom() {
+    var out = []
+    for (var i = 0; i < feedModel.count; i++) {
+      var it = feedView.itemAtIndex(i)
+      if (!it) continue
+      out.push({ i: i, y: Math.round(it.y), h: Math.round(it.height),
+                 ih: Math.round(it.implicitHeight), ch: Math.round(it.cardHeight) })
+    }
+    return out
+  }
+
+  // Rebuild the feed rows and tell the scroll machine they are in. Always paired: a sync
+  // without the report leaves a queued jump waiting for an event that may never come.
+  function _resyncFeed() { syncFeedModel(); feedScroll.synced() }
+
   // --- Live feed for the selected session; mock when no daemon data yet ---
   // Debounced stream updates: rebuilding the whole feed model on every token
   // blocks the UI thread and stutters animations (the orb) + scrolling. Coalesce
@@ -999,8 +1026,7 @@ Item {
     id: feedDebounce; interval: 120
     onTriggered: {
       rail.feedTick++
-      rail.syncFeedModel()
-      feedScroll.synced()
+      rail._resyncFeed()
     }
   }
   Connections {
@@ -1347,12 +1373,12 @@ Item {
       // Streaming content arrived as a hard pop. Fade added rows in — short enough
       // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
       // below from jumping when one is inserted.
-      add: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 140; easing.type: Easing.OutQuad }
-      }
-      displaced: Transition {
-        NumberAnimation { properties: "y"; duration: 140; easing.type: Easing.OutQuad }
-      }
+      // NO add/displaced transitions. A row inside one has its geometry held by the
+      // transition manager, and these cards only reach their real height AFTER their prose
+      // Loader realizes (57 -> 144px) — that growth never made it back into the layout, so
+      // every agent card was positioned as a 57px row and painted over the one below it.
+      // (`ipc call heidr railGeom` shows it: y jumps by 75 between rows that are 144 tall.)
+      // The fade lives in the delegate instead, where it cannot touch layout.
       // Manual scrolling wins over follow-the-stream. NOTE: do NOT use
       // onMovementStarted/Ended here — Flickable emits those for PROGRAMMATIC
       // contentY changes too, so the follow timer's own scrolling would trip them.
@@ -1363,7 +1389,13 @@ Item {
         id: turnDel
         width: feedView.width
         implicitHeight: card.implicitHeight
+        // Streaming content arrived as a hard pop; fade each row in on its own (see the
+        // note above on why this is not a ListView `add` transition).
+        opacity: 0
+        Component.onCompleted: opacity = 1
+        Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
         property int rowIndex: index
+        readonly property real cardHeight: card.height   // for the feedGeom probe
         // Capture the row's turn once: nested Repeaters shadow `model` with their
         // own model property, so model.d is only readable at the delegate root.
         readonly property var turn: model.d

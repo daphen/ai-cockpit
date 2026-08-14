@@ -106,6 +106,12 @@ QtObject {
   function synced() {
     if (!chatVisible) return
     if (_pendingEnd) {
+      // Nothing to jump to yet. This synced() is usually ANOTHER session's stream tick
+      // arriving inside the window where the switched-in transcript has not loaded: the
+      // rows are gone, the new ones are not in, and "the end" is the last ROSTER row. The
+      // jump used to be spent right there — cursor parked on a roster row, and every
+      // later signal is unforced, so nothing moved it into the feed again. Stay armed.
+      if (view && view.count === 0) return
       _pendingEnd = false
       _mode = "follow"
       wantCursorAtEnd(true)

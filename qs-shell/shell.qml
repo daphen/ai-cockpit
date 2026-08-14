@@ -54,6 +54,9 @@ ShellRoot {
                                 row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
+      // Realized feed rows as y/height/implicitHeight/cardHeight — the only way to see
+      // whether chat cards are drawn on top of each other.
+      function railGeom(): string { return JSON.stringify(rail.feedGeom()) }
       // Merged roster as "scope/name status" lines — proves which daemon owns what
       // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
       function sessions(): string {

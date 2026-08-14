@@ -11,7 +11,7 @@ import json, os, socket, sys, threading, time
 SOCK = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fake-agentd.sock"
 
 BASE = ["alpha-1000", "every-9001", "zulu-9999"]
-state = {"names": list(BASE), "streaming": None, "extra_turns": 0}
+state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0}
 clients = []
 lock = threading.Lock()
 
@@ -85,9 +85,19 @@ def serve(conn):
             t = m.get("type")
             if t == "get_entries":
                 sid = m.get("session")
-                ents, leaf = entries_for(sid)
-                send(conn, {"type": "response", "command": "get_entries",
-                            "session": sid, "data": {"entries": ents, "leafId": leaf}})
+
+                def answer(sid=sid, conn=conn, d=state["entry_delay"]):
+                    # Off-thread so the delay widens the WINDOW without stalling this
+                    # connection: the point is to keep stream ticks arriving while the
+                    # switched-to session still has no rows, which is when the rail used
+                    # to spend its jump-to-end on a roster row.
+                    if d:
+                        time.sleep(d)
+                    ents, leaf = entries_for(sid)
+                    send(conn, {"type": "response", "command": "get_entries",
+                                "session": sid, "data": {"entries": ents, "leafId": leaf}})
+
+                threading.Thread(target=answer, daemon=True).start()
     with lock:
         if conn in clients:
             clients.remove(conn)
@@ -122,6 +132,9 @@ def driver():
                 state["streaming"] = "every-9001"
             elif c == "stream_off":
                 state["streaming"] = None
+            elif c.startswith("slow_entries"):
+                parts = c.split()
+                state["entry_delay"] = float(parts[1]) if len(parts) > 1 else 2.0
             elif c == "grow":
                 state["extra_turns"] += 2
                 broadcast({"type": "message_delta", "session": "every-9001"})
