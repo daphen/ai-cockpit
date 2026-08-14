@@ -25,14 +25,14 @@ done
 
 # MODE by launch context. The DEFAULT is PRIVATE: the personal scope only, files and
 # sessions all on this machine. Launching from the lovable workspace is the special
-# case that wires the full work cockpit — local lovable scope (orchestrator + PR
-# reviewers) first, the tunneled VM work scope, then personal LAST: on a name
-# collision the earlier socket wins, and ticket names must stay addressable.
+# case that wires the work cockpit — local lovable scope (orchestrator + PR
+# reviewers) first, then the tunneled VM work scope; private/personal sessions
+# stay out of the work rail entirely (they have their own cockpit).
 if [ -z "${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "${HEIDR_AGENTD_SOCK:-}" ]; then
   ws=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true)
   case "${ws:-}" in
     lovable*)
-      scopes="lovable work personal"
+      scopes="lovable work"
       export HEIDR_SCOPE="${HEIDR_SCOPE:-lovable}"
       export HEIDR_NEW_CWD="${HEIDR_NEW_CWD:-$HOME/work/lovable}"
       ;;

@@ -75,7 +75,7 @@
             ws=$(niri msg --json workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true)
             case "''${ws:-}" in
               lovable*)
-                scopes="lovable work personal"
+                scopes="lovable work"
                 export HEIDR_SCOPE="''${HEIDR_SCOPE:-lovable}"
                 export HEIDR_NEW_CWD="''${HEIDR_NEW_CWD:-$HOME/work/lovable}"
                 ;;
