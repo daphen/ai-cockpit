@@ -1369,7 +1369,10 @@ Item {
               Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
               Text {
                 text: modelData.state || modelData.idle || ""
-                Layout.preferredWidth: 74; horizontalAlignment: Text.AlignRight
+                // Sub-agents (linked rows) carry no status word at all — the orb says
+                // "working", and an idle watcher needs no label to say it's waiting.
+                visible: !modelData.linked
+                Layout.preferredWidth: visible ? 74 : 0; horizontalAlignment: Text.AlignRight
                 Layout.alignment: Qt.AlignVCenter
                 // One muted colour for every state: the orb by the name already says
                 // "working", so colouring the word too was saying it twice.
