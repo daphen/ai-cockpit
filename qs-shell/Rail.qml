@@ -247,7 +247,7 @@ Item {
   // that unit; `yy` copies the whole message. ONE regex is shared by the extractor
   // and the badge pass (hintify), so labels and targets can never drift apart.
   property bool yankMode: false
-  onViewChanged: if (hinting) cancelHints()
+  onViewChanged: if (hinting) cancelHints("view")
   function _yankRe() {
     return /```[a-zA-Z]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
   }
@@ -265,12 +265,16 @@ Item {
     feedbackPill.show(targets.length ? "YANK MODE — press a yellow [letter] · yy = all · esc"
                                      : "YANK MODE — no code/links here · yy = all · esc")
   }
-  function cancelHints() { hinting = false; yankMode = false; hintLabels = []; hintTargets = []; hintIdx = -1 }
+  property string lastCancel: ""
+  function cancelHints(why) {
+    if (hinting) lastCancel = (why || "unknown") + " @cur=" + cur
+    hinting = false; yankMode = false; hintLabels = []; hintTargets = []; hintIdx = -1
+  }
   function hintKey(ch) {
     var i = hintLabels.indexOf(ch)
     var t = i >= 0 ? hintTargets[i] : ""
     var wasYank = yankMode, idx = hintIdx
-    cancelHints()
+    cancelHints("picked:" + ch)
     if (wasYank) {
       if (t) copyText(t)
       else if (ch === "y") copyText(String(feedCopyTarget(groupedFeed[idx]) || ""))
@@ -818,7 +822,7 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
-    if (hinting) cancelHints()   // hint mode is per-row; a session switch orphans it
+    if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
     if (_prevSelected) {
       var m = _seenAt
       if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
@@ -985,7 +989,7 @@ Item {
   property var keyLog: []
   function _klog(e) {
     var l = keyLog.slice(-7)
-    l.push({ k: e.key, t: String(e.text || ""), hint: hinting, yank: yankMode, ins: insert, cur: cur })
+    l.push({ k: e.key, t: String(e.text || ""), m: e.modifiers, hint: hinting, yank: yankMode, ins: insert, cur: cur })
     keyLog = l
   }
   Keys.onPressed: (e) => {
@@ -1017,12 +1021,12 @@ Item {
     // Link-hint mode owns the keyboard while active: a label letter opens its
     // link, Esc (or any non-label key) drops the hints — mlqs's `f` semantics.
     if (hinting) {
-      if (e.key === Qt.Key_Escape) { cancelHints(); e.accepted = true; return }
+      if (e.key === Qt.Key_Escape) { cancelHints("esc"); e.accepted = true; return }
       if (e.text && /^[a-z]$/.test(e.text)) { hintKey(e.text); e.accepted = true; return }
       // A lone modifier (Ctrl/Shift/Alt/Super) is not a choice — the mode was
       // dying to a reflexive Ctrl before the user ever saw the labels.
       if (e.key === Qt.Key_Control || e.key === Qt.Key_Shift || e.key === Qt.Key_Alt || e.key === Qt.Key_Meta) return
-      cancelHints()   // fall through: the key does its normal thing
+      cancelHints("other-key:" + e.key)   // fall through: the key does its normal thing
     }
     // A pending question owns the keyboard: y/n (confirm), 1–9 (select),
     // i (type a reply for input/editor), esc (cancel). j/k still scroll.
@@ -1098,7 +1102,7 @@ Item {
 
   // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
-    if (hinting) cancelHints()   // any cursor move invalidates the labeled row
+    if (hinting) cancelHints("cur-move")   // any cursor move invalidates the labeled row
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
     else if (view === "chat" && cur >= rSize)
