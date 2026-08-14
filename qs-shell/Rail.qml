@@ -58,27 +58,46 @@ Item {
   // blinked on every roster tick. Same fix as the feed: reconcile by signature so the
   // delegates persist and only a row that really changed is written.
   ListModel { id: rosterModel; dynamicRoles: true }
+  // KEYED reconcile, shared by the roster and the feed. Index-based reconciling
+  // couldn't survive a transient row-count dip (a mid-stream regroup, a session
+  // removal): the tail — usually the LIVE row — was destroyed and re-created a
+  // beat later, which is a blink. Matching by identity instead means insertions
+  // and removals touch exactly the rows that appeared or vanished.
+  function _reconcileKeyed(model, arr, keyOf, sigOf) {
+    var want = {}
+    for (var a = 0; a < arr.length; a++) want[keyOf(arr[a])] = true
+    for (var r = model.count - 1; r >= 0; r--)
+      if (!want[model.get(r).k]) model.remove(r)
+    for (var i = 0; i < arr.length; i++) {
+      var k = keyOf(arr[i]), sig = sigOf(arr[i])
+      if (i < model.count && model.get(i).k === k) {
+        if (model.get(i).sig !== sig) {
+          model.setProperty(i, "d", arr[i])
+          model.setProperty(i, "sig", sig)
+        }
+        continue
+      }
+      // not at i: either it exists later (a row above it vanished — already handled
+      // by the removal pass) or it is new. Find it; move is rare (stable orders).
+      var found = -1
+      for (var j = i + 1; j < model.count; j++) if (model.get(j).k === k) { found = j; break }
+      if (found >= 0) model.move(found, i, 1)
+      else model.insert(i, { d: arr[i], sig: sig, k: k })
+      if (model.get(i).sig !== sig || found >= 0) {
+        model.setProperty(i, "d", arr[i])
+        model.setProperty(i, "sig", sig)
+      }
+    }
+  }
   function _rosterSig(x) {
     if (!x) return ""
     return [x.name, x.rawName, x.status, x.idle, x.remote === true, x.devenv === true,
             x.depth || 0, x.linked === true, x.profile || x.role || ""].join("|")
   }
   function syncRosterModel() {
-    var arr = rosterList || []
-    if (arr.length < rosterModel.count) rosterModel.clear()   // shrank → rebuild
-    for (var i = 0; i < arr.length; i++) {
-      var sig = _rosterSig(arr[i])
-      if (i < rosterModel.count) {
-        // setProperty, NOT set(): set() replaces the element and rebuilds the delegate,
-        // which is exactly the blink this model exists to avoid.
-        if (rosterModel.get(i).sig !== sig) {
-          rosterModel.setProperty(i, "d", arr[i])
-          rosterModel.setProperty(i, "sig", sig)
-        }
-      } else {
-        rosterModel.append({ d: arr[i], sig: sig })
-      }
-    }
+    _reconcileKeyed(rosterModel, rosterList || [],
+                    function (x) { return String(x.rawName || x.name || "") },
+                    _rosterSig)
   }
   Component.onCompleted: syncRosterModel()
 
@@ -985,6 +1004,11 @@ Item {
     cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
   }
 
+  // Blink probes (debug): delegate/dot creations — streaming must not grow these.
+  property int probeCardCreates: 0
+  property int probeDotCreates: 0
+  property int probeFullResets: 0
+  property int probeActCreates: 0
   // Ground-truth key trace (debug): what key arrived, and what state met it.
   property var keyLog: []
   function _klog(e) {
@@ -992,108 +1016,139 @@ Item {
     l.push({ k: e.key, t: String(e.text || ""), m: e.modifiers, hint: hinting, yank: yankMode, ins: insert, cur: cur })
     keyLog = l
   }
-  Keys.onPressed: (e) => {
-    _klog(e)
-    // BEFORE the insert guard: the stale-ask notice advertises C-d while the composer is
-    // focused (its whole point is "type your answer instead"), so the binding must work in
-    // insert too. The composer doesn't consume Ctrl+D, so it bubbles up to here.
-    if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_D && staleAsk) {
-      dismissStaleAsk(); e.accepted = true; return
-    }
-    // Ctrl+T = the in-app Super+T, from ANY state (insert included — the composer
-    // doesn't consume it): open the roster and park the cursor on the active row.
-    // Pressed again while already parked there, it puts the roster away and drops
-    // you back into the composer.
-    if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_T) {
+  // ── input dispatch ──────────────────────────────────────────────────────────
+  // ONE derived mode + one dispatcher. Every key walks the same visible chain:
+  // global chords → insert guard → hint/yank → new-session → ask → normal. Each
+  // key*() returns true when it consumed the key; false falls through, exactly
+  // like the old else-if ladder — but each mode is now a named function and the
+  // active mode is observable (railState.im), so a shadowed binding can't hide.
+  readonly property string imode:
+      (insert && !(pendingAsk && !askWantsText)) ? "insert"
+    : (pendingAsk && !askWantsText)              ? "ask"
+    : hinting                                    ? (yankMode ? "yank" : "hint")
+    : (newOpen && newMode === "")                ? "new"
+    : pendingAsk                                 ? "ask"
+    : "normal"
+
+  // Chords that work from EVERY mode, insert included (the composer doesn't
+  // consume them, so they bubble up here).
+  function keyGlobal(e) {
+    var ctrl = (e.modifiers & Qt.ControlModifier)
+    // The stale-ask notice advertises C-d while the composer is focused — its
+    // whole point is "type your answer instead", so it must work in insert.
+    if (ctrl && e.key === Qt.Key_D && staleAsk) { dismissStaleAsk(); return true }
+    // Ctrl+T = the in-app Super+T: open the roster and park on the active row;
+    // pressed again while parked, put it away and return to the composer.
+    if (ctrl && e.key === Qt.Key_T) {
       if (rosterExpanded && !insert && cur < rSize) {
         rosterOverride = false
         Qt.callLater(rail.enterInsert)
       } else {
         focusRoster()
       }
-      e.accepted = true; return
+      return true
     }
-    // A confirm/select ask overrides a stale insert flag: the composer is hidden while
-    // the ask card holds the chin, so there is nothing to type into anyway — fall
-    // through so y/n/1-9/esc reach the ask block below. Text asks keep insert (the
-    // answer IS typed).
-    if (insert && !(pendingAsk && !askWantsText)) return
-    // Link-hint mode owns the keyboard while active: a label letter opens its
-    // link, Esc (or any non-label key) drops the hints — mlqs's `f` semantics.
-    if (hinting) {
-      if (e.key === Qt.Key_Escape) { cancelHints("esc"); e.accepted = true; return }
-      if (e.text && /^[a-z]$/.test(e.text)) { hintKey(e.text); e.accepted = true; return }
-      // A lone modifier (Ctrl/Shift/Alt/Super) is not a choice — the mode was
-      // dying to a reflexive Ctrl before the user ever saw the labels.
-      if (e.key === Qt.Key_Control || e.key === Qt.Key_Shift || e.key === Qt.Key_Alt || e.key === Qt.Key_Meta) return
-      cancelHints("other-key:" + e.key)   // fall through: the key does its normal thing
+    return false
+  }
+
+  // Hint/yank mode: a label letter acts, Esc cancels, a lone modifier is NOT a
+  // choice (a reflexive Ctrl used to kill the mode before the labels were seen);
+  // any other key cancels and falls through to do its normal thing.
+  function keyHint(e) {
+    if (e.key === Qt.Key_Escape) { cancelHints("esc"); return true }
+    if (e.text && /^[a-z]$/.test(e.text)) { hintKey(e.text); return true }
+    if (e.key === Qt.Key_Control || e.key === Qt.Key_Shift || e.key === Qt.Key_Alt || e.key === Qt.Key_Meta) return true
+    cancelHints("other-key:" + e.key)
+    return false
+  }
+
+  // New-session panel: l/r pick the kind (then the input takes over in insert);
+  // everything else is swallowed while choosing. Esc closes in any phase.
+  function keyNew(e) {
+    if (e.key === Qt.Key_Escape) { closeNew(); return true }
+    if (newMode === "") {
+      if (e.key === Qt.Key_L) { newMode = "local";  Qt.callLater(rail.enterInsert); return true }
+      if (e.key === Qt.Key_R) { newMode = "remote"; Qt.callLater(rail.enterInsert); return true }
+      return true
     }
-    // A pending question owns the keyboard: y/n (confirm), 1–9 (select),
-    // i (type a reply for input/editor), esc (cancel). j/k still scroll.
-    if (newOpen) {
-      if (e.key === Qt.Key_Escape) { closeNew(); e.accepted = true; return }
-      if (newMode === "") {
-        if (e.key === Qt.Key_L) { newMode = "local";  Qt.callLater(rail.enterInsert); e.accepted = true; return }
-        if (e.key === Qt.Key_R) { newMode = "remote"; Qt.callLater(rail.enterInsert); e.accepted = true; return }
-        e.accepted = true; return                     // swallow the rest while choosing
-      }
+    return false
+  }
+
+  // A pending question owns its keys: y/n (confirm), 1–9 (select), i (type a
+  // reply), esc (cancel), t (cancel + say what you actually think). j/k fall
+  // through so the chat still scrolls under the card.
+  function keyAsk(e) {
+    var pm = pendingAsk.method
+    if (e.key === Qt.Key_Escape) { answerAsk({ cancelled: true }); return true }
+    if (e.key === Qt.Key_T && !(e.modifiers & Qt.ControlModifier)) {
+      answerAsk({ cancelled: true })
+      Qt.callLater(rail.enterInsert)
+      return true
     }
-    if (pendingAsk) {
-      var pm = pendingAsk.method
-      if (e.key === Qt.Key_Escape) { answerAsk({ cancelled: true }); e.accepted = true; return }
-      // `t` works for ANY ask kind: cancel the question so the agent stops blocking,
-      // then drop into the composer so you can say what you actually think.
-      // Bare `t` only — Ctrl+T is the roster toggle and must not cancel an ask.
-      if (e.key === Qt.Key_T && !(e.modifiers & Qt.ControlModifier)) {
-        answerAsk({ cancelled: true })
-        Qt.callLater(rail.enterInsert)
-        e.accepted = true; return
-      }
-      if (pm === "confirm") {
-        if (e.key === Qt.Key_Y) { answerAsk({ confirmed: true });  e.accepted = true; return }
-        if (e.key === Qt.Key_N) { answerAsk({ confirmed: false }); e.accepted = true; return }
-      } else if (pm === "select" && pendingAsk.options) {
-        var d = e.key - Qt.Key_0
-        if (d >= 1 && d <= Math.min(9, pendingAsk.options.length)) { answerAsk({ value: pendingAsk.options[d - 1] }); e.accepted = true; return }
-      } else if (pm === "input" || pm === "editor") {
-        if (e.key === Qt.Key_I) { enterInsert(); e.accepted = true; return }
-      }
+    if (pm === "confirm") {
+      if (e.key === Qt.Key_Y) { answerAsk({ confirmed: true });  return true }
+      if (e.key === Qt.Key_N) { answerAsk({ confirmed: false }); return true }
+    } else if (pm === "select" && pendingAsk.options) {
+      var d = e.key - Qt.Key_0
+      if (d >= 1 && d <= Math.min(9, pendingAsk.options.length)) { answerAsk({ value: pendingAsk.options[d - 1] }); return true }
+    } else if (pm === "input" || pm === "editor") {
+      if (e.key === Qt.Key_I) { enterInsert(); return true }
     }
+    return false
+  }
+
+  function keyNormal(e) {
     var ctrl = (e.modifiers & Qt.ControlModifier)
-    // Ctrl+j → jump into the main view (chat/files); Ctrl+k → back to roster top.
-    if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); e.accepted = true; return }
-    if (ctrl && e.key === Qt.Key_K) { cur = 0; e.accepted = true; return }
-    if (e.key === Qt.Key_I)      { enterInsert(); e.accepted = true }
-    else if (e.key === Qt.Key_Escape) {
-      // Esc = interrupt, everywhere (composer already does this): abort the open
-      // session's turn if it is running; idle keeps the old escape-to-nvim.
+    var shift = (e.modifiers & Qt.ShiftModifier)
+    // Ctrl+j → jump into the main view; Ctrl+k → back to the roster top.
+    if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); return true }
+    if (ctrl && e.key === Qt.Key_K) { cur = 0; return true }
+    switch (e.key) {
+    case Qt.Key_I:      enterInsert(); return true
+    case Qt.Key_Escape:
+      // Esc = interrupt, everywhere: abort the open session's turn if it is
+      // running; idle keeps the old escape-to-nvim.
       if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.interrupt(rail.selectedRaw)
       else rail.focusNvim()
-      e.accepted = true
-    }
-    else if (e.key === Qt.Key_H) { rail.focusNvim(); e.accepted = true }
-    else if (e.key === Qt.Key_J)  { rail.moveDown(); e.accepted = true }
-    else if (e.key === Qt.Key_K)  { rail.moveUp(); e.accepted = true }
-    else if (e.key === Qt.Key_G)  { cur = (e.modifiers & Qt.ShiftModifier) ? navTotal - 1 : 0; e.accepted = true }
-    else if (e.key === Qt.Key_F)  { rail.startHints(); e.accepted = true }   // vimium-style link hints
-    else if (e.key === Qt.Key_Y && (e.modifiers & Qt.ShiftModifier)) {       // Y = whole message, no mode
-      if (rail.view === "chat" && rail.cur >= rail.rSize)
-        rail.copyText(String(rail.feedCopyTarget(rail.groupedFeed[rail.cur - rail.rSize]) || ""))
-      e.accepted = true
-    }
-    else if (e.key === Qt.Key_Y)  { rail.startYank(); e.accepted = true }    // yank-hints (yy = whole message)
-    else if (e.key === Qt.Key_N)  { rail.openNew(); e.accepted = true }      // new session
-    else if (e.key === Qt.Key_X)  {
-      // x kills the session under the ROSTER cursor (the daemon's stop — pi dies, the
-      // row goes) and does nothing anywhere else: interrupting a turn is Esc, and a
-      // kill should require aiming at the session you mean.
+      return true
+    case Qt.Key_H:      rail.focusNvim(); return true
+    case Qt.Key_J:      rail.moveDown(); return true
+    case Qt.Key_K:      rail.moveUp(); return true
+    case Qt.Key_G:      cur = shift ? navTotal - 1 : 0; return true
+    case Qt.Key_F:      rail.startHints(); return true          // vimium-style link hints
+    case Qt.Key_Y:
+      if (shift) {                                              // Y = whole message, no mode
+        if (rail.view === "chat" && rail.cur >= rail.rSize)
+          rail.copyText(String(rail.feedCopyTarget(rail.groupedFeed[rail.cur - rail.rSize]) || ""))
+      } else {
+        rail.startYank()                                        // yank-hints (yy = whole message)
+      }
+      return true
+    case Qt.Key_N:      rail.openNew(); return true             // new session
+    case Qt.Key_X:
+      // x kills the session under the ROSTER cursor and does nothing anywhere
+      // else: interrupting a turn is Esc, and a kill should require aiming.
       if (rail.curSection() === "roster") {
         var row = rail.rosterList[rail.curLocal()]
         if (row && rail.agentd) rail.agentd.stop(row.rawName || row.name)
       }
-      e.accepted = true
+      return true
+    case Qt.Key_O: case Qt.Key_Return: case Qt.Key_Enter:
+      activateCur(); return true
     }
-    else if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { activateCur(); e.accepted = true }
+    return false
+  }
+
+  Keys.onPressed: (e) => {
+    _klog(e)
+    if (keyGlobal(e)) { e.accepted = true; return }
+    // Insert: the focused input owns the keyboard — except a blocking confirm/
+    // select ask, which hides the composer, so its keys must still land here.
+    if (insert && !(pendingAsk && !askWantsText)) return
+    if (hinting && keyHint(e)) { e.accepted = true; return }
+    if (newOpen && keyNew(e)) { e.accepted = true; return }
+    if (pendingAsk && keyAsk(e)) { e.accepted = true; return }
+    if (keyNormal(e)) e.accepted = true
   }
   // A feed refresh (stream update / reload) can shrink navTotal below cur, so
   // the cursor points past the last message and nothing highlights. Re-clamp.
@@ -1189,29 +1244,22 @@ Item {
     return "turn|" + its.length + "|" +
       (last ? (String(last.kind) + String(last.text || last.command || "").length) : "")
   }
+  // Row identity: turns carry a stable key; keyless rows (live pushes, echoes)
+  // fall back to kind+text, which never mutates for those kinds.
+  function _feedKey(t) {
+    if (!t) return ""
+    return t.key ? ("k:" + t.key) : (String(t.kind) + ":" + String(t.text || t.command || "").slice(0, 80))
+  }
   function syncFeedModel() {
     var arr = groupedFeed
-    if (_feedReset || arr.length < feedModel.count) {
+    if (_feedReset) {
       _feedReset = false
       feedModel.clear()
-      for (var a = 0; a < arr.length; a++) feedModel.append({ d: arr[a], sig: _turnSig(arr[a]) })
+      for (var a = 0; a < arr.length; a++)
+        feedModel.append({ d: arr[a], sig: _turnSig(arr[a]), k: _feedKey(arr[a]) })
       return
     }
-    for (var i = 0; i < arr.length; i++) {
-      var sig = _turnSig(arr[i])
-      if (i < feedModel.count) {
-        // setProperty, NOT set(): set() REPLACES the element and rebuilds that row's
-        // delegate. The streaming row fills the viewport, so rebuilding it 8x/sec
-        // still read as the whole chat blinking. setProperty mutates the role, so the
-        // delegate survives and only its bindings re-evaluate.
-        if (feedModel.get(i).sig !== sig) {
-          feedModel.setProperty(i, "d", arr[i])
-          feedModel.setProperty(i, "sig", sig)
-        }
-      } else {
-        feedModel.append({ d: arr[i], sig: sig })
-      }
-    }
+    _reconcileKeyed(feedModel, arr, _feedKey, _turnSig)
   }
 
   // Per-row geometry of the realized feed rows, for asserting that cards do not OVERLAP.
@@ -1433,7 +1481,7 @@ Item {
         // Streaming content arrived as a hard pop; fade each row in on its own (see the
         // note above on why this is not a ListView `add` transition).
         opacity: 0
-        Component.onCompleted: opacity = 1
+        Component.onCompleted: { opacity = 1; rail.probeCardCreates++ }
         Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
         property int rowIndex: index
         readonly property real cardHeight: card.height   // for the feedGeom probe
@@ -1625,16 +1673,24 @@ Item {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
             Repeater {
-              model: (rail.rosterList || []).filter(s => (s.rawName || s.name) !== rail.selectedRaw)
+              // rosterModel, NOT a filtered array: the array's identity changed on every
+              // roster push, so every dot (and running spinner) was destroyed and rebuilt
+              // several times a second while anything streamed — the "blinking dots".
+              // Rows update in place via setProperty; the selected session's slot hides.
+              model: rosterModel
               Item {
+                readonly property var md: model.d
+                readonly property bool self: (md.rawName || md.name) === rail.selectedRaw
+                visible: !self
                 width: 12; height: 12
+                Component.onCompleted: rail.probeDotCreates++
                 Spinner {
-                  anchors.centerIn: parent; visible: modelData.status === "streaming"
+                  anchors.centerIn: parent; visible: parent.visible && md.status === "streaming"
                   running: visible; color: Theme.green; dotSize: 2.0
                 }
                 Rectangle {
-                  anchors.centerIn: parent; visible: modelData.status !== "streaming"
-                  width: 7; height: 7; radius: 3.5; color: rail.dotColor(modelData.status)
+                  anchors.centerIn: parent; visible: parent.visible && md.status !== "streaming"
+                  width: 7; height: 7; radius: 3.5; color: rail.dotColor(md.status)
                 }
               }
             }
@@ -2322,10 +2378,12 @@ Item {
         TapHandler { onTapped: rail.toggleGroupKey(grpCol.myKey) }
       }
       Repeater {
-        model: expanded ? entry.cmds : []
+        // Count model for the same reason as the activity list: the cmds array is
+        // rebuilt per stream update, and an array model would recreate every line.
+        model: expanded ? entry.cmds.length : 0
         Text {
           x: 26
-          text: modelData.text; color: Theme.fg_muted
+          text: (entry.cmds[index] || {}).text || ""; color: Theme.fg_muted
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           elide: Text.ElideRight; width: 340
         }
@@ -2350,14 +2408,19 @@ Item {
         TapHandler { onTapped: rail.toggleGroupKey(ekey) }
       }
       Repeater {
-        model: expanded ? items : []
+        // An INT model, not the array: an array-model Repeater destroys and recreates
+        // EVERY row when the array identity changes — which is every stream update on
+        // the auto-expanded live turn, i.e. the chat "blinking". With a count model,
+        // growth instantiates only the new indexes and existing rows rebind in place.
+        model: expanded ? items.length : 0
         Loader {
           width: actCol.width
-          property var entry: modelData
+          Component.onCompleted: rail.probeActCreates++
+          property var entry: items[index]
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
           sourceComponent: {
-            var k = modelData.kind
+            var k = (entry || {}).kind
             if (k === "edit")  return editRow
             if (k === "think") return thinkRow
             if (k === "group") return groupRow

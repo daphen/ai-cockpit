@@ -180,6 +180,14 @@ def driver():
             elif c.startswith("slow_entries"):
                 parts = c.split()
                 state["entry_delay"] = float(parts[1]) if len(parts) > 1 else 2.0
+            elif c == "tool":
+                # the LIVE streaming path: a tool_execution_start lands in the feed as a
+                # pushed cmd row inside the streaming turn (what real pi does per tool)
+                state.setdefault("tooln", 0)
+                state["tooln"] += 1
+                broadcast({"type": "tool_execution_start", "session": "every-9001",
+                           "toolName": "bash", "toolCallId": f"tc-{state['tooln']}",
+                           "args": {"command": f"echo live-tool-{state['tooln']} && sleep 1"}})
             elif c == "grow":
                 state["extra_turns"] += 2
                 # Both frames, in pi's order. message_delta ALONE is what the fake used to
