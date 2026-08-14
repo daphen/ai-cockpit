@@ -62,6 +62,18 @@ ShellRoot {
       // instance, so heidr-cross can target its own heidr without asking niri anything.
       function nvimSock(): string   { return term.nvimSocket }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
+      // Super+T's whole in-window decision as ONE call (it was pane + railState +
+      // focusRoster — three qs spawns): land on this window's roster unless the cursor
+      // is genuinely parked there in normal mode, in which case report "parked" so the
+      // script can hop cockpits.
+      function rosterHop(): string {
+        const onRoster = win.pane === "rail" && !term.activeFocus
+                       && !rail.insert && rail.cur < rail.rSize
+        if (onRoster) return "parked"
+        win.pane = "rail"
+        rail.focusRoster()
+        return "landed"
+      }
       // The rail's test interface (test/rail-nav.sh): cursor/scroll behaviour depends on
       // the roster and feed changing UNDER the cursor, which is only assertable from
       // outside the process.
