@@ -58,27 +58,46 @@ Item {
   // blinked on every roster tick. Same fix as the feed: reconcile by signature so the
   // delegates persist and only a row that really changed is written.
   ListModel { id: rosterModel; dynamicRoles: true }
+  // KEYED reconcile, shared by the roster and the feed. Index-based reconciling
+  // couldn't survive a transient row-count dip (a mid-stream regroup, a session
+  // removal): the tail — usually the LIVE row — was destroyed and re-created a
+  // beat later, which is a blink. Matching by identity instead means insertions
+  // and removals touch exactly the rows that appeared or vanished.
+  function _reconcileKeyed(model, arr, keyOf, sigOf) {
+    var want = {}
+    for (var a = 0; a < arr.length; a++) want[keyOf(arr[a])] = true
+    for (var r = model.count - 1; r >= 0; r--)
+      if (!want[model.get(r).k]) model.remove(r)
+    for (var i = 0; i < arr.length; i++) {
+      var k = keyOf(arr[i]), sig = sigOf(arr[i])
+      if (i < model.count && model.get(i).k === k) {
+        if (model.get(i).sig !== sig) {
+          model.setProperty(i, "d", arr[i])
+          model.setProperty(i, "sig", sig)
+        }
+        continue
+      }
+      // not at i: either it exists later (a row above it vanished — already handled
+      // by the removal pass) or it is new. Find it; move is rare (stable orders).
+      var found = -1
+      for (var j = i + 1; j < model.count; j++) if (model.get(j).k === k) { found = j; break }
+      if (found >= 0) model.move(found, i, 1)
+      else model.insert(i, { d: arr[i], sig: sig, k: k })
+      if (model.get(i).sig !== sig || found >= 0) {
+        model.setProperty(i, "d", arr[i])
+        model.setProperty(i, "sig", sig)
+      }
+    }
+  }
   function _rosterSig(x) {
     if (!x) return ""
     return [x.name, x.rawName, x.status, x.idle, x.remote === true, x.devenv === true,
             x.depth || 0, x.linked === true, x.profile || x.role || ""].join("|")
   }
   function syncRosterModel() {
-    var arr = rosterList || []
-    if (arr.length < rosterModel.count) rosterModel.clear()   // shrank → rebuild
-    for (var i = 0; i < arr.length; i++) {
-      var sig = _rosterSig(arr[i])
-      if (i < rosterModel.count) {
-        // setProperty, NOT set(): set() replaces the element and rebuilds the delegate,
-        // which is exactly the blink this model exists to avoid.
-        if (rosterModel.get(i).sig !== sig) {
-          rosterModel.setProperty(i, "d", arr[i])
-          rosterModel.setProperty(i, "sig", sig)
-        }
-      } else {
-        rosterModel.append({ d: arr[i], sig: sig })
-      }
-    }
+    _reconcileKeyed(rosterModel, rosterList || [],
+                    function (x) { return String(x.rawName || x.name || "") },
+                    _rosterSig)
   }
   Component.onCompleted: syncRosterModel()
 
@@ -1194,33 +1213,22 @@ Item {
     return "turn|" + its.length + "|" +
       (last ? (String(last.kind) + String(last.text || last.command || "").length) : "")
   }
+  // Row identity: turns carry a stable key; keyless rows (live pushes, echoes)
+  // fall back to kind+text, which never mutates for those kinds.
+  function _feedKey(t) {
+    if (!t) return ""
+    return t.key ? ("k:" + t.key) : (String(t.kind) + ":" + String(t.text || t.command || "").slice(0, 80))
+  }
   function syncFeedModel() {
     var arr = groupedFeed
     if (_feedReset) {
       _feedReset = false
       feedModel.clear()
-      for (var a = 0; a < arr.length; a++) feedModel.append({ d: arr[a], sig: _turnSig(arr[a]) })
+      for (var a = 0; a < arr.length; a++)
+        feedModel.append({ d: arr[a], sig: _turnSig(arr[a]), k: _feedKey(arr[a]) })
       return
     }
-    // Shrink (a transient regroup, a daemon rebuild): drop tail rows only — every row
-    // above the cut survives untouched. This used to clear the ENTIRE model, which
-    // faded the whole chat back in at once — the biggest single blink source.
-    while (feedModel.count > arr.length) { probeFullResets++; feedModel.remove(feedModel.count - 1) }
-    for (var i = 0; i < arr.length; i++) {
-      var sig = _turnSig(arr[i])
-      if (i < feedModel.count) {
-        // setProperty, NOT set(): set() REPLACES the element and rebuilds that row's
-        // delegate. The streaming row fills the viewport, so rebuilding it 8x/sec
-        // still read as the whole chat blinking. setProperty mutates the role, so the
-        // delegate survives and only its bindings re-evaluate.
-        if (feedModel.get(i).sig !== sig) {
-          feedModel.setProperty(i, "d", arr[i])
-          feedModel.setProperty(i, "sig", sig)
-        }
-      } else {
-        feedModel.append({ d: arr[i], sig: sig })
-      }
-    }
+    _reconcileKeyed(feedModel, arr, _feedKey, _turnSig)
   }
 
   // Per-row geometry of the realized feed rows, for asserting that cards do not OVERLAP.
