@@ -1198,8 +1198,10 @@ Item {
       Layout.fillWidth: true
       clip: true
       z: 2   // the chat slides UNDER the rounded bottom edge (negative top margin below)
-      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 16
-                                          : glanceCol.implicitHeight + 28   // extra room below the glance
+      // 8 top + 20 bottom: the bottom pad matches the 20px side insets, so the last
+      // pill floats off the rounded seam the same distance it sits from the edges.
+      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 28
+                                          : glanceCol.implicitHeight + 34   // extra room below the glance
       Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.InOutQuad } }
       // A flush TOP SHEET: full width, square at the top (the strip below covers the
       // top rounding), rounded only where it meets the chat. No border, no divider —
