@@ -1043,6 +1043,10 @@ Item {
     }
   }
   // subtle focus accent on the left edge (no full ring)
+  // The rail's own ground: one step darker than the editor side (Theme.bgDim), so the
+  // two panes read as distinct layers without a divider doing the work.
+  Rectangle { anchors.fill: parent; color: Theme.bgDim; z: -1 }
+
   Rectangle {
     width: 2; height: parent.height; anchors.left: parent.left
     color: Theme.electric; opacity: rail.focused ? 0.5 : 0; z: 10
@@ -1648,7 +1652,7 @@ Item {
     // fudge factors, which is how the new-session card ended up overflowing.)
     height: chinCol.implicitHeight + chinCol.anchors.topMargin + 14
     Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
-    color: Theme.bg
+    color: Theme.bgDim   // the rail's ground, so the chin melts into it
 
     ColumnLayout {
       id: chinCol
