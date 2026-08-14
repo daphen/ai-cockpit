@@ -216,11 +216,19 @@ Item {
   // passes the daemon's blocked-on-a-question bounce, so it is also the escape hatch
   // for a session parked inside ask_user. Distinct from stop() below, which tears the
   // whole session down (kills pi, drops it from the roster).
+  // Interrupt markers never exist in pi's transcript, so a plain _push vanished on the
+  // next rebuild — an accidental Esc-abort looked like nothing happened at all. Keep the
+  // last few per session and re-append them after every rebuild.
+  property var _marks: ({})   // sid -> [text, …] (capped)
   function interrupt(sid) {
     if (!sid) return
     if (!send({ type: "abort", session: sid })) return
     delete _steerPending[sid]
     _clearPending(sid)
+    var mk = _marks; var l = (mk[sid] = mk[sid] || [])
+    l.push("⏹ interrupted — turn aborted")
+    if (l.length > 3) l.shift()
+    _marks = mk
     _push(sid, { kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted" })
   }
   function stop(sid) {
@@ -570,6 +578,9 @@ Item {
       if (left.length) le[esid] = left; else delete le[esid]
       _localEcho = le
     }
+    var mks = _marks[esid] || []
+    for (var mi = 0; mi < mks.length; mi++)
+      feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi] })
     feedGen++
     _recoverAsk(esid, m.data.entries)
   }
