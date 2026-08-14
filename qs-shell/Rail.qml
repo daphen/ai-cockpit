@@ -1102,6 +1102,24 @@ Item {
     return String(it.text || "").slice(0, 48)
   }
   // Nav driven from the IPC, for test/rail-nav.sh.
+  // Walk the realized delegate under the cursor and pull its prose Text.text —
+  // the ONLY view of what the badge pipeline actually rendered (test probe).
+  function probeProse() {
+    if (view !== "chat" || cur < rSize) return ""
+    var idx = cur - rSize, c = feedView.contentItem.children
+    for (var i = 0; i < c.length; i++) {
+      if (c[i].rowIndex !== idx) continue
+      var out = []
+      ;(function walk(o) {
+        if (!o) return
+        if (o.text !== undefined && String(o.text).length > 40) out.push(String(o.text))
+        var ch = o.children || []
+        for (var j = 0; j < ch.length; j++) walk(ch[j])
+      })(c[i])
+      return out.join("\n---\n")
+    }
+    return ""
+  }
   function debugNav(k) {
     if (k === "j") moveDown()
     else if (k === "k") moveUp()
@@ -1121,6 +1139,8 @@ Item {
         if (row && agentd) agentd.stop(row.rawName || row.name)
       }
     }
+    else if (k === "yank") startYank()
+    else if (k.indexOf("hintkey:") === 0) hintKey(k.slice(8))
     else if (k === "esc") {
       if (featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
       else if (insert) exitInsert()

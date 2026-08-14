@@ -35,7 +35,7 @@ def entries_for(sid):
         role = "user" if i % 2 == 0 else "assistant"
         eid = f"{sid}-e{i}"
         text = (f"user message {i//2} in {sid}" if role == "user"
-                else f"assistant reply {i//2} in {sid} — " + ("body line. " * 6))
+                else f"assistant reply {i//2} in {sid} — see https://example.com/pr-{i} and `inline{i}` — " + ("body line. " * 6))
         ents.append({
             "id": eid, "parentId": parent, "type": "message",
             "message": {"role": role, "content": [{"type": "text", "text": text}]},

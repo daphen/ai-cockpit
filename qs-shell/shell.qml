@@ -86,9 +86,13 @@ ShellRoot {
                                 sel: rail.selectedRaw, key: rail.cursorKey,
                                 ins: rail.insert, ask: !!rail.pendingAsk, stale: !!rail.staleAsk,
                                 q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
+                                hint: rail.hinting, yank: rail.yankMode, labels: rail.hintLabels.length,
                                 row: rail.curRowText() })
       }
       function railKey(k: string): string { rail.debugNav(k); return "ok" }
+      // Rendered prose of the focused feed row — what the user actually SEES,
+      // after the badge/hint/colorize pipeline (test probe).
+      function railProse(): string { return rail.probeProse() }
       // Test-only sends, so the harness can drive the steer/queue/abort model.
       function railSend(t: string): string { if (rail.agentd) rail.agentd.submit(rail.selectedRaw, t); return "ok" }
       function railQueue(t: string): string { if (rail.agentd) rail.agentd.enqueue(rail.selectedRaw, t); return "ok" }
