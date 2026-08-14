@@ -1205,10 +1205,15 @@ Item {
       // Inset to the chat cards' outer edges — the sheet spans the same column as the
       // feed instead of full-bleed.
       Layout.leftMargin: 20; Layout.rightMargin: 20
+      // Square top WITHOUT painting over the border: the card extends one radius above
+      // the window, so its top rounding is offscreen and the visible edge is the native
+      // hairline, unbroken. (The strip+patch approach mixed an antialiased rounded
+      // border with crisp hand-drawn segments — two line weights meeting mid-edge.)
+      Layout.topMargin: -radius
       clip: true
       z: 2   // the chat slides UNDER the rounded bottom edge (negative top margin below)
-      implicitHeight: rail.rosterExpanded ? rosterInner.implicitHeight + 28   // 20 top + 8 bottom
-                                          : glanceCol.implicitHeight + 28   // extra room below the glance
+      implicitHeight: radius + (rail.rosterExpanded ? rosterInner.implicitHeight + 28   // 20 top + 8 bottom
+                                                    : glanceCol.implicitHeight + 28)  // extra room below the glance
       Behavior on implicitHeight { NumberAnimation { duration: 160; easing.type: Easing.InOutQuad } }
       // A flush TOP SHEET: full width, square at the top (the strip below covers the
       // top rounding), rounded only where it meets the chat. No border, no divider —
@@ -1216,24 +1221,12 @@ Item {
       radius: 20 + 8   // (rowHeight/2) + padding → concentric with the pill rows
       color: Theme.surface0            // subtler than surface (barely-there tint)
       border.color: Theme.hairlineSoft; border.width: 1
-      // Square the top corners with a fill strip: inset 1px so the SIDE hairlines run
-      // through to the window edge while the TOP edge stays line-free (flush sheet).
-      Rectangle {
-        anchors { top: parent.top; left: parent.left; right: parent.right; leftMargin: 1; rightMargin: 1 }
-        height: parent.radius
-        color: parent.color
-      }
-      // The Rectangle's own border follows its ROUNDED shape, so in the squared top
-      // zone the side hairline was the (now hidden) corner arc — the vertical lines
-      // only began below the radius. Draw the missing top segments explicitly.
-      Rectangle { anchors { top: parent.top; left: parent.left }  width: 1; height: parent.radius; color: Theme.hairlineSoft }
-      Rectangle { anchors { top: parent.top; right: parent.right } width: 1; height: parent.radius; color: Theme.hairlineSoft }
 
       // Collapsed glance: active session name + a per-session status strip
       // (spinner while working, dot otherwise) + the toggle hint.
       Column {
         id: glanceCol
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 16; rightMargin: 16; topMargin: 14 }
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 16; rightMargin: 16; topMargin: 14 + rosterCard.radius }
         spacing: 13
         opacity: rail.rosterExpanded ? 0 : 1
         visible: opacity > 0.01
@@ -1270,7 +1263,7 @@ Item {
         Behavior on opacity { NumberAnimation { duration: 120 } }
         // Top matches the visual weight of the sides/bottom: flush against the window
         // edge, 8px read as none — the first pill needs real breathing room up there.
-        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 20 }
+        anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 20 + rosterCard.radius }
         spacing: 3
         Repeater {
           model: rosterModel
