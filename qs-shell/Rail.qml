@@ -697,7 +697,7 @@ Item {
     roots.sort(byName)
     for (var key in children) children[key].sort(byName)
     var out = []
-    function walk(s, depth) {
+    function walk(s, depth, parentCwd) {
       out.push({ name: shortName(s.name), rawName: s.name, idle: stateLabel(s.status),
                  status: s.status, linked: !!s.parent, cwd: s.cwd || "",
                  hasWorktree: /\.daphen-|\/work\//.test(s.cwd || ""),
@@ -705,12 +705,14 @@ Item {
                  // worktrees are <repo>.daphen-<t>, VM ones <repo>-<t>; the plain repo
                  // root (…/work/lovable, …/src/lovable) has none, so a session opened
                  // there — an orchestrator, a one-off — must not claim one.
-                 devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || ""),
+                 // …and never a CHILD in its parent's worktree: the babysitter/watcher
+                 // shares the ticket session's cwd, but the slice belongs to the parent.
+                 devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || "") && s.cwd !== parentCwd,
                  remote: rail._isRemote(s.cwd), scope: s.scope || "",
                  profile: s.profile || "",   // agentd role (…-orchestrator/worker/…)
                  depth: Math.min(depth, 1) })  // one level deep only
       var kids = children[s.name] || []
-      for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1)
+      for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1, s.cwd || "")
     }
     for (var r = 0; r < roots.length; r++) walk(roots[r], 0)
     return out
