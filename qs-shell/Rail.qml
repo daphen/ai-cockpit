@@ -1048,7 +1048,7 @@ Item {
                 Layout.alignment: Qt.AlignVCenter
               }
               // Where the agent actually runs: cloud = a lovbox worktree, laptop =
-              // this machine. Muted on purpose — it's provenance, not status.
+              // this machine. Same ink as the name it sits next to.
               Icon {
                 // Outline cuts, and both from the 18px set so their stroke weights match —
                 // there is no laptop--outline--12. Drawn at 14 rather than 13 to give the
@@ -1057,33 +1057,38 @@ Item {
                 width: 14; height: 14
                 Layout.preferredWidth: 14; Layout.preferredHeight: 14
                 Layout.alignment: Qt.AlignVCenter
-                color: sessRow.cursor ? Theme.bg : Theme.fg_muted
-                opacity: sessRow.cursor ? 0.8 : 0.65
-              }
-              // Spinner sits with the NAME. Not first in the row: as the leading item its
-              // reserved slot made the left inset 20px deeper than the right. After the
-              // provenance icon, the row still starts 14px in, matching the right edge.
-              // The slot is reserved even when idle so the name never shifts as a session
-              // starts or stops working.
-              Item {
-                Layout.preferredWidth: 14; Layout.preferredHeight: 14
-                Layout.alignment: Qt.AlignVCenter
-                // At 14px the Orb picks ~8 nodes instead of 26, so it reads as a spinning
-                // wireframe rather than a blob.
-                Orb {
-                  anchors.fill: parent
-                  visible: sessRow.streaming
-                  running: sessRow.streaming
-                  // Electric, not muted: the one thing in the row that should catch the eye.
-                  glow: sessRow.cursor ? Theme.bg : Theme.electric
-                }
+                color: sessRow.cursor ? Theme.bg : Theme.fg
               }
               Text {
-                text: modelData.name; Layout.fillWidth: true; elide: Text.ElideRight
+                text: modelData.name
+                // fillWidth CAPPED at the text's own width: the name stays content-sized so
+                // the spinner hugs its right edge instead of being pushed to the row's edge,
+                // but a name too long for the row can still shrink and elide.
+                Layout.fillWidth: true
+                Layout.maximumWidth: implicitWidth
+                elide: Text.ElideRight
                 color: sessRow.cursor ? Theme.bg : Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                 font.weight: (sessRow.selected || sessRow.streaming) ? 600 : 400
               }
+              // Spinner immediately right of the name. The slot is reserved even when idle
+              // so nothing shifts as a session starts or stops working. 16px is free: the
+              // row is a fixed 40px tall, so the orb cannot push it.
+              Item {
+                Layout.preferredWidth: 16; Layout.preferredHeight: 16
+                Layout.alignment: Qt.AlignVCenter
+                Orb {
+                  anchors.fill: parent
+                  visible: sessRow.streaming
+                  running: sessRow.streaming
+                  // Pinned to 13 rather than letting the size rule pick 15 for 16px — 13 is
+                  // the density that was judged right, and this keeps it while growing.
+                  nodes: 13
+                  // Electric, not muted: the one thing in the row that should catch the eye.
+                  glow: sessRow.cursor ? Theme.bg : Theme.electric
+                }
+              }
+              Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
               Text {
                 text: modelData.state || modelData.idle || ""
                 Layout.preferredWidth: 74; horizontalAlignment: Text.AlignRight
