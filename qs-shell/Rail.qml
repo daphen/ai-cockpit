@@ -1502,6 +1502,31 @@ Item {
       // underneath it — the header scrolls with the feed, which is the whole trick.
       header: Item { width: feedView.width; height: rosterCard.radius + feedView.spacing }
       footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
+      // Edge fades, fixed to the view (non-delegate children of a ListView paint above
+      // its content). The top one is opaque through the sheet's corner-notch zone — the
+      // curve then sits on clean ground — and dissolves below it; the bottom one mirrors
+      // above the composer, only while content remains below the viewport.
+      Rectangle {
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: rosterCard.radius + 44
+        z: 2
+        gradient: Gradient {
+          GradientStop { position: 0.0; color: Theme.bgDim }
+          GradientStop { position: rosterCard.radius / (rosterCard.radius + 44); color: Theme.bgDim }
+          GradientStop { position: 1.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
+        }
+      }
+      Rectangle {
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+        height: 44
+        z: 2
+        opacity: (feedView.originY + feedView.contentHeight - feedView.height - feedView.contentY) > 8 ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 150 } }
+        gradient: Gradient {
+          GradientStop { position: 0.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
+          GradientStop { position: 1.0; color: Theme.bgDim }
+        }
+      }
       onCountChanged: feedScroll.contentChanged()
       // Streaming content arrived as a hard pop. Fade added rows in — short enough
       // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
@@ -1636,34 +1661,6 @@ Item {
   }
 
 
-  // Fades, not shadows: scrolled content DISSOLVES into the rail's ground as it slides
-  // under the roster seam / behind the composer. A translucent dark veil left text
-  // half-readable in the band, which read as a glitch.
-  Rectangle {
-    x: 20; width: parent.width - 40
-    y: rosterCard.height
-    height: 44
-    z: 1
-    gradient: Gradient {
-      GradientStop { position: 0.0; color: Theme.bgDim }
-      GradientStop { position: 1.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
-    }
-  }
-  // …and the mirror above the composer, shown only while there is more chat BELOW the
-  // viewport (at the live edge it vanishes, so the newest message never looks cut).
-  Rectangle {
-    x: 20; width: parent.width - 40
-    anchors.bottom: chin.top
-    height: 44
-    z: 1
-    visible: rail.view === "chat"
-    opacity: (feedView.originY + feedView.contentHeight - feedView.height - feedView.contentY) > 8 ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 150 } }
-    gradient: Gradient {
-      GradientStop { position: 0.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
-      GradientStop { position: 1.0; color: Theme.bgDim }
-    }
-  }
 
   // Chin: an opaque bottom bar (composer + hints) anchored to the rail bottom,
   // like the sibling apps' statusbar. The feed is bounded to chin.top, so chat
