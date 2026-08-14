@@ -108,6 +108,7 @@ private:
   qreal baseCellW_ = 9, baseCellH_ = 18, baseAscent_ = 14;   // unsnapped, from QFontMetricsF
   void applyMetrics(qreal dpr);   // snap metrics + padding for this ratio
   void centerGrid(qreal viewH, int rows);  // share the row remainder top/bottom
+  void relayoutGrid();            // re-derive cols/rows from the current size + metrics
   qreal basePadT_ = 18, basePadB_ = 0;     // design padding, before remainder sharing
   void syncTextureSize(qreal dpr); // pin the backing texture to DEVICE pixels
   int cols_ = 110, rows_ = 30;   // worker-thread only after start; reflows on resize

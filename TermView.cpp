@@ -358,19 +358,32 @@ void TermView::spawnPty() {
 
 void TermView::geometryChange(const QRectF &n, const QRectF &o) {
   QQuickPaintedItem::geometryChange(n, o);
-  if (n.size() == o.size() || cellW_ <= 0 || cellH_ <= 0) return;
-  const int c = std::max(1, (int)((n.width()  - padL_ - padR_) / cellW_));
+  if (n.size() == o.size()) return;
+  relayoutGrid();
+}
+
+// Re-derive the grid from the CURRENT size and the CURRENT cell metrics. Both inputs
+// move: the size on a window resize, and the metrics whenever the device-pixel ratio
+// lands (applyMetrics snaps cellW_/cellH_ to the ratio). The ctor lays out at ratio 1
+// and the real ratio arrives after the first frame, so on a fresh window the grid was
+// sized with ratio-1 cells and rows*cellH_ no longer filled the height — the strip of
+// dead space under the statusline that vanished the moment you resized anything.
+void TermView::relayoutGrid() {
+  if (cellW_ <= 0 || cellH_ <= 0) return;
+  const qreal w = width(), h = height();
+  if (w <= 0 || h <= 0) return;
+  const int c = std::max(1, (int)((w - padL_ - padR_) / cellW_));
   // Rows never divide the height exactly, and the remainder used to pile up at the
   // bottom as a dead band below the statusline — with the cursor occasionally drawn
   // into it, which is what the stray dash past the lualine was. Split the remainder
   // top/bottom so it reads as symmetric padding instead of a gap.
-  const int r = std::max(1, (int)((n.height() - basePadT_ - basePadB_) / cellH_));
-  centerGrid(n.height(), r);
+  const int r = std::max(1, (int)((h - basePadT_ - basePadB_) / cellH_));
+  centerGrid(h, r);
   const qreal dpr = window() ? window()->effectiveDevicePixelRatio() : 1.0;
   syncTextureSize(dpr);
   {
     std::lock_guard<std::mutex> lk(cmdMtx_);
-    resize_ = { true, c, r, (int)n.width(), (int)n.height(), dpr };
+    resize_ = { true, c, r, (int)w, (int)h, dpr };
   }
   wakeWorker();   // worker applies ghostty_terminal_resize + TIOCSWINSZ + re-renders
 }
@@ -642,7 +655,14 @@ void TermView::paint(QPainter *outP) {
   // knows. Queued, because this runs on the render thread.
   if (liveDpr > 0 && std::abs(liveDpr - guiDpr_) > 0.001) {
     QMetaObject::invokeMethod(this, [this, liveDpr] {
-      if (std::abs(liveDpr - guiDpr_) > 0.001) { guiDpr_ = liveDpr; emit dprChanged(); }
+      if (std::abs(liveDpr - guiDpr_) <= 0.001) return;
+      guiDpr_ = liveDpr;
+      // Re-snap the cell metrics to the ratio we just learned, then rebuild the grid on
+      // them. Without this the row count keeps the ratio-1 metrics until something else
+      // resizes the window.
+      applyMetrics(guiDpr_);
+      relayoutGrid();
+      emit dprChanged();
     }, Qt::QueuedConnection);
   }
   if (liveDpr > 0 && std::abs(liveDpr - lastDpr_) > 0.01) {
@@ -966,7 +986,12 @@ void TermView::itemChange(ItemChange change, const ItemChangeData &data) {
   auto publish = [this] {
     if (!window()) return;
     const qreal r = window()->effectiveDevicePixelRatio();
-    if (r > 0 && std::abs(r - guiDpr_) > 0.001) { guiDpr_ = r; emit dprChanged(); }
+    if (r > 0 && std::abs(r - guiDpr_) > 0.001) {
+      guiDpr_ = r;
+      applyMetrics(guiDpr_);
+      relayoutGrid();
+      emit dprChanged();
+    }
   };
   publish();
   // Follow the window across monitors: a different screen means a different ratio, and
