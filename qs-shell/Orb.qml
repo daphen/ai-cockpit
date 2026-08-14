@@ -27,6 +27,10 @@ Item {
   Component.onCompleted: _build()
   onNodesChanged: _build()
   function _build() {
+    // Guard: onNodesChanged can fire while the component is still being created (setting
+    // `nodes` explicitly at a use site triggers it), and the JS globals are not reliably
+    // there yet — the harness caught "Math is undefined" from exactly that path.
+    if (typeof Math === "undefined" || orb.nodes === undefined) return
     var n = Math.max(4, orb.nodes), pts = [], off = 2 / n, inc = Math.PI * (3 - Math.sqrt(5))  // fibonacci sphere
     for (var i = 0; i < n; i++) {
       var y = i * off - 1 + off / 2

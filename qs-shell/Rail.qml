@@ -1061,11 +1061,15 @@ Item {
               }
               Text {
                 text: modelData.name
-                // fillWidth CAPPED at the text's own width: the name stays content-sized so
-                // the spinner hugs its right edge instead of being pushed to the row's edge,
-                // but a name too long for the row can still shrink and elide.
-                Layout.fillWidth: true
-                Layout.maximumWidth: implicitWidth
+                // Content-sized, so the spinner hugs the name's right edge instead of being
+                // pushed to the row's edge. The cap comes from the ROW, never from this
+                // item's own implicitWidth: capping a text by its own width — which is then
+                // what elide reacts to — is self-referential and settles arbitrarily (it ate
+                // the last glyph of the SHORT name while longer ones were fine). 190 is the
+                // rest of the row: margins 28 + icon 14 + orb 16 + status 74 + devenv 15 +
+                // five 8px gaps.
+                Layout.fillWidth: false
+                Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20)
                 elide: Text.ElideRight
                 color: sessRow.cursor ? Theme.bg : Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName
