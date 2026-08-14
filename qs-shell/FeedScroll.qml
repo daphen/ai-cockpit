@@ -1,64 +1,36 @@
 import QtQuick
 
-// The ONE owner of the chat viewport.
+// The ONE owner of the chat viewport — the slqs/dsqrd MessageList pattern, ported.
 //
-// Six things used to move the feed on their own cadence — a 250ms follow timer, a
-// first-load settle burst, onCountChanged, the wheel handler, drag/flick handlers and
-// cursor moves — while four booleans (pinBottom, _wantBottom, _sendPin, scrollGuarded)
-// tried to arbitrate between them. They oscillated: the follow timer's programmatic
-// scroll tripped the handlers that were supposed to detect USER scrolling, which
-// unpinned follow, which re-pinned on the next tick, and scrolling wedged.
-//
-// So: callers only report EVENTS, this object owns the mode, and it is the only thing
-// that calls positionViewAt*. One writer, so there is nothing left to fight over.
+// The previous version was a state machine with five timers (follow poll, settle burst,
+// guard window, repin, seek handshake) all compensating for ONE root cause: the feed was
+// virtualized, so contentHeight was an ESTIMATE and every positionViewAtEnd landed on a
+// guess — short by a stable 332px at the row cap, 1.5 cards behind on a fast stream. The
+// feed is capped at 60 rows (feedCap), the same scale as a slack channel, so the fix is
+// the family's: realize everything (feedView sets cacheBuffer huge), heights become
+// exact, and following is a bool plus one exact assignment. No polling, no arbitration:
+// the writers are all event-driven, so there is nothing left to fight over.
 QtObject {
   id: sm
 
   property var view: null          // the feed ListView
-  property bool streaming: false   // selected session is mid-turn
-  property bool chatVisible: true   // the chat view is the one on screen
+  property bool chatVisible: true  // the chat view is the one on screen
 
-  //   follow — pinned to the newest content, the default
+  //   follow — stuck to the newest content, the default
   //   free   — the user scrolled away and is reading; nothing auto-moves
-  //   seek   — a one-shot programmatic move is in flight (session switch / send)
-  readonly property string mode: _mode
-  readonly property bool following: _mode === "follow"
+  readonly property string mode: _stick ? "follow" : "free"
+  readonly property bool following: _stick
 
   // The cursor should land on the last row. `force` distinguishes an explicit jump (a
   // session switch or a send, which may pull the cursor out of the roster) from merely
   // following growth, which must never yank a cursor that is browsing the roster.
   signal wantCursorAtEnd(bool force)
 
-  property string _mode: "follow"
-  property bool _pendingEnd: false
-  property bool _settleWanted: false
-
-  // A user gesture wins outright for this long: while it runs, nothing auto-positions.
-  // Without it the follow timer fought the wheel and the feed felt locked.
-  readonly property bool _guarded: _guard.running
-  readonly property Timer _guard: Timer { interval: 700 }
-
-  // Follow the bottom via the SUPPORTED api on a bounded cadence. Writing contentY
-  // directly fights ListView's layout bookkeeping while the streaming card resizes,
-  // and positioning synchronously on contentHeightChanged re-triggers delegate
-  // incubation into a 100%-CPU refill loop.
-  readonly property Timer _followTimer: Timer {
-    interval: 250; repeat: true
-    running: sm.chatVisible && sm.streaming && sm.following && !sm._guarded
-    onTriggered: sm._toEnd()
-  }
-
-  // On a first load the delegates aren't realized, so contentHeight is an estimate and
-  // one positionViewAtEnd lands mid-feed. Re-pin over ~540ms until geometry settles.
-  readonly property Timer _settle: Timer {
-    interval: 60; repeat: true
-    property int n: 0
-    onTriggered: {
-      if (sm.chatVisible && sm.following) sm._toEnd()
-      n++
-      if (n >= 9) { running = false; n = 0 }
-    }
-  }
+  property bool _stick: true
+  // A switch/send wants the CURSOR at the end too, but the rows may not exist yet (the
+  // transcript loads async). Consumed by the first synced() that actually has rows —
+  // spending it earlier was how the cursor once landed on a roster row.
+  property bool _pendingCursor: false
 
   // How close to the bottom counts as "back at the live edge". 8px meant you had to land
   // on the exact last pixel to resume following, so scrolling down to catch up left the
@@ -67,90 +39,91 @@ QtObject {
 
   function _atBottom() {
     if (!view) return true
-    // Do NOT trust atYEnd: with async delegates contentHeight is an estimate and it
-    // reports true mid-feed, which used to leave follow armed while the user was reading.
-    return view.contentY >= view.contentHeight - view.height - bottomSlack
+    return view.contentY >= _bottomY() - bottomSlack
   }
 
-  function _toEnd() {
-    if (view && !_guarded) view.positionViewAtEnd()
+  // The true max scroll. Exact, because every row is realized (contentHeight includes
+  // the header/footer items). Late in-place growth can still leave contentHeight stale
+  // for a frame — the slqs snapToBottom fallback positions by item geometry then.
+  function _bottomY() {
+    // originY-aware: the header item shifts the content origin, so without it the
+    // "bottom" lands one header short and returnToBounds clamps the difference.
+    return view.originY + Math.max(0, view.contentHeight - view.height)
+  }
+  function _pin() {
+    if (!view || !chatVisible || view.count <= 0) return
+    var li = view.itemAtIndex(view.count - 1)
+    if (li && li.y + li.height > view.contentHeight + 0.5) {
+      view.positionViewAtIndex(view.count - 1, ListView.Beginning)
+      view.positionViewAtEnd()
+    } else {
+      view.contentY = _bottomY()
+      view.returnToBounds()
+    }
+  }
+
+  // Content grew or the viewport resized (chin/composer growth shrinks the view) —
+  // while stuck, stay at the bottom. These two connections ARE the follow behavior.
+  readonly property Connections _follow: Connections {
+    target: sm.view
+    enabled: sm.chatVisible && sm._stick
+    function onContentHeightChanged() { sm._pin() }
+    function onHeightChanged() { sm._pin() }
   }
 
   // ── events ────────────────────────────────────────────────────────────────────
 
   // The wheel: ScrollFeel writes contentY directly, so it sets neither `dragging` nor
   // `flicking` and its signal is the only reliable "the user scrolled".
-  function userScrolled(up) {
-    _guard.restart()
-    _mode = (up || !_atBottom()) ? "free" : "follow"
-  }
+  function userScrolled(up) { _stick = !up && _atBottom() }
 
   // Drag/flick ended. These two are user-gesture-only, unlike movementStarted/Ended,
   // which Flickable also emits for programmatic contentY changes.
-  function gestureStarted() { _guard.restart(); _mode = "free" }
-  function gestureEnded() {
-    _guard.restart()
-    _mode = _atBottom() ? "follow" : "free"
-  }
+  function gestureStarted() { _stick = false }
+  function gestureEnded()   { _stick = _atBottom() }
 
   // A row was added or removed. While following, the cursor moves with the bottom:
   // leaving it behind put the highlight on an old row while the viewport showed the
   // newest one, so `k` then jumped from a position the user could no longer see.
   function contentChanged() {
-    if (!chatVisible || !following || _guarded) return
+    if (!chatVisible || !_stick) return
     wantCursorAtEnd(false)
-    Qt.callLater(_toEnd)
   }
 
   // The feed model finished reconciling (streaming tick, or a switch's first load).
   function synced() {
     if (!chatVisible) return
-    if (_pendingEnd) {
-      // Nothing to jump to yet. This synced() is usually ANOTHER session's stream tick
-      // arriving inside the window where the switched-in transcript has not loaded: the
-      // rows are gone, the new ones are not in, and "the end" is the last ROSTER row. The
-      // jump used to be spent right there — cursor parked on a roster row, and every
-      // later signal is unforced, so nothing moved it into the feed again. Stay armed.
-      if (view && view.count === 0) return
-      _pendingEnd = false
-      _mode = "follow"
+    if (_pendingCursor && view && view.count > 0) {
+      _pendingCursor = false
       wantCursorAtEnd(true)
-      _toEnd()
-      if (_settleWanted) { _settleWanted = false; _settle.n = 0; _settle.restart() }
-      return
     }
-    if (following) _toEnd()
+    if (_stick) _pin()
   }
 
-  // Stay where the caller is about to put us: no seek, no follow. Used when switching to a
-  // session whose reading position we remember — the restore itself is the rail's anchor
-  // machinery, which only runs while free.
-  function hold() {
-    _mode = "free"
-    _pendingEnd = false
-    _settleWanted = false
-  }
+  // Stay where the caller is about to put us. Used when switching to a session whose
+  // reading position we remember — the restore itself is the rail's anchor machinery,
+  // which only runs while free.
+  function hold() { _stick = false; _pendingCursor = false }
 
-  // Jump to the newest content. `settle` re-pins through async delegate sizing — true
-  // for a session switch (rows unsized), false for a send (rows already sized, where
-  // the extra re-pins were visible as a flicker).
-  function toEnd(settle) {
-    _mode = "seek"
-    _pendingEnd = true
-    _settleWanted = settle === true
+  // Jump to the newest content (session switch, send). The pin is immediate AND armed:
+  // rows that realize later re-pin through the follow connection above, so there is no
+  // settle burst — every growth step lands exactly.
+  function toEnd() {
+    _stick = true
+    _pendingCursor = true
+    _pin()
   }
 
   // The cursor moved to `idx`. Landing on the last row means "follow the stream"; any
-  // other row is a deliberate move away from the bottom, so reveal it ONCE — as a
-  // standing constraint (ApplyRange) it re-ran on every model change and yanked the view.
+  // other row is a deliberate move away from the bottom — reveal it, exactly once.
   function cursorMoved(idx, isLast) {
     if (!chatVisible || !view) return
     if (isLast) {
-      _mode = "follow"
-      Qt.callLater(_toEnd)
+      _stick = true
+      _pin()
       return
     }
-    _mode = "free"
-    if (streaming) Qt.callLater(function () { if (sm.view) sm.view.positionViewAtIndex(idx, ListView.Contain) })
+    _stick = false
+    view.positionViewAtIndex(idx, ListView.Contain)
   }
 }

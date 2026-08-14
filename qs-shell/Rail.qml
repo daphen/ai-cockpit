@@ -119,7 +119,7 @@ Item {
       // (trimmed, or the session moved on) — then fall back to the newest message rather
       // than leaving the cursor on whatever index it happened to hold.
       if (i >= 0) { cur = rSize + i; _restoring = false }
-      else if (groupedFeed.length) { _restoring = false; feedScroll.toEnd(false) }
+      else if (groupedFeed.length) { _restoring = false; feedScroll.toEnd() }
       return
     }
     if (cur < rSize) return          // cursor is in the roster; feed order can't affect it
@@ -132,7 +132,6 @@ Item {
   FeedScroll {
     id: feedScroll
     view: feedView
-    streaming: rail.featuredStreaming
     chatVisible: rail.view === "chat"
     onWantCursorAtEnd: (force) => {
       // "The end" is the end of the FEED. With no feed rows, navTotal - 1 is the last
@@ -739,7 +738,7 @@ Item {
       feedScroll.hold()
     } else {
       _restoring = false
-      feedScroll.toEnd(true)   // settle: the switched-in transcript's rows aren't sized yet
+      feedScroll.toEnd()
     }
     if (agentd) agentd.select(selectedRaw)
     // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
@@ -917,8 +916,7 @@ Item {
   // the cursor points past the last message and nothing highlights. Re-clamp.
   onNavTotalChanged: if (cur > navTotal - 1) cur = Math.max(0, navTotal - 1)
 
-  // Cursor moves only set state — feedView's native highlight range does the
-  // scrolling (see currentIndex / preferredHighlightBegin|End there).
+  // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
@@ -1011,6 +1009,14 @@ Item {
                  ih: Math.round(it.implicitHeight), ch: Math.round(it.cardHeight) })
     }
     return out
+  }
+
+  // Distance from the live edge, so "it isn't following" is a number instead of an opinion.
+  function feedScrollState() {
+    return { mode: feedScroll.mode,
+             behind: Math.round(feedView.originY + feedView.contentHeight - feedView.height - feedView.contentY),
+             cy: Math.round(feedView.contentY), ch: Math.round(feedView.contentHeight),
+             h: Math.round(feedView.height), count: feedModel.count }
   }
 
   // Rebuild the feed rows and tell the scroll machine they are in. Always paired: a sync
@@ -1339,23 +1345,16 @@ Item {
       spacing: 18
       model: feedModel
       boundsBehavior: Flickable.StopAtBounds
-      // NATIVE cursor-follow: ListView keeps currentIndex inside the preferred
-      // range, scrolling as needed. This replaces ~120 lines of hand-rolled
-      // contentY math (which mis-snapped via indexAt() returning -1 in the gaps).
-      // The range IS the scroll margin: one spacing at the top, the composer's
-      // footer pad at the bottom.
-      currentIndex: (rail.view === "chat" && rail.cur >= rail.rSize) ? (rail.cur - rail.rSize) : -1
-      highlightFollowsCurrentItem: true
-      // ApplyRange re-evaluates the current item's position on EVERY model change, so
-      // while a turn streams (rows updating ~8x/sec) it continuously yanked the view —
-      // that was the "constant blinking", and it stopped the moment pinning kicked in
-      // because that already disabled the range. Keep the range off for the whole
-      // streaming window; cursor moves get one-shot positioning below instead.
-      highlightRangeMode: rail.featuredStreaming ? ListView.NoHighlightRange : ListView.ApplyRange
-      preferredHighlightBegin: spacing
-      preferredHighlightEnd: height - 56
-      highlightMoveDuration: 0
-      highlightResizeDuration: 0
+      // Realize the WHOLE feed (it is capped at feedCap=60 rows — slack-channel scale).
+      // This one line is what makes scrolling exact instead of statistical: virtualized,
+      // contentHeight is an estimate and every scroll-to-bottom lands on a guess, which is
+      // where the old settle bursts, follow polls and repin timers all came from. The
+      // sibling apps (slk-gui-proto/MessageList.qml) proved this trade years of bugs ago.
+      cacheBuffer: 1000000
+      // No native highlight machinery: ApplyRange re-evaluated the current item's position
+      // on EVERY model change (the view yanked while streaming), so the cursor is revealed
+      // explicitly in FeedScroll.cursorMoved instead — geometry is exact now.
+      highlightFollowsCurrentItem: false
       highlight: null           // the delegate paints its own cursor fill
       ScrollFeel {
         flick: feedView
@@ -1856,7 +1855,7 @@ Item {
               rail.pastedImages = []      // attachments belong to the message just sent
               // No settle burst on a send: the rows are already sized, so re-pinning
               // 9x over ~540ms was visible as a flicker on the first message.
-              feedScroll.toEnd(false)
+              feedScroll.toEnd()
               // Stay in insert after sending — you almost always have a follow-up,
               // and dropping to normal mode meant pressing `i` again every time.
               // Esc / Ctrl+h still leave. (An answered ask_user is done, so exit.)
