@@ -630,6 +630,11 @@ Item {
     if (!f) return { name: daemonUp ? "no sessions" : "disconnected", rawName: "", state: "", status: "idle" }
     return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
   }
+  // A turn ending is when the agent's commits land, so realign the mirror then too —
+  // otherwise a commit made while you sit in the session leaves lualine stale until you
+  // switch away and back. Cheap: the align exits immediately when nothing moved.
+  onFeaturedStreamingChanged: if (!featuredStreaming && selectedRaw) _alignMirror(selectedRaw)
+
   // The ONE bool the thinking pill + orb depend on. Being a bool, its binding only
   // notifies consumers when it actually flips (stream start/stop) — decoupled from
   // `featured`, which allocates a fresh object on every roster tick.
