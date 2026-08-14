@@ -11,6 +11,10 @@ Item {
   id: rail
 
   property var agentd: null
+  // Set by shell.qml from TermView.nvimSocket — the socket THIS instance's nvim listens
+  // on. Never rebuild this path here: a guessed shared name is how the rail ended up
+  // talking to a socket a newer heidr had already unlinked.
+  property string nvimSock: ""
   property bool focused: false
   signal focusNvim()
   signal requestFocus()   // a click in the rail should pull focus here
@@ -39,6 +43,36 @@ Item {
   readonly property int navTotal: rSize + viewSize
   function curSection() { return cur < rSize ? "roster" : view }
   function curLocal()   { return cur < rSize ? cur : cur - rSize }
+
+  // Reconciled roster model. `rosterList` is a fresh JS ARRAY on every daemon event, and a
+  // Repeater cannot diff an array — it destroys and rebuilds every row, which restarts each
+  // row's Orb canvas and its rotation animation, so a streaming session's spinner visibly
+  // blinked on every roster tick. Same fix as the feed: reconcile by signature so the
+  // delegates persist and only a row that really changed is written.
+  ListModel { id: rosterModel; dynamicRoles: true }
+  function _rosterSig(x) {
+    if (!x) return ""
+    return [x.name, x.rawName, x.status, x.idle, x.remote === true, x.devenv === true,
+            x.depth || 0, x.linked === true].join("|")
+  }
+  function syncRosterModel() {
+    var arr = rosterList || []
+    if (arr.length < rosterModel.count) rosterModel.clear()   // shrank → rebuild
+    for (var i = 0; i < arr.length; i++) {
+      var sig = _rosterSig(arr[i])
+      if (i < rosterModel.count) {
+        // setProperty, NOT set(): set() replaces the element and rebuilds the delegate,
+        // which is exactly the blink this model exists to avoid.
+        if (rosterModel.get(i).sig !== sig) {
+          rosterModel.setProperty(i, "d", arr[i])
+          rosterModel.setProperty(i, "sig", sig)
+        }
+      } else {
+        rosterModel.append({ d: arr[i], sig: sig })
+      }
+    }
+  }
+  Component.onCompleted: syncRosterModel()
 
   // The roster cursor is anchored to a session's IDENTITY, not its row number. Rows are
   // name-sorted, but a session appearing or going offline still shifts every index below
@@ -69,6 +103,7 @@ Item {
     }
   }
   onRosterListChanged: {
+    syncRosterModel()
     if (cur >= rSize) return          // cursor is in the feed; roster order can't affect it
     var want = _rosterIndexOf(cursorName)
     if (want >= 0) cur = want
@@ -361,8 +396,8 @@ Item {
     // checkout, an unsynced tree) maps to a path that does not exist here, and cd'ing
     // there left nvim on an empty buffer staring at nothing.
     var expr = 'isdirectory("' + cwd + '") ? (execute("cd ' + cwd + '") . ' + open + ') : ""' 
-    var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
-    Quickshell.execDetached(["nvim", "--server", sock, "--remote-expr", expr])
+    if (!nvimSock.length) return
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", expr])
   }
 
   function openInNvim(path) {
@@ -372,8 +407,8 @@ Item {
     // own cwd is the cockpit dir, so a bare "web/…" would open an empty buffer.
     if (p.charAt(0) !== "/" && changesCwd) p = changesCwd + "/" + p
     p = rail._localPath(p)   // box path → local SSHFS mount (no-op for local sessions)
-    var sock = Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-nvim.sock"
-    Quickshell.execDetached(["nvim", "--server", sock, "--remote", p])
+    if (!nvimSock.length) return
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote", p])
     rail.focusNvim()
   }
   // Prose blocks of an agent turn (the headline answer).
@@ -940,17 +975,27 @@ Item {
   // Every row carries `key`, a stable identity from the message it came from. Row INDEX
   // is not stable: the transcript is capped to the last 60 messages, so past that each
   // new message slides the whole window and every index shifts by one.
+  // A card also closes after this many tool calls. Only PROSE used to end one, so a long
+  // tool-only stretch — a Playwright loop, a build chase — collapsed into a single card
+  // hundreds of items tall: scrolling the chat showed nothing but that one card. Chunking
+  // gives a sequence instead, and since only the newest card auto-expands, the older
+  // chunks read as one-line activity summaries.
+  readonly property int turnChunk: 12
   readonly property var groupedFeed: {
-    var f = feed, out = [], cur = null
+    var f = feed, out = [], cur = null, acts = 0
     for (var i = 0; i < f.length; i++) {
       var it = f[i]
       if (it.kind === "user") {
-        if (cur) { out.push(cur); cur = null }
+        if (cur) { out.push(cur); cur = null; acts = 0 }
         out.push({ kind: "user", text: it.text, mid: it.mid, key: it.mid || ("i" + i) })
       } else {
-        if (!cur) cur = { kind: "turn", items: [], key: it.mid || ("i" + i) }
+        if (!cur) { cur = { kind: "turn", items: [], key: it.mid || ("i" + i) }; acts = 0 }
         cur.items.push(it)
-        if (it.kind === "text") { out.push(cur); cur = null }  // prose ends the card
+        if (it.kind === "text") { out.push(cur); cur = null; acts = 0 }   // prose ends the card
+        else {
+          if (it.kind !== "think") acts++
+          if (acts >= turnChunk) { out.push(cur); cur = null; acts = 0 }
+        }
       }
     }
     if (cur) out.push(cur)
@@ -1019,9 +1064,12 @@ Item {
         anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 8; topMargin: 8 }
         spacing: 3
         Repeater {
-          model: rail.rosterList
+          model: rosterModel
           Rectangle {
             id: sessRow
+            // Republish the row's data under the name the delegate already uses, so the
+            // switch from an array model to a ListModel touches one line, not thirty.
+            readonly property var modelData: model.d
             Layout.fillWidth: true
             implicitHeight: 40
             radius: height / 2   // pill rows (as before)

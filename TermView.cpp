@@ -87,6 +87,15 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setAcceptedMouseButtons(Qt::AllButtons);
   setFocus(true);
 
+  // Decided before the pty is forked: the child exports it as NVIM_LISTEN_ADDRESS and the
+  // rail reads it back off this item, so both sides always agree on one path per instance.
+  {
+    const QByteArray rt = qgetenv("XDG_RUNTIME_DIR");
+    nvimSocket_ = QStringLiteral("%1/heidr-nvim-%2.sock")
+                    .arg(rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt))
+                    .arg(static_cast<qint64>(::getpid()));
+  }
+
   // Match the RAIL's text rendering so the two panes look like one app: same family,
   // sized in PIXELS like QsLib does (Theme.fontSize + n), and the DEFAULT hinting
   // preference. PreferNoHinting was chosen to imitate kitty, but the rail's QML Text
@@ -336,14 +345,13 @@ void TermView::spawnPty() {
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);  // let nvim enable termguicolors → full theme
     setenv("HEIDR_COCKPIT", "1", 1);  // nvim uses this to enable rail-crossing keymaps
-    // Fixed nvim RPC socket so the rail can open files in the running nvim
-    // (nvim-follow). nvim reads NVIM_LISTEN_ADDRESS on startup to set --listen.
-    {
-      const char *rt = getenv("XDG_RUNTIME_DIR");
-      static char nvsock[512];
-      snprintf(nvsock, sizeof(nvsock), "%s/heidr-nvim.sock", rt && *rt ? rt : "/tmp");
-      setenv("NVIM_LISTEN_ADDRESS", nvsock, 1);
-    }
+    // nvim RPC socket so the rail can open files in the running nvim (nvim-follow).
+    // PER INSTANCE: the launch command has to rm the path before binding, so a shared
+    // name meant every new heidr unlinked the socket the previous instance's nvim was
+    // still listening on — that nvim stayed alive believing it was reachable, and every
+    // session switch fired an RPC into a path with no inode, silently (execDetached
+    // reports nothing). Keyed by the heidr pid, launches cannot collide.
+    setenv("NVIM_LISTEN_ADDRESS", nvimSocket_.toUtf8().constData(), 1);
     // Auto-launch nvim in the pane; drop to a login shell when it exits.
     // Override the command with HEIDR_COCKPIT_CMD.
     // Launch nvim with an explicit --listen (NVIM_LISTEN_ADDRESS is deprecated in

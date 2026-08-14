@@ -108,6 +108,8 @@ ShellRoot {
           width: parent.width - term.width - 1
           height: parent.height
           agentd: agentd
+          // One path per heidr instance, straight from the terminal that spawned nvim.
+          nvimSock: term.nvimSocket
           focused: win.pane === "rail"
           onFocusNvim: win.pane = "nvim"
           onRequestFocus: win.pane = "rail"

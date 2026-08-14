@@ -60,11 +60,16 @@ QtObject {
     }
   }
 
+  // How close to the bottom counts as "back at the live edge". 8px meant you had to land
+  // on the exact last pixel to resume following, so scrolling down to catch up left the
+  // feed detached and reading as if follow were broken.
+  readonly property int bottomSlack: 48
+
   function _atBottom() {
     if (!view) return true
     // Do NOT trust atYEnd: with async delegates contentHeight is an estimate and it
     // reports true mid-feed, which used to leave follow armed while the user was reading.
-    return view.contentY >= view.contentHeight - view.height - 8
+    return view.contentY >= view.contentHeight - view.height - bottomSlack
   }
 
   function _toEnd() {

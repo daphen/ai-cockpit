@@ -30,9 +30,24 @@ check() {   # check <label> <actual> <expected>
   else say "  ✗ $1 — got '$2', want '$3'"; fail=$((fail+1)); fi
 }
 
+# Leaving either process behind puts a fake roster on the user's desktop that looks like
+# a real session — and its feed keeps growing, so it reads as a broken rail. Kill by PID
+# FILE, not by pattern: `qs` re-execs as .quickshell-wrapped and a `setsid` child is not
+# in this shell's job table, so pattern-matching missed it and the window survived.
 cleanup() {
-  for pid in $(ps -eo pid=,args= | awk -v p="$T/qs-shell" '$0 ~ p && $0 !~ /awk/ {print $1}'); do kill "$pid" 2>/dev/null; done
-  for pid in $(ps -eo pid=,args= | awk '$0 ~ /fake-agentd\.py/ && $0 !~ /awk/ {print $1}'); do kill "$pid" 2>/dev/null; done
+  for f in "$T/qs.pid" "$T/fake.pid"; do
+    [ -f "$f" ] || continue
+    pid=$(cat "$f" 2>/dev/null)
+    if [ -n "${pid:-}" ]; then
+      kill "$pid" 2>/dev/null
+      for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.3; done
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+    fi
+    rm -f "$f"
+  done
+  # belt and braces: anything still holding this run's config dir or fake socket
+  for pid in $(ps -eo pid=,args= | awk -v p="$T/qs-shell" '$0 ~ p && $0 !~ /awk/ {print $1}'); do kill -9 "$pid" 2>/dev/null; done
+  for pid in $(ps -eo pid=,args= | awk -v s="$SOCK" '$0 ~ s && $0 ~ /fake-agentd/ && $0 !~ /awk/ {print $1}'); do kill -9 "$pid" 2>/dev/null; done
   rm -f "$SOCK" "$CMD"
 }
 trap cleanup EXIT
@@ -47,6 +62,7 @@ for f in "$B"/qs-shell/*.qml; do ln -s "$f" "$T/qs-shell/$(basename "$f")"; done
 
 say "start fake agentd"
 setsid nohup python3 "$B/test/fake-agentd.py" "$SOCK" > "$T/fake.log" 2>&1 < /dev/null &
+echo $! > "$T/fake.pid"
 sleep 1.5
 [ -S "$SOCK" ] || { echo "fake agentd did not bind $SOCK"; exit 1; }
 
@@ -56,6 +72,7 @@ setsid nohup env QML2_IMPORT_PATH="$B/build/qml:$HOME/.local/share/qml" \
   LD_LIBRARY_PATH="$B/build" QT_QPA_PLATFORM=wayland \
   HEIDR_AGENTD_SOCKS="$SOCK" HEIDR_COCKPIT_CMD='sh -c "while :; do sleep 60; done"' \
   qs -p "$T/qs-shell" > "$LOG" 2>&1 < /dev/null &
+echo $! > "$T/qs.pid"
 for _ in $(seq 1 30); do sleep 1; [ -n "$(st)" ] && break; done
 [ -n "$(st)" ] || { echo "rail never answered ipc; log:"; tail -20 "$LOG"; exit 1; }
 

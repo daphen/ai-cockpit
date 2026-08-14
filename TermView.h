@@ -41,7 +41,11 @@ public:
   // actually at 1.75, which silently defeated the snapping and left every frame
   // resampling.
   Q_PROPERTY(qreal dpr READ dpr NOTIFY dprChanged)
+  // The nvim RPC socket THIS instance's nvim listens on. Per-instance, so the rail
+  // never talks to a path a different heidr may have unlinked.
+  Q_PROPERTY(QString nvimSocket READ nvimSocket CONSTANT)
   qreal dpr() const { return guiDpr_ > 0 ? guiDpr_ : 1.0; }
+  QString nvimSocket() const { return nvimSocket_; }
 
   // false when focus is in the rail → hide the terminal cursor.
   Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
@@ -109,6 +113,7 @@ private:
   void applyMetrics(qreal dpr);   // snap metrics + padding for this ratio
   void centerGrid(qreal viewH, int rows);  // share the row remainder top/bottom
   void relayoutGrid();            // re-derive cols/rows from the current size + metrics
+  QString nvimSocket_;
   qreal basePadT_ = 18, basePadB_ = 0;     // design padding, before remainder sharing
   void syncTextureSize(qreal dpr); // pin the backing texture to DEVICE pixels
   int cols_ = 110, rows_ = 30;   // worker-thread only after start; reflows on resize
