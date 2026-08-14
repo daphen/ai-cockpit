@@ -102,13 +102,26 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   {
     const QByteArray rt = qgetenv("XDG_RUNTIME_DIR");
     const QString base = rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt);
-    nvimSocket_ = base + QStringLiteral("/heidr-nvim.sock");
-    QLocalSocket probe;
-    probe.connectToServer(nvimSocket_);
-    if (probe.waitForConnected(150)) {
+    // Candidates in preference order: the stable name, then pid-keyed, then pid-N. The
+    // pid alone is NOT collision-free: a QML hot-reload recreates this item inside the
+    // SAME process, and the replacement's nvim raced the dying one on an identical
+    // pid-keyed path — "--listen: address already in use", pane dead at a shell. Probe
+    // each candidate and take the first nobody answers on (a stale FILE is fine: nvim
+    // unlinks those itself; only a LIVE listener forces the next name).
+    const auto live = [](const QString &p) {
+      QLocalSocket probe;
+      probe.connectToServer(p);
+      const bool up = probe.waitForConnected(150);
       probe.abort();
-      nvimSocket_ = base + QStringLiteral("/heidr-nvim-%1.sock").arg(static_cast<qint64>(::getpid()));
-    }
+      return up;
+    };
+    QStringList cands{ base + QStringLiteral("/heidr-nvim.sock"),
+                       base + QStringLiteral("/heidr-nvim-%1.sock").arg(static_cast<qint64>(::getpid())) };
+    for (int i = 2; i <= 9; ++i)
+      cands << base + QStringLiteral("/heidr-nvim-%1-%2.sock").arg(static_cast<qint64>(::getpid())).arg(i);
+    nvimSocket_ = cands.last();
+    for (const QString &c : cands)
+      if (!live(c)) { nvimSocket_ = c; break; }
   }
 
   // Match the RAIL's text rendering so the two panes look like one app: same family,
