@@ -2141,6 +2141,11 @@ Item {
             }
             Keys.onPressed: (e) => {
               var ctrl = (e.modifiers & Qt.ControlModifier)
+              // The old TextInput let C-d bubble to the rail's stale-notice dismiss;
+              // the Controls TextArea consumes it, so handle it here explicitly.
+              if (ctrl && e.key === Qt.Key_D && rail.staleAsk) {
+                rail.dismissStaleAsk(); e.accepted = true; return
+              }
               // Plain Enter sends (the TextInput's onAccepted, relocated); Shift+Enter
               // is left to the default handler and inserts a newline.
               if ((e.key === Qt.Key_Return || e.key === Qt.Key_Enter) && !ctrl && !(e.modifiers & Qt.ShiftModifier)) {
