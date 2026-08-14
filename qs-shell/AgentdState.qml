@@ -435,6 +435,9 @@ Item {
     if (!sid) return
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
+    // A daemon bounce (undeliverable prompt, lineage refusal) was invisible — the send
+    // echoed optimistically and then nothing. Surface it as a feed row.
+    if (t === "error" && m.error) _push(sid, { kind: "cmd", tool: "error", text: String(m.error) })
     // Strand fallback: the turn ended too soon after a steer to have consumed it, so
     // pi dropped the message. Re-send it as a fresh prompt (already echoed in the feed).
     if (t === "turn_end" || t === "agent_end") {
