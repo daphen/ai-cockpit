@@ -158,6 +158,9 @@ Item {
   }
   // A send while the agent is working should redirect it, not queue behind the turn.
   function submit(sid, text) {
+    // A prompt IS the answer to a stale ask ("send a prompt with your answer to
+    // continue"), so sending one retires the notice — leaving it up read as unanswered.
+    dismissStaleAsk(sid)
     if (isBusy(sid)) steer(sid, text)
     else sendPrompt(sid, text)
   }

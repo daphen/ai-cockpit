@@ -844,6 +844,12 @@ Item {
   }
 
   Keys.onPressed: (e) => {
+    // BEFORE the insert guard: the stale-ask notice advertises C-d while the composer is
+    // focused (its whole point is "type your answer instead"), so the binding must work in
+    // insert too. The composer doesn't consume Ctrl+D, so it bubbles up to here.
+    if ((e.modifiers & Qt.ControlModifier) && e.key === Qt.Key_D && staleAsk) {
+      dismissStaleAsk(); e.accepted = true; return
+    }
     if (insert) return
     // Link-hint mode owns the keyboard while active: a label letter opens its
     // link, Esc (or any non-label key) drops the hints — mlqs's `f` semantics.
@@ -887,7 +893,6 @@ Item {
     // Ctrl+j → jump into the main view (chat/files); Ctrl+k → back to roster top.
     if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); e.accepted = true; return }
     if (ctrl && e.key === Qt.Key_K) { cur = 0; e.accepted = true; return }
-    if (ctrl && e.key === Qt.Key_D && staleAsk) { dismissStaleAsk(); e.accepted = true; return }
     if (ctrl && e.key === Qt.Key_T) { rosterOverride = !rosterExpanded; e.accepted = true; return }
     if (e.key === Qt.Key_I)      { enterInsert(); e.accepted = true }
     else if (e.key === Qt.Key_H || e.key === Qt.Key_Escape) { rail.focusNvim(); e.accepted = true }
