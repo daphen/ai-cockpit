@@ -407,6 +407,15 @@ Item {
         if (ut) items.push({ kind: "user", text: ut })
       } else {
         _expandAssistant(msg.content, items)
+        // A failed assistant turn carries its reason on the MESSAGE, not the content —
+        // it rendered as a bare "1 error" chip with nothing to read. Name it: a user
+        // abort gets the interrupt grammar, anything else shows the provider's message.
+        if (msg.stopReason === "error" || msg.errorMessage) {
+          var em = String(msg.errorMessage || "unknown error")
+          items.push({ kind: "cmd", tool: "error",
+                       text: /abort/i.test(em) ? "⏹ interrupted — turn aborted (yours or a steer)"
+                                               : "✗ " + em })
+        }
       }
       for (var ti = _from; ti < items.length; ti++)
         // (message id, nth item OF THAT MESSAGE) — `ti` alone is the index into the
