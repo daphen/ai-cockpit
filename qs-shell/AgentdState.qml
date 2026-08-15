@@ -146,9 +146,14 @@ Item {
   // queue until the next tool boundary, so it is absent from get_entries for seconds to
   // minutes — and the rebuild wiped the optimistic row, making mid-turn sends silently
   // vanish and then "all show up at once" when pi finally consumed them.
-  property var _localEcho: ({})   // sid -> [text, …] not yet seen in the transcript
+  property var _localEcho: ({})   // sid -> [{text, at}, …] not yet seen in the transcript
   function _echoTrack(sid, text) {
-    var m = _localEcho; (m[sid] = m[sid] || []).push(text); _localEcho = m
+    var m = _localEcho; (m[sid] = m[sid] || []).push({ text: text, at: Date.now() }); _localEcho = m
+  }
+  function _sessionStatus(sid) {
+    for (var i = 0; i < sessions.length; i++)
+      if (sessions[i].id === sid || sessions[i].name === sid) return sessions[i].status || ""
+    return ""
   }
   function sendPrompt(sid, text) {
     // agentd/pi expect `message`, not `text`.
@@ -226,7 +231,7 @@ Item {
     delete _steerPending[sid]
     _clearPending(sid)
     var mk = _marks; var l = (mk[sid] = mk[sid] || [])
-    l.push("⏹ interrupted — turn aborted")
+    l.push({ text: "⏹ interrupted — turn aborted", at: Date.now() })
     if (l.length > 3) l.shift()
     _marks = mk
     _push(sid, { kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted" })
@@ -599,18 +604,22 @@ Item {
     // message is the newest thing they did.
     var mks = _marks[esid] || []
     if (mks.length) {
+      // A mark bridges rebuilds only until pi's own stopReason row lands — and if the
+      // abort never reached a turn (dead pi), that row never comes, so a hard 60s cap
+      // keeps a mark from re-appending forever after every later message.
       var caughtUp = false
       for (var fi = 0; fi < feeds[esid].length && !caughtUp; fi++) {
         var its = feeds[esid][fi].items || []
         for (var ii = 0; ii < its.length; ii++)
           if (String(its[ii].text || "").indexOf("⏹ interrupted") === 0) { caughtUp = true; break }
       }
-      if (caughtUp) {
-        var nm = _marks; delete nm[esid]; _marks = nm; mks = []
-      }
+      mks = caughtUp ? [] : mks.filter(mm => (Date.now() - (mm.at || 0)) < 60000)
+      var nm = _marks
+      if (mks.length) nm[esid] = mks; else delete nm[esid]
+      _marks = nm
     }
     for (var mi = 0; mi < mks.length; mi++)
-      feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi] })
+      feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi].text !== undefined ? mks[mi].text : mks[mi] })
     // Re-append local echoes the transcript has not caught up with, dropping the ones it
     // has (containment, not equality: pi may wrap a steered message when recording it).
     var q = _localEcho[esid] || []
@@ -624,10 +633,21 @@ Item {
       }
       var joined = corpus.join("\n\u0000")
       var left = []
+      var idle = _sessionStatus(esid) !== "streaming"
       for (var qi = 0; qi < q.length; qi++) {
-        if (joined.indexOf(q[qi]) >= 0) continue          // transcript caught up
-        left.push(q[qi])
-        feeds[esid].push({ kind: "user", text: q[qi] })   // keep it on screen
+        var qe = q[qi], qt = qe.text !== undefined ? qe.text : String(qe)
+        if (joined.indexOf(qt) >= 0) continue             // transcript caught up
+        // An echo can wait out a long tool run while a STREAMING turn holds the steer —
+        // but an IDLE session with a stale echo means the message provably died (pi
+        // rejected or never received it). Say so once instead of ghosting it forever.
+        var age = Date.now() - (qe.at || 0)
+        if (idle && age > 30000) {
+          feeds[esid].push({ kind: "cmd", tool: "error",
+                             text: "✗ not delivered — the agent never received: “" + qt.slice(0, 80) + "”. Resend it." })
+          continue                                        // dropped from the queue
+        }
+        left.push(qe)
+        feeds[esid].push({ kind: "user", text: qt })      // keep it on screen
       }
       var le = _localEcho
       if (left.length) le[esid] = left; else delete le[esid]
