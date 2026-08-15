@@ -570,17 +570,24 @@ Item {
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
   // counted): "4 bash · 6 read · edited 3".
   function turnActivitySummary(items) {
-    var counts = {}, edits = 0
+    var counts = {}, edits = 0, interrupts = 0, errors = 0
     for (var i = 0; i < (items || []).length; i++) {
       var it = items[i]
       if (it.kind === "text" || it.kind === "think") continue
       else if (it.kind === "edit") edits++
+      else if (it.kind === "cmd" && it.tool === "error") {
+        // "1 error" says nothing. Name the interrupt; other errors count as words.
+        if (String(it.text || "").indexOf("⏹") === 0) interrupts++
+        else errors++
+      }
       else if (it.kind === "group") counts[it.tool] = (counts[it.tool] || 0) + (it.cmds ? it.cmds.length : 1)
       else if (it.kind === "cmd") counts[it.tool] = (counts[it.tool] || 0) + 1
     }
     var parts = []
     for (var k in counts) parts.push(counts[k] + " " + k)
     if (edits) parts.push("edited " + edits)
+    if (interrupts) parts.push("interrupted")
+    if (errors) parts.push(errors === 1 ? "1 error" : errors + " errors")
     return parts.join("  ·  ")
   }
   function turnActivityItems(items) { return (items || []).filter(x => x.kind !== "text" && x.kind !== "think") }
