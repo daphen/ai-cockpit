@@ -54,7 +54,7 @@ Item {
 
   // Reconciled roster model. `rosterList` is a fresh JS ARRAY on every daemon event, and a
   // Repeater cannot diff an array — it destroys and rebuilds every row, which restarts each
-  // row's Orb canvas and its rotation animation, so a streaming session's spinner visibly
+  // row's ThinkingOrb canvas and its rotation animation, so a streaming session's spinner visibly
   // blinked on every roster tick. Same fix as the feed: reconcile by signature so the
   // delegates persist and only a row that really changed is written.
   ListModel { id: rosterModel; dynamicRoles: true }
@@ -1450,7 +1450,7 @@ Item {
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
-        out.push({ kind: "user", text: it.text, mid: it.mid, key: it.mid || ("i" + i) })
+        out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, key: it.mid || ("i" + i) })
       } else {
         if (!cur) { cur = { kind: "turn", items: [], key: it.mid || ("i" + i), contFrom: chunked }; acts = 0 }
         cur.items.push(it)
@@ -1639,6 +1639,22 @@ Item {
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
                 anchors.verticalCenter: parent.verticalCenter
               }
+              // A steer redirected a LIVE turn — visibly different from a normal
+              // prompt, so "why did it abort" has its answer in the header.
+              Rectangle {
+                visible: turnDel.isUser && turnDel.turn.steered === true
+                implicitWidth: steerCap.implicitWidth + 12
+                implicitHeight: 17; radius: 8.5
+                color: "transparent"
+                border.width: 1; border.color: Theme.orange
+                anchors.verticalCenter: parent.verticalCenter
+                Text {
+                  id: steerCap; anchors.centerIn: parent
+                  text: "steer"
+                  color: Theme.orange
+                  font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 3; font.bold: true
+                }
+              }
             }
 
             // User message body.
@@ -1796,7 +1812,7 @@ Item {
             }
             // The "thinking" signifier lives HERE now (the floating pill is gone):
             // same orb grammar as the expanded rows.
-            Orb {
+            ThinkingOrb {
               anchors.verticalCenter: parent.verticalCenter
               // The one "thinking" signifier since the floating pill left — big
               // enough to read from the corner of the eye.
@@ -1934,7 +1950,7 @@ Item {
                 Item {
                   Layout.preferredWidth: 20; Layout.preferredHeight: 20
                   Layout.alignment: Qt.AlignVCenter
-                  Orb {
+                  ThinkingOrb {
                     anchors.fill: parent
                     visible: sessRow.streaming
                     running: sessRow.streaming

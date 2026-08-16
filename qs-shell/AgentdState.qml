@@ -186,7 +186,7 @@ Item {
   property var _steerPending: ({})
   function steer(sid, text) {
     if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
-    _push(sid, { kind: "user", text: text })
+    _push(sid, { kind: "user", text: text, steered: true })
     _echoTrack(sid, text)
     _steerPending[sid] = { text: text, at: Date.now() }
   }
@@ -469,13 +469,14 @@ Item {
     for (var mi = 0; mi < msgs.length; mi++) {
       var msg = msgs[mi]
       var isLast = (mi === msgs.length - 1)
+      var prevAborted = mi > 0 && msgs[mi - 1].role === "assistant" && msgs[mi - 1].stopReason === "aborted"
       var _from = items.length
       if (msg.role === "user") {
         var uc = msg.content || [], ut = ""
         for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
         ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
         ut = _foldSlashBody(ut)
-        if (ut) items.push({ kind: "user", text: ut })
+        if (ut) items.push({ kind: "user", text: ut, steered: prevAborted })
       } else if (msg._compaction) {
         items.push({ kind: "cmd", tool: "info", text: "· context compacted" })
       } else {
