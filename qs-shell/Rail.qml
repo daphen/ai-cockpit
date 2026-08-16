@@ -1997,6 +1997,7 @@ Item {
                     // Same action hue whether or not the cursor is on the row — the
                     // pill fill already marks the cursor; a recolored orb read as a bug.
                     glow: rail.actionGlow(modelData.rawName || modelData.name)
+                    invertRing: sessRow.cursor
                   }
                 }
                 Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
