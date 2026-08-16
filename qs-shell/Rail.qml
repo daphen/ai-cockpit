@@ -1994,8 +1994,9 @@ Item {
                     // Pinned to 13 rather than letting the size rule pick 15 for 16px — 13 is
                     // the density that was judged right, and this keeps it while growing.
                     nodes: 13
-                    // Electric, not muted: the one thing in the row that should catch the eye.
-                    glow: sessRow.cursor ? Theme.bg : rail.actionGlow(modelData.rawName || modelData.name)
+                    // Same action hue whether or not the cursor is on the row — the
+                    // pill fill already marks the cursor; a recolored orb read as a bug.
+                    glow: rail.actionGlow(modelData.rawName || modelData.name)
                   }
                 }
                 Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
