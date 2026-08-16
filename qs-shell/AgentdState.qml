@@ -388,7 +388,7 @@ Item {
     // moving main counts every unrelated commit main gained since the fork as this
     // session's changes (584 phantom files on a branch with zero work).
     command: ["sh", "-c",
-      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { b=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse -q --verify HEAD 2>/dev/null || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904); git diff --no-color --no-ext-diff --unified=0 \"$b\" 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null | while IFS= read -r f; do printf 'diff --git a/%s b/%s\\n+++ b/%s\\n' \"$f\" \"$f\" \"$f\"; n=$(wc -l < \"$f\" 2>/dev/null || echo 0); i=0; while [ $i -lt $n ] && [ $i -lt 500 ]; do printf '+\\n'; i=$((i+1)); done; done; }"]
+      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { b=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse -q --verify HEAD 2>/dev/null || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904); git diff --no-color --no-ext-diff --unified=0 \"$b\" 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null | grep -v '^\\.heidr-pastes/' | while IFS= read -r f; do printf 'diff --git a/%s b/%s\\n+++ b/%s\\n' \"$f\" \"$f\" \"$f\"; n=$(wc -l < \"$f\" 2>/dev/null || echo 0); i=0; while [ $i -lt $n ] && [ $i -lt 500 ]; do printf '+\\n'; i=$((i+1)); done; done; }"]
     stdout: StdioCollector {
       onStreamFinished: {
         var sid = root._pendingChangesSid

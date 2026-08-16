@@ -483,7 +483,12 @@ Item {
     // One shell pass: detect an image flavour, write it, print the path (or NOIMAGE).
     pasteProc.running = false
     pasteProc.command = ["sh", "-c",
+      // Teach the host repo to ignore the paste stash the moment it exists: without
+      // this, agents running `git add -A` commit screenshots, and the changes view
+      // counts them as project files.
       'd=' + JSON.stringify(rail.pasteDirFor) + '; mkdir -p "$d" || exit 0; ' +
+      'g=$(cd "$d/.." && git rev-parse --absolute-git-dir 2>/dev/null); ' +
+      'if [ -n "$g" ]; then grep -qxF ".heidr-pastes/" "$g/info/exclude" 2>/dev/null || { mkdir -p "$g/info"; echo ".heidr-pastes/" >> "$g/info/exclude"; }; fi; ' +
       't=$(wl-paste --list-types 2>/dev/null | grep -m1 "^image/"); ' +
       '[ -n "$t" ] || { echo NOIMAGE; exit 0; }; ' +
       'e=${t#image/}; [ "$e" = jpeg ] && e=jpg; [ "$e" = svg+xml ] && e=svg; ' +
