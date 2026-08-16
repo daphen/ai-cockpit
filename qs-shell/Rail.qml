@@ -734,6 +734,9 @@ Item {
   // green (something is changing), running commands is orange (side effects),
   // mcp/asks and thinking (no tool) idle on the default azure -- electric's
   // blue-violet read purple in the aurora orb and was voted out.
+  // 1s heartbeat for elapsed-time displays (running tool call duration).
+  property int nowTick: 0
+  Timer { interval: 1000; repeat: true; running: true; onTriggered: rail.nowTick++ }
   function actionGlow(sid) {
     agentd ? agentd.curToolGen : 0
     var t = agentd ? agentd.curToolFor(sid) : ""
@@ -1235,6 +1238,12 @@ Item {
       return true
     case Qt.Key_N:      rail.openNew(); return true             // new session
     case Qt.Key_X:
+      // X (shift) = surgical: kill only the RUNNING TOOL CALL of the open
+      // session — the turn survives and the model adapts (hung network command).
+      if (shift) {
+        if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.abortTool(rail.selectedRaw)
+        return true
+      }
       // x kills the session under the ROSTER cursor and does nothing anywhere
       // else: interrupting a turn is Esc, and a kill should require aiming.
       if (rail.curSection() === "roster") {
@@ -1331,6 +1340,9 @@ Item {
     else if (k === "esc") {
       if (featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
       else if (insert) exitInsert()
+    }
+    else if (k === "killtool") {
+      if (featuredStreaming && agentd && selectedRaw) agentd.abortTool(selectedRaw)
     }
   }
   // The rail's own ground: one step darker than the editor side (Theme.bgDim), so the
@@ -2015,7 +2027,18 @@ Item {
                   }
                 }
                 Text {
-                  text: sessRow.hasAsk ? "" : (modelData.state || modelData.idle || "")
+                  text: {
+                    rail.nowTick
+                    rail.agentd ? rail.agentd.curToolGen : 0
+                    if (sessRow.hasAsk) return ""
+                    var sid2 = modelData.rawName || modelData.name
+                    if (sessRow.streaming && rail.agentd && rail.agentd.curToolLiveFor(sid2)) {
+                      var secs = Math.max(0, Math.round((Date.now() - rail.agentd.curToolAtFor(sid2)) / 1000))
+                      var el = secs >= 60 ? Math.floor(secs / 60) + "m" + String(secs % 60).padStart(2, "0") : secs + "s"
+                      return (rail.agentd.curToolFor(sid2) || "tool") + " · " + el
+                    }
+                    return modelData.state || modelData.idle || ""
+                  }
                   // Sub-agents (linked rows) carry no status word at all — the orb says
                   // "working", and an idle watcher needs no label to say it's waiting.
                   visible: !modelData.linked
@@ -2512,7 +2535,7 @@ Item {
               { k: "f",   l: rail.hinting ? "pick" : "links" },
               { k: "i",   l: "type" },
               { k: "h",   l: "nvim" }
-            ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }] : [])
+            ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }, { k: "X", l: "kill tool" }] : [])
           }
           RowLayout {
             spacing: 4
