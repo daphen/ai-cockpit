@@ -336,9 +336,9 @@ Item {
     var n = 0
     // Both ref shapes: remote worktree-relative (@.heidr-pastes/…) and local
     // cache-absolute (@/home/…/.cache/heidr-pastes/…).
-    return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/[^\s"']+/g, function () {
-      n++
-      return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>&#128206;&#8201;image " + n + "</b></font>"
+    return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/([^\s"']+)/g, function (all, file) {
+      var stem = String(file).replace(/\.[a-z]+$/, "")
+      return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>&#128206;&#8201;" + stem + "</b></font>"
     })
   }
   function _hex(c) {
@@ -429,8 +429,10 @@ Item {
   // by its file ref at send time. A token the user deleted sends nothing — deletion
   // is the drop gesture.
   function attachRefs(t) {
-    return String(t || "").replace(/\[image (\d+)\]/g, function (all, n) {
-      var f = pastedImages[parseInt(n) - 1]
+    return String(t || "").replace(/\[(img\d+)\]/g, function (all, stem) {
+      var f = ""
+      for (var i = 0; i < pastedImages.length; i++)
+        if (String(pastedImages[i]).indexOf(stem + ".") === 0) { f = pastedImages[i]; break }
       if (!f) return all
       // Remote: worktree-relative (the box's absolute path differs from ours).
       // Local: the cache dir's absolute path — the project stays untouched.
@@ -465,7 +467,9 @@ Item {
         // in place at send time (attachRefs), so the image sits where you pasted it,
         // for you and for the agent. Deleting the token drops the image from the send.
         rail.pastedImages = rail.pastedImages.concat([out])
-        composerInput.insert(composerInput.cursorPosition, "[image " + rail.pastedImages.length + "] ")
+        // The token IS the file's name (img7 for img7.png): what you see, what the
+        // agent reads, and what the badge shows are the same word.
+        composerInput.insert(composerInput.cursorPosition, "[" + out.replace(/\.[a-z]+$/, "") + "] ")
         rail._pushPasteRemote(out)
       }
     }
