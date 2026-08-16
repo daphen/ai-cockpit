@@ -388,7 +388,7 @@ Item {
     // moving main counts every unrelated commit main gained since the fork as this
     // session's changes (584 phantom files on a branch with zero work).
     command: ["sh", "-c",
-      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { b=$(git merge-base origin/main HEAD 2>/dev/null || echo HEAD); git diff --no-color --no-ext-diff --unified=0 \"$b\" 2>/dev/null; }"]
+      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { b=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse -q --verify HEAD 2>/dev/null || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904); git diff --no-color --no-ext-diff --unified=0 \"$b\" 2>/dev/null; }"]
     stdout: StdioCollector {
       onStreamFinished: {
         var sid = root._pendingChangesSid
