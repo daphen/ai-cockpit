@@ -730,6 +730,17 @@ Item {
     if (st === "offline")   return "offline"   // its daemon/tunnel is gone
     return "idle"
   }
+  // The working orb's hue names the ACTION: reading is calm blue, editing is
+  // green (something is changing), running commands is orange (side effects),
+  // mcp/asks are the identity electric. Thinking (no tool) idles on electric.
+  function actionGlow(sid) {
+    agentd ? agentd.curToolGen : 0
+    var t = agentd ? agentd.curToolFor(sid) : ""
+    if (t === "edit" || t === "write" || t === "create" || t === "str_replace") return Theme.green
+    if (t === "bash" || t === "shell") return Theme.orange
+    if (t === "read" || t === "grep" || t === "glob" || t === "find" || t === "ls" || t === "ripgrep" || t === "search_files") return Theme.sky
+    return Theme.electric
+  }
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
@@ -1817,10 +1828,9 @@ Item {
               // The one "thinking" signifier since the floating pill left — big
               // enough to read from the corner of the eye.
               width: 44; height: 44
-              visible: rail.featuredStreaming
               running: rail.featuredStreaming
               nodes: 16
-              glow: Theme.electric
+              glow: rail.actionGlow(rail.selectedRaw)
             }
           }
           Row {
@@ -1952,13 +1962,12 @@ Item {
                   Layout.alignment: Qt.AlignVCenter
                   ThinkingOrb {
                     anchors.fill: parent
-                    visible: sessRow.streaming
                     running: sessRow.streaming
                     // Pinned to 13 rather than letting the size rule pick 15 for 16px — 13 is
                     // the density that was judged right, and this keeps it while growing.
                     nodes: 13
                     // Electric, not muted: the one thing in the row that should catch the eye.
-                    glow: sessRow.cursor ? Theme.bg : Theme.electric
+                    glow: sessRow.cursor ? Theme.bg : rail.actionGlow(modelData.rawName || modelData.name)
                   }
                 }
                 Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
