@@ -42,9 +42,14 @@ Item {
     canvas.requestPaint()
   }
 
-  NumberAnimation on rot {
-    running: orb.running; loops: Animation.Infinite
-    from: 0; to: 2 * Math.PI; duration: 7000
+  // Rotation is a WALL-CLOCK phase, not animation state: a stored-from-zero
+  // NumberAnimation restarted whenever `running` flapped (pi's status flips
+  // between tool cycles) or the delegate was recreated — the orb visibly
+  // snapped back to its start pose. A clock phase cannot reset, and every orb
+  // on screen spins in unison for free.
+  FrameAnimation {
+    running: orb.running
+    onTriggered: orb.rot = (Date.now() % 7000) / 7000 * 2 * Math.PI
   }
   onRotChanged: canvas.requestPaint()
   onGlowChanged: canvas.requestPaint()
