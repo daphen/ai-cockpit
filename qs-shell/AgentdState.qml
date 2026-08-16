@@ -358,8 +358,11 @@ Item {
   Process {
     id: gitProc
     property string cwdArg: ""
+    // Diff from the MERGE-BASE, not origin/main itself: a two-dot diff against a
+    // moving main counts every unrelated commit main gained since the fork as this
+    // session's changes (584 phantom files on a branch with zero work).
     command: ["sh", "-c",
-      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { git diff --no-color --no-ext-diff --unified=0 origin/main 2>/dev/null || git diff --no-color --no-ext-diff --unified=0 HEAD 2>/dev/null; }"]
+      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { b=$(git merge-base origin/main HEAD 2>/dev/null || echo HEAD); git diff --no-color --no-ext-diff --unified=0 \"$b\" 2>/dev/null; }"]
     stdout: StdioCollector {
       onStreamFinished: {
         var sid = root._pendingChangesSid
