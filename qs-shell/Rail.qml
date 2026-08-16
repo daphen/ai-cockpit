@@ -742,6 +742,14 @@ Item {
     if (t === "read" || t === "grep" || t === "glob" || t === "find" || t === "ls" || t === "ripgrep" || t === "search_files") return Theme.sky
     return "#3aa0ff"
   }
+  // The orb ring's exact tint of the current action hue -- shared by the orb
+  // (QsLib draws the same formula) and the composer outline so they move as one.
+  readonly property color activeRing: {
+    var g = actionGlow(selectedRaw)
+    var h = g.hslHue < 0 ? 0 : g.hslHue
+    var s2 = Math.min(1, Math.max(0.75, g.hslSaturation)) * 0.85
+    return Qt.hsla(h, s2, Theme.mode === "light" ? 0.34 : 0.82, 1)
+  }
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
@@ -2267,8 +2275,9 @@ Item {
             implicitHeight: 44; height: implicitHeight
             radius: 10
             color: Theme.surface0
-            border.color: rail.insert ? Theme.electric : Theme.hairline
+            border.color: rail.insert ? rail.activeRing : Theme.hairline
             border.width: 1
+            Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
             RowLayout {
               anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
               spacing: 8
@@ -2308,8 +2317,9 @@ Item {
         implicitHeight: Math.max(52, Math.min(composerInput.implicitHeight + 30, 94))
         radius: Math.min(height / 2, 26)   // pill at one line, rounded card when grown
         color: Theme.surface0
-        border.color: rail.insert ? Theme.electric : Theme.hairline
+        border.color: rail.insert ? rail.activeRing : Theme.hairline
         border.width: 1
+        Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
         RowLayout {
           anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
           spacing: 8
