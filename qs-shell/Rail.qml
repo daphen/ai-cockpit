@@ -334,7 +334,9 @@ Item {
   // matching the composer chips.
   function badgeAttachments(t) {
     var n = 0
-    return String(t || "").replace(/@?\.heidr-pastes\/\S+/g, function () {
+    // Both ref shapes: remote worktree-relative (@.heidr-pastes/…) and local
+    // cache-absolute (@/home/…/.cache/heidr-pastes/…).
+    return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/[^\s"']+/g, function () {
       n++
       return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>&#128206;&#8201;image " + n + "</b></font>"
     })
