@@ -740,7 +740,9 @@ Item {
     if (t === "edit" || t === "write" || t === "create" || t === "str_replace") return Theme.green
     if (t === "bash" || t === "shell") return Theme.orange
     if (t === "read" || t === "grep" || t === "glob" || t === "find" || t === "ls" || t === "ripgrep" || t === "search_files") return Theme.sky
-    return "#3aa0ff"
+    // Qt.color, not a bare string: activeRing reads .hslHue off this return,
+    // and on a raw string that's undefined -> the outline computed a garbage hue.
+    return Qt.color("#3aa0ff")
   }
   // The orb ring's exact tint of the current action hue -- shared by the orb
   // (QsLib draws the same formula) and the composer outline so they move as one.
