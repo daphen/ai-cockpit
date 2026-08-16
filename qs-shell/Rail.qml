@@ -592,7 +592,12 @@ Item {
     if (errors) parts.push(errors === 1 ? "1 error" : errors + " errors")
     return parts.join("  ·  ")
   }
-  function turnActivityItems(items) { return (items || []).filter(x => x.kind !== "text" && x.kind !== "think") }
+  function turnActivityItems(items) {
+    return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && !(x.kind === "cmd" && x.tool === "info"))
+  }
+  function turnInfos(items) {
+    return (items || []).filter(x => x.kind === "cmd" && x.tool === "info").map(x => String(x.text || ""))
+  }
 
   function feedCopyTarget(item) {
     if (!item) return ""
@@ -1552,6 +1557,18 @@ Item {
               linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
               wrapMode: Text.WordWrap; textFormat: Text.MarkdownText
               onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
+            }
+
+            // Status markers (compaction, retries) — inline, muted. They carry no
+            // activity counts, so without this they rendered as an EMPTY agent card.
+            Repeater {
+              model: turnDel.isUser ? 0 : rail.turnInfos(turnDel.turn.items).length
+              Text {
+                width: cardCol.width
+                text: rail.turnInfos(turnDel.turn.items)[index] || ""
+                color: Theme.fg_muted
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              }
             }
 
             // Thought process — visible inline. Each block shows its short header;
