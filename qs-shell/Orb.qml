@@ -19,7 +19,7 @@ Item {
   Behavior on scale   { NumberAnimation { duration: 260; easing.type: Easing.OutBack } }
   // The gradient/mesh hue tracks what the agent is DOING (read/edit/run/…);
   // ease between hues so tool changes glide instead of flashing.
-  Behavior on glow { ColorAnimation { duration: 350 } }
+  Behavior on glow { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
 
   // Node count scales with size. At roster size the 26-node mesh collapsed into a dark
   // blob: R is ~5px there, the edge threshold spans almost the whole disc, so all ~325
@@ -90,10 +90,17 @@ Item {
       var gphase = (Date.now() % 11000) / 11000 * 2 * Math.PI
       var gx = Math.cos(gphase), gy = Math.sin(gphase)
       var hx = cx + gx * discR * 0.45, hy = cy + gy * discR * 0.45
+      // Duotone, not color-plus-white: the highlight is the glow's HUE-SHIFTED
+      // sibling at full saturation (washing toward white read as pastel milk),
+      // and the rim is the opposite shift driven deep — a saturated sweep with
+      // real depth at every action color.
+      var hu = g0.hslHue < 0 ? 0 : g0.hslHue
+      var hi = Qt.hsla((hu + 0.09) % 1, Math.min(1, Math.max(0.75, g0.hslSaturation)), 0.62, 1)
+      var rim = Qt.hsla((hu + 0.94) % 1, Math.min(1, Math.max(0.6, g0.hslSaturation)), 0.13, 1)
       var grad = ctx.createRadialGradient(hx, hy, discR * 0.05, cx, cy, discR * 1.25)
-      grad.addColorStop(0.0, Qt.rgba(Math.min(1, g0.r * 0.6 + 0.5), Math.min(1, g0.g * 0.6 + 0.5), Math.min(1, g0.b * 0.6 + 0.5), 1))
-      grad.addColorStop(0.35, Qt.rgba(g0.r, g0.g, g0.b, 1))
-      grad.addColorStop(1.0, Qt.rgba(g0.r * 0.12, g0.g * 0.12, g0.b * 0.20, 1))
+      grad.addColorStop(0.0, hi)
+      grad.addColorStop(0.42, Qt.rgba(g0.r, g0.g, g0.b, 1))
+      grad.addColorStop(1.0, rim)
       ctx.beginPath(); ctx.arc(cx, cy, discR, 0, 2 * Math.PI)
       ctx.fillStyle = grad; ctx.fill()
       ctx.lineWidth = ring
