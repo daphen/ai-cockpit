@@ -96,6 +96,10 @@ Item {
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
   signal editSeen(string sid, string path)
+  // Last file each session touched — so switching TO a mid-turn session can land
+  // on the work instead of the dashboard.
+  property var _lastEdit: ({})
+  function lastEditFor(sid) { return _lastEdit[sid] || "" }
 
   property var asks: ({})
   property int askGen: 0
@@ -636,7 +640,10 @@ Item {
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
                      add: 0, del: 0, id: m.toolCallId })
-        if (args.path) root.editSeen(sid, String(args.path))
+        if (args.path) {
+          var le = _lastEdit; le[sid] = String(args.path); _lastEdit = le
+          root.editSeen(sid, String(args.path))
+        }
       } else {
         // bash/mcp/grep/read/… → one-line hint; keep raw command for "run from message".
         _push(sid, { kind: "cmd", tool: tn, text: toolHint(tn, args),
@@ -755,6 +762,16 @@ Item {
       var le = _localEcho
       if (left.length) le[esid] = left; else delete le[esid]
       _localEcho = le
+    }
+    for (var li = feeds[esid].length - 1; li >= 0; li--) {
+      var lit = feeds[esid][li]
+      var lp = lit.kind === "edit" ? lit.path
+             : (lit.kind === "turn" && lit.items) ? (function (its) {
+                 for (var lj = its.length - 1; lj >= 0; lj--)
+                   if (its[lj].kind === "edit" && its[lj].path) return its[lj].path
+                 return ""
+               })(lit.items) : ""
+      if (lp) { var le2 = _lastEdit; le2[esid] = String(lp); _lastEdit = le2; break }
     }
     feedGen++
     _recoverAsk(esid, m.data.entries)

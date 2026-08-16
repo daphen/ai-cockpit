@@ -543,11 +543,22 @@ Item {
   }
   function landNvim(sid) {
     if (!sid || !agentd) return
-    var cwd = ""
+    var cwd = "", st = ""
     for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; break }
+      if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; st = agentd.sessions[i].status || ""; break }
     if (!cwd) return
     _landedFor = sid + "@" + cwd
+    // Switching TO a session that is mid-turn lands on its LIVE EDGE — the file it
+    // last edited — not the dashboard. The dashboard is for arriving at rest.
+    if (st === "streaming" && agentd.lastEditFor(sid) && nvimSock.length) {
+      var lcwd0 = rail._localPath(cwd)
+      var lp0 = rail._localPath(String(agentd.lastEditFor(sid)))
+      if (lp0.charAt(0) !== "/") lp0 = lcwd0 + "/" + lp0
+      Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
+        'isdirectory("' + lcwd0 + '") ? (execute("cd ' + lcwd0 + '") . v:lua.require("heidr").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)) : ""'])
+      _alignMirror(sid)
+      return
+    }
     cwd = rail._localPath(cwd)   // box path → local mutagen mirror (no-op for local sessions)
     // Plan location depends on where the session lives: local work uses the vault,
     // a lovbox session has no vault so plan-ticket writes <worktree>/.plans/.
