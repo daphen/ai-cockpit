@@ -333,6 +333,11 @@ Item {
     if (name === "list" || name === "ls")          { var d = a.path || a.dir || a.directory || ""; return "ls " + (d ? _rel(d) : "") }
     if (name === "webfetch" || name === "web_fetch" || name === "fetch") return "fetch " + _clip(a.url || a.uri)
     if (name === "websearch" || name === "web_search") return "web " + _clip(a.query || a.q)
+    if (name === "agent_send")   return "send → " + (a.agent || "?") + " · " + _clip(a.message)
+    if (name === "agent_steer")  return "steer → " + (a.agent || "?") + " · " + _clip(a.message)
+    if (name === "agent_spawn")  return "spawn → " + (a.name || _base(a.dir || "?")) + (a.detached ? " (top-level)" : "")
+    if (name === "agent_read")   return "read ← " + (a.agent || "?")
+    if (name === "agent_review") return "review PR " + (a.pr || "")
     if (name === "mcp") {
       var bits = []
       if (a.server) bits.push(a.server)
@@ -673,10 +678,17 @@ Item {
           root.editSeen(sid, String(args.path))
         }
       } else {
-        // bash/mcp/grep/read/… → one-line hint; keep raw command for "run from message".
-        _push(sid, { kind: "cmd", tool: tn, text: toolHint(tn, args),
-                     command: (tn === "bash" || tn === "shell") ? (args.command || args.cmd || "") : "",
-                     id: m.toolCallId })
+        // bash/mcp/grep/read/… → one-line hint; keep the raw payload so the row
+        // can EXPAND: bash shows its command, agent_* shows target + full message.
+        var raw = ""
+        if (tn === "bash" || tn === "shell") raw = args.command || args.cmd || ""
+        else if (tn === "agent_send" || tn === "agent_steer")
+          raw = "to: " + (args.agent || "?") + "\n\n" + (args.message || "")
+        else if (tn === "agent_spawn")
+          raw = "dir: " + (args.dir || "?") + (args.name ? "\nname: " + args.name : "")
+              + (args.profile ? "\nprofile: " + args.profile : "") + (args.detached ? "\ndetached: true" : "")
+              + (args.prompt ? "\n\nseed prompt:\n" + args.prompt : "")
+        _push(sid, { kind: "cmd", tool: tn, text: toolHint(tn, args), command: raw, id: m.toolCallId })
       }
     } else if (t === "auto_retry_start") {
       _setTransient(sid, "retry", "info",
