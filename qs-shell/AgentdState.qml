@@ -24,7 +24,14 @@ Item {
     var one = Quickshell.env("HEIDR_AGENTD_SOCK")
     return [one || (Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-" + root.scope + ".sock")]
   }
-  property var _rosters: ({})   // socket index -> its sessions[]
+  property var _rosters: ({})
+  property var _health: ({})      // socket index -> daemon health string ("" = ok)
+  property int healthGen: 0
+  function healthSummary() {
+    var out = []
+    for (var k in _health) if (_health[k]) out.push(_health[k])
+    return out.join(" · ")
+  }   // socket index -> its sessions[]
   property var _sockOf: ({})    // session name -> owning socket index (routing table)
   property var _socks: ({})     // socket index -> Socket object
 
@@ -560,6 +567,10 @@ Item {
     if (t === "roster") {
       var si = sockIdx || 0
       _rosters[si] = m.sessions || []
+      // Daemon-level health (boot self-check): "" = fine; anything else is a broken
+      // pi contract every session on that daemon shares — surface it, loudly.
+      var hh = _health
+      if (String(m.health || "") !== String(hh[si] || "")) { hh[si] = String(m.health || ""); _health = hh; healthGen++ }
       _noteReported(si)
       _rebuildSessions()
       return

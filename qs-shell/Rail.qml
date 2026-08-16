@@ -1243,6 +1243,29 @@ Item {
   // two panes read as distinct layers without a divider doing the work.
   Rectangle { anchors.fill: parent; color: Theme.bgDim; z: -1 }
 
+  // Daemon health banner (boot self-check failed): the whole scope is broken, not
+  // one session — pin it above everything so it can't be scrolled away or missed.
+  Rectangle {
+    readonly property string h: {
+      if (!rail.agentd) return ""
+      rail.agentd.healthGen
+      return rail.agentd.healthSummary()
+    }
+    visible: h.length > 0
+    anchors { left: parent.left; right: parent.right; top: parent.top }
+    height: visible ? healthText.implicitHeight + 16 : 0
+    color: Theme.red
+    z: 30
+    Text {
+      id: healthText
+      anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter; leftMargin: 14; rightMargin: 14 }
+      text: "⚠ " + parent.h
+      color: Theme.bg
+      font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+      wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight
+    }
+  }
+
   // Incremental feed model. `groupedFeed` is a fresh JS ARRAY every time stream data
   // lands, and ListView cannot diff arrays — assigning one destroys and rebuilds every
   // delegate (re-parsing all the markdown), which at the 120ms debounce cadence is the
