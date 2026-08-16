@@ -96,6 +96,11 @@ Item {
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
   signal editSeen(string sid, string path)
+  // What the session is DOING right now (last tool started this exchange) — feeds
+  // the working orb's action hue.
+  property var _curTool: ({})
+  property int curToolGen: 0
+  function curToolFor(sid) { return _curTool[sid] || "" }
   // Last file each session touched — so switching TO a mid-turn session can land
   // on the work instead of the dashboard.
   property var _lastEdit: ({})
@@ -605,6 +610,7 @@ Item {
     if (!sid) return
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
+    if (t === "agent_end") { var ct0 = _curTool; delete ct0[sid]; _curTool = ct0; curToolGen++ }
     // The whole turn is over (completed or aborted) → the next queued message goes out.
     if (t === "agent_end") root._flushQueue(sid)
     // A daemon bounce (undeliverable prompt, lineage refusal) was invisible — the send
@@ -637,6 +643,7 @@ Item {
     }
     if (t === "tool_execution_start") {
       const tn = m.toolName || ""
+      var ct = _curTool; ct[sid] = tn; _curTool = ct; curToolGen++
       const args = m.args || {}
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
