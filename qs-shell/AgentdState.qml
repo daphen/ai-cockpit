@@ -462,6 +462,7 @@ Item {
     var items = []
     for (var mi = 0; mi < msgs.length; mi++) {
       var msg = msgs[mi]
+      var isLast = (mi === msgs.length - 1)
       var _from = items.length
       if (msg.role === "user") {
         var uc = msg.content || [], ut = ""
@@ -477,7 +478,10 @@ Item {
         // it rendered as a bare "1 error" chip with nothing to read. Name it: a user
         // abort gets the interrupt grammar, anything else shows the provider's message.
         if (msg.stopReason === "aborted") {
-          items.push({ kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted (yours or a steer)" })
+          // An abort mid-conversation is how pi implements a STEER — the turn was
+          // redirected and work continued. Only a trailing abort is a real interrupt.
+          if (isLast) items.push({ kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted" })
+          else items.push({ kind: "cmd", tool: "info", text: "· redirected by your message (steer)" })
         } else if (msg.stopReason === "error" || msg.errorMessage) {
           var em = String(msg.errorMessage || "unknown error")
           items.push({ kind: "cmd", tool: "error",
