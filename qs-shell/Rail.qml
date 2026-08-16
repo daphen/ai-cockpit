@@ -620,6 +620,7 @@ Item {
       else if (it.kind === "cmd" && it.tool === "error") {
         // "1 error" says nothing. Name the interrupt; other errors count as words.
         if (String(it.text || "").indexOf("⏹") === 0) interrupts++
+        else if (String(it.text || "").indexOf("⚡") === 0) { counts["aborted externally"] = 1 }
         else errors++
       }
       else if (it.kind === "cmd" && it.tool === "info") continue   // markers, not activity

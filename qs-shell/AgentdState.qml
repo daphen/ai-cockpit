@@ -251,13 +251,15 @@ Item {
     if (t[sid] && t[sid][key]) { delete t[sid][key]; _transients = t }
   }
   property var _marks: ({})   // sid -> [text, …] (capped)
+  property var _myAbortAt: ({})   // sid -> ms of the last abort WE sent (attribution)
   function interrupt(sid) {
     if (!sid) return
     if (!send({ type: "abort", session: sid })) return
+    var ab = _myAbortAt; ab[sid] = Date.now(); _myAbortAt = ab
     delete _steerPending[sid]
     _clearPending(sid)
     var mk = _marks; var l = (mk[sid] = mk[sid] || [])
-    l.push({ text: "⏹ interrupted — turn aborted", at: Date.now() })
+    l.push({ text: "⏹ interrupted by you", at: Date.now() })
     if (l.length > 3) l.shift()
     _marks = mk
     _push(sid, { kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted" })
@@ -457,7 +459,7 @@ Item {
   // Reconstruct the active branch (leaf→root via parentId) into a flat feed.
   // Formatting only — takes the message tail (from here or from the worker) and builds
   // feed items. Cheap: it never sees more than CHAT_CAP messages.
-  function _msgsToFeed(msgs, toolErrs) {
+  function _msgsToFeed(msgs, toolErrs, sid) {
     toolErrs = toolErrs || {}
     var items = []
     for (var mi = 0; mi < msgs.length; mi++) {
@@ -478,10 +480,18 @@ Item {
         // it rendered as a bare "1 error" chip with nothing to read. Name it: a user
         // abort gets the interrupt grammar, anything else shows the provider's message.
         if (msg.stopReason === "aborted") {
-          // An abort mid-conversation is how pi implements a STEER — the turn was
-          // redirected and work continued. Only a trailing abort is a real interrupt.
-          if (isLast) items.push({ kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted" })
-          else items.push({ kind: "cmd", tool: "info", text: "· redirected by your message (steer)" })
+          // Three different events share stopReason "aborted":
+          //   mid-chain  → a steer redirected the turn and work continued (muted)
+          //   trailing + we sent an abort recently → YOU interrupted (red ⏹)
+          //   trailing, no abort of ours → something ELSE stopped it — another
+          //     client, the orchestrator, or the agent tripping its own keybinds
+          if (!isLast) {
+            items.push({ kind: "cmd", tool: "info", text: "· redirected mid-turn (steer)" })
+          } else if (sid && _myAbortAt[sid] && (Date.now() - _myAbortAt[sid]) < 600000) {
+            items.push({ kind: "cmd", tool: "error", text: "⏹ interrupted by you" })
+          } else {
+            items.push({ kind: "cmd", tool: "error", text: "⚡ aborted externally — another client or the agent itself stopped this turn" })
+          }
         } else if (msg.stopReason === "error" || msg.errorMessage) {
           var em = String(msg.errorMessage || "unknown error")
           items.push({ kind: "cmd", tool: "error",
@@ -501,6 +511,7 @@ Item {
     return _coalesce(items)
   }
 
+  property string _feedSid: ""
   function _entriesToFeed(entries, leafId) {
     var byid = {}
     for (var i = 0; i < entries.length; i++) if (entries[i].id) byid[entries[i].id] = entries[i]
@@ -533,7 +544,7 @@ Item {
       }
     }
     var CHAT_CAP = 60
-    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)), toolErrs)
+    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)), toolErrs, _feedSid)
     return _coalesce(items)
   }
 
@@ -682,6 +693,7 @@ Item {
     if (!m.data || !m.data.entries) return
     var esid = m.session
     if (!esid) return
+    _feedSid = esid
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
     // Interrupt markers are a BRIDGE, not history: pi records the aborted turn
     // itself (stopReason → the "⏹ interrupted" item), so once the rebuilt feed
