@@ -496,12 +496,32 @@ Item {
     pasteProc.running = true
   }
 
+  // A landing is only as fresh as the session's cwd: a re-homed/respawned session
+  // (stop + spawn at a new dir) otherwise kept the OLD landing forever — nvim sat
+  // on the previous dir's dashboard (or the lovable fallback) looking broken.
+  property string _landedFor: ""
+  Connections {
+    target: rail.agentd
+    function onSessionsChanged() {
+      if (!rail._landed || !rail.selectedRaw) return
+      for (var i = 0; i < rail.agentd.sessions.length; i++) {
+        var ss = rail.agentd.sessions[i]
+        if (ss.id === rail.selectedRaw) {
+          var key = ss.id + "@" + ss.cwd
+          if (rail._landedFor && rail._landedFor.indexOf(ss.id + "@") === 0 && rail._landedFor !== key)
+            rail.landNvim(ss.id)
+          return
+        }
+      }
+    }
+  }
   function landNvim(sid) {
     if (!sid || !agentd) return
     var cwd = ""
     for (var i = 0; i < agentd.sessions.length; i++)
       if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; break }
     if (!cwd) return
+    _landedFor = sid + "@" + cwd
     cwd = rail._localPath(cwd)   // box path → local mutagen mirror (no-op for local sessions)
     // Plan location depends on where the session lives: local work uses the vault,
     // a lovbox session has no vault so plan-ticket writes <worktree>/.plans/.
