@@ -2276,12 +2276,16 @@ Item {
             radius: 10
             color: Theme.surface0
             border.color: rail.insert ? rail.activeRing : Theme.hairline
-            border.width: 1
+            border.width: 2
             Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
             RowLayout {
               anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
               spacing: 8
-              Icon { name: "chevron-right"; width: 14; height: 14; color: Theme.electric }
+              Icon {
+                name: "chevron-right"; width: 14; height: 14
+                color: rail.insert ? rail.activeRing : Theme.hairline
+                Behavior on color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+              }
               TextInput {
                 id: newInput
                 Layout.fillWidth: true
@@ -2318,13 +2322,17 @@ Item {
         radius: Math.min(height / 2, 26)   // pill at one line, rounded card when grown
         color: Theme.surface0
         border.color: rail.insert ? rail.activeRing : Theme.hairline
-        border.width: 1
+        border.width: 2
         Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
         RowLayout {
           anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
           spacing: 8
           Icon {
-            name: "chevron-right"; width: 14; height: 14; color: Theme.electric
+            name: "chevron-right"; width: 14; height: 14
+            // Rides the outline exactly (same hue, same glide) so prompt + frame
+            // read as one piece of chrome.
+            color: rail.insert ? rail.activeRing : Theme.hairline
+            Behavior on color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
             // Centered on the FIRST text line, derived from the real line height
             // (cursorRectangle) instead of a hand-tuned constant — the guess drifted
             // off-center the moment the TextArea's metrics differed from TextInput's.
