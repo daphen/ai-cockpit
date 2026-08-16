@@ -104,9 +104,12 @@ Item {
       ctx.beginPath(); ctx.arc(cx, cy, discR, 0, 2 * Math.PI)
       ctx.fillStyle = grad; ctx.fill()
       ctx.lineWidth = ring
-      // Ring ink follows the theme: white on dark ground, near-black on light —
-      // a white ring on a light surface is an invisible border.
-      ctx.strokeStyle = Theme.mode === "light" ? "#1F1F1F" : "#FFFFFF"
+      // The ring belongs to the duotone, not to black/white: the highlight hue,
+      // brightened — it frames without introducing a foreign color. Light mode
+      // deepens it instead so the badge still cuts against a pale ground.
+      ctx.strokeStyle = Theme.mode === "light"
+        ? Qt.hsla((hu + 0.09) % 1, 0.75, 0.30, 1)
+        : Qt.hsla((hu + 0.09) % 1, 0.85, 0.74, 1)
       ctx.beginPath(); ctx.arc(cx, cy, discR, 0, 2 * Math.PI); ctx.stroke()
 
       var R = (Math.min(w, h) / 2 - ring * 1.6) / 1.2
