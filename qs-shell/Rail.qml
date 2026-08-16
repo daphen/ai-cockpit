@@ -749,8 +749,8 @@ Item {
   readonly property color activeRing: {
     var g = actionGlow(selectedRaw)
     var h = g.hslHue < 0 ? 0 : g.hslHue
-    var s2 = Math.max(0.85, g.hslSaturation)
-    return Qt.hsla(h, s2, Theme.mode === "light" ? 0.34 : 0.70, 1)
+    var s2 = Math.min(1, Math.max(0.75, g.hslSaturation)) * 0.85
+    return Qt.hsla(h, s2, Theme.mode === "light" ? 0.34 : 0.82, 1)
   }
   function dotColor(st) {
     if (st === "streaming") return Theme.green
