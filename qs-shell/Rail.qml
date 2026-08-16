@@ -1765,6 +1765,8 @@ Item {
       Item {
         id: rosterCard
         Layout.fillWidth: true
+        // Always clip: without it, collapsing rows slide over the composer during
+        // the toggle animation. The orb fits because the glance sizes to content.
         clip: true
         // The ONE geometry animation. The sheet has no Behavior of its own — its
         // height binding follows this frame-by-frame, so container and content can
@@ -1777,11 +1779,14 @@ Item {
         Item {
           id: glanceCol
           anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
-          implicitHeight: 32
+          // Tall enough for whatever sits in the name row (the working orb is 44px) —
+          // a fixed 32 clipped the orb against the sheet's edges.
+          implicitHeight: Math.max(32, glanceName.implicitHeight + 4)
           opacity: rail.rosterExpanded ? 0 : 1
           visible: opacity > 0.01
           Behavior on opacity { NumberAnimation { duration: 220 } }
           Row {
+            id: glanceName
             anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 9
             Text {
@@ -1795,7 +1800,7 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               // The one "thinking" signifier since the floating pill left — big
               // enough to read from the corner of the eye.
-              width: 30; height: 30
+              width: 44; height: 44
               visible: rail.featuredStreaming
               running: rail.featuredStreaming
               nodes: 16

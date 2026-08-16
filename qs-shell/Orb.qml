@@ -68,7 +68,33 @@ Item {
       // dot reaches R*0.20 past that, so the inset has to be that dot radius, not a
       // fixed 1.5px. At small sizes the flat inset was most of the difference — a 16px
       // box drew a ~13px sphere, so making the box bigger barely showed.
-      var R = Math.min(w, h) / 2 / 1.2
+      // Badge chrome: an animated gradient disc behind the mesh, ringed in white.
+      // The gradient's axis rides the same wall-clock phase as the sphere, so the
+      // light appears to orbit with it. The mesh insets inside the ring.
+      var ring = Math.max(1.5, Math.min(w, h) * 0.09)
+      var discR = Math.min(w, h) / 2 - ring / 2 - 1   // 1px in from the item edge (AA headroom)
+      var g0 = orb.glow
+      // Lit-sphere shading: a radial gradient whose HIGHLIGHT orbits with the
+      // phase — offset bright core → saturated glow mid → near-black rim. Big
+      // luminance range is what makes it read as a gradient at 20px.
+      // The highlight's own full-period clock: any (t%P)/P*2pi phase is continuous
+      // at the wrap — rot*0.7 wrapped mid-angle and snapped every 7 seconds.
+      var gphase = (Date.now() % 11000) / 11000 * 2 * Math.PI
+      var gx = Math.cos(gphase), gy = Math.sin(gphase)
+      var hx = cx + gx * discR * 0.45, hy = cy + gy * discR * 0.45
+      var grad = ctx.createRadialGradient(hx, hy, discR * 0.05, cx, cy, discR * 1.25)
+      grad.addColorStop(0.0, Qt.rgba(Math.min(1, g0.r * 0.6 + 0.5), Math.min(1, g0.g * 0.6 + 0.5), Math.min(1, g0.b * 0.6 + 0.5), 1))
+      grad.addColorStop(0.35, Qt.rgba(g0.r, g0.g, g0.b, 1))
+      grad.addColorStop(1.0, Qt.rgba(g0.r * 0.12, g0.g * 0.12, g0.b * 0.20, 1))
+      ctx.beginPath(); ctx.arc(cx, cy, discR, 0, 2 * Math.PI)
+      ctx.fillStyle = grad; ctx.fill()
+      ctx.lineWidth = ring
+      // Ring ink follows the theme: white on dark ground, near-black on light —
+      // a white ring on a light surface is an invisible border.
+      ctx.strokeStyle = Theme.mode === "light" ? "#1F1F1F" : "#FFFFFF"
+      ctx.beginPath(); ctx.arc(cx, cy, discR, 0, 2 * Math.PI); ctx.stroke()
+
+      var R = (Math.min(w, h) / 2 - ring * 1.6) / 1.2
       var ca = Math.cos(orb.rot), sa = Math.sin(orb.rot)
       var tilt = 0.45, ct = Math.cos(tilt), st = Math.sin(tilt)
       var proj = []
@@ -89,14 +115,14 @@ Item {
           var reach = R * (orb._pts.length > 16 ? 0.72 : 0.95)
           if (dx * dx + dy * dy < reach * reach) {
             var d = (proj[e][2] + proj[f][2]) / 2
-            ctx.strokeStyle = Qt.rgba(g.r, g.g, g.b, 0.10 + (d + 1) / 2 * 0.30)
+            ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.14 + (d + 1) / 2 * 0.38)
             ctx.lineWidth = Math.max(0.5, R * 0.07)
             ctx.beginPath(); ctx.moveTo(proj[e][0], proj[e][1]); ctx.lineTo(proj[f][0], proj[f][1]); ctx.stroke()
           }
         }
       for (var j = 0; j < proj.length; j++) {
         var dd = proj[j][2]
-        ctx.fillStyle = Qt.rgba(g.r, g.g, g.b, 0.35 + (dd + 1) / 2 * 0.6)
+        ctx.fillStyle = Qt.rgba(1, 1, 1, 0.45 + (dd + 1) / 2 * 0.55)
         // Radius as a FRACTION of R, not absolute px — 2px dots on a 5px radius are
         // what made the small orb read as filled.
         var rr = R * (0.10 + (dd + 1) / 2 * 0.10)
