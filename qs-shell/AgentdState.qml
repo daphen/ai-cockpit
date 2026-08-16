@@ -643,8 +643,16 @@ Item {
     }
     if (t === "tool_execution_start") {
       const tn = m.toolName || ""
-      var ct = _curTool; ct[sid] = tn; _curTool = ct; curToolGen++
       const args = m.args || {}
+      // Agents write plenty of code THROUGH bash (inline heredoc scripts, sed -i,
+      // tee, redirects into files). Those read as editing, not running -- without
+      // this the orb sat orange through entire coding sessions.
+      var act = tn
+      if (tn === "bash" || tn === "shell") {
+        const cmd = String(args.command || args.cmd || "")
+        if (/(<<-?\s*'?[A-Z]{2,})|(\bsed\s+-i)|(\btee\s)|(>>?\s*['"]?[\w~.\/-]+\.[A-Za-z]{1,4})/.test(cmd)) act = "bash-write"
+      }
+      var ct = _curTool; ct[sid] = act; _curTool = ct; curToolGen++
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
                      add: 0, del: 0, id: m.toolCallId })
