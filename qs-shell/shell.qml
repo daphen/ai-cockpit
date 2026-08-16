@@ -96,6 +96,7 @@ ShellRoot {
       // Rendered prose of the focused feed row — what the user actually SEES,
       // after the badge/hint/colorize pipeline (test probe).
       function railProse(): string { return rail.probeProse() }
+      function termGeom(): string { return term.gridInfo }
       // Last N feed rows of the selected session, raw (test probe).
       function railTail(): string {
         var f = rail.agentd ? (rail.agentd.feeds[rail.selectedRaw] || []) : []

@@ -41,10 +41,18 @@ public:
   // actually at 1.75, which silently defeated the snapping and left every frame
   // resampling.
   Q_PROPERTY(qreal dpr READ dpr NOTIFY dprChanged)
+  // Grid geometry probe (debug/IPC): what the terminal believes about its layout.
+  Q_PROPERTY(QString gridInfo READ gridInfo NOTIFY dprChanged)
   // The nvim RPC socket THIS instance's nvim listens on. Per-instance, so the rail
   // never talks to a path a different heidr may have unlinked.
   Q_PROPERTY(QString nvimSocket READ nvimSocket CONSTANT)
   qreal dpr() const { return guiDpr_ > 0 ? guiDpr_ : 1.0; }
+  QString gridInfo() const {
+    return QString("cols=%1 rows=%2 cellW=%3 cellH=%4 padT=%5 padB=%6 itemH=%7 dpr=%8 slack=%9")
+      .arg(cols_).arg(rows_).arg(cellW_).arg(cellH_).arg(padT_).arg(padB_)
+      .arg(height()).arg(guiDpr_ > 0 ? guiDpr_ : 1.0)
+      .arg(height() - rows_ * cellH_ - padT_ - padB_);
+  }
   QString nvimSocket() const { return nvimSocket_; }
 
   // false when focus is in the rail → hide the terminal cursor.
