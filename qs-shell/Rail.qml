@@ -1486,6 +1486,12 @@ Item {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
         out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, key: it.mid || ("i" + i) })
+      } else if (it.kind === "sys") {
+        // Housekeeping (compaction) gets its OWN card so it never colors the
+        // neighboring turn's errors.
+        if (cur) { out.push(cur); cur = null; acts = 0 }
+        chunked = false
+        out.push({ kind: "turn", items: [it], key: it.mid || ("i" + i) })
       } else {
         if (!cur) { cur = { kind: "turn", items: [], key: it.mid || ("i" + i), contFrom: chunked }; acts = 0 }
         cur.items.push(it)

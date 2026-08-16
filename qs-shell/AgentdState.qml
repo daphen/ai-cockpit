@@ -489,7 +489,10 @@ Item {
         ut = _foldSlashBody(ut)
         if (ut) items.push({ kind: "user", text: ut, steered: prevAborted })
       } else if (msg._compaction) {
-        items.push({ kind: "cmd", tool: "info", text: "· context compacted" })
+        // sys, not cmd: compaction is housekeeping between turns — inlining it in
+        // the following turn's card made its neighbors ("output truncated") read
+        // as compaction failures.
+        items.push({ kind: "sys", tool: "info", text: "· context compacted" })
       } else {
         _expandAssistant(msg.content, items, toolErrs)
         // A failed assistant turn carries its reason on the MESSAGE, not the content —
@@ -516,7 +519,7 @@ Item {
         } else if (msg.stopReason === "length") {
           // The reply hit the output cap: pi/Claude Code warn; silence read as a
           // complete answer that just… ended.
-          items.push({ kind: "cmd", tool: "error", text: "⚠ output truncated — hit the max-tokens limit" })
+          items.push({ kind: "cmd", tool: "error", text: "⚠ response hit its output cap and was cut off — send “continue” to resume" })
         }
       }
       for (var ti = _from; ti < items.length; ti++)
