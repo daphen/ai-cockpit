@@ -303,6 +303,12 @@ done
 check "outcomes persist across rebuilds" "$found" "2"
 check "retry status was replaced by its outcome" "$(case "$tail" in *"retrying (1/3)"*) echo 1;; *) echo 0;; esac)" "0"
 
+say "17. a background session's ask is globally visible"
+key g; key enter; sleep 2                 # select alpha-1000 (NOT the ask target)
+fake ask 1                                # live ask lands on every-9001
+check "ask counted while another session selected" "$(field "$(st)" asksTotal)" "1"
+check "selected session's chin NOT hijacked" "$(field "$(st)" ask)" "False"
+
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
 check "error lines" "$errs" "0"

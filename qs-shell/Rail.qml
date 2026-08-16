@@ -1783,6 +1783,10 @@ Item {
               readonly property bool cursor: rail.focused && !rail.insert && rail.cur === index
               readonly property bool selected: (modelData.rawName || modelData.name) === rail.selectedRaw
               readonly property bool streaming: modelData.status === "streaming"
+            readonly property bool hasAsk: {
+              rail.agentd ? rail.agentd.askGen : 0
+              return rail.agentd ? rail.agentd.askFor(modelData.rawName || modelData.name) !== null : false
+            }
               color: cursor ? Theme.fg
                    : selected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
                    : hov.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.04) : "transparent"
@@ -1867,8 +1871,21 @@ Item {
                   }
                 }
                 Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
+                // needs-input beacon: the one roster state that outranks everything.
+                Rectangle {
+                  visible: sessRow.hasAsk
+                  implicitWidth: askCap.implicitWidth + 14
+                  implicitHeight: 20; radius: 10
+                  color: Theme.orange
+                  Layout.alignment: Qt.AlignVCenter
+                  Text {
+                    id: askCap; anchors.centerIn: parent
+                    text: "needs input"
+                    color: Theme.bg; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 2; font.bold: true
+                  }
+                }
                 Text {
-                  text: modelData.state || modelData.idle || ""
+                  text: sessRow.hasAsk ? "" : (modelData.state || modelData.idle || "")
                   // Sub-agents (linked rows) carry no status word at all — the orb says
                   // "working", and an idle watcher needs no label to say it's waiting.
                   visible: !modelData.linked

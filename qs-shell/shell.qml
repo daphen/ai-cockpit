@@ -87,6 +87,7 @@ ShellRoot {
                                 ins: rail.insert, ask: !!rail.pendingAsk, stale: !!rail.staleAsk,
                                 q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
                                 hint: rail.hinting, yank: rail.yankMode, labels: rail.hintLabels.length,
+                                asksTotal: rail.agentd ? (rail.agentd.askGen >= 0 ? rail.agentd.askCount() : 0) : 0,
                                 keys: rail.keyLog, lastCancel: rail.lastCancel,
                                 pCards: rail.probeCardCreates, pDots: rail.probeDotCreates, pResets: rail.probeFullResets, pActs: rail.probeActCreates, im: rail.imode,
                                 row: rail.curRowText() })

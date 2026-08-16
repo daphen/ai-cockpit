@@ -99,6 +99,11 @@ Item {
 
   property var asks: ({})
   property int askGen: 0
+  // A session stopped on a question — fired once per ask id, so the UI can badge
+  // the roster and raise a desktop notification for NON-selected sessions (a
+  // blocked background worker read as "working" for as long as nobody looked).
+  signal askRaised(string sid, string title)
+  function askCount() { var n = 0; for (var k in asks) n++; return n }
   function askFor(sid) { return asks[sid] || null }
   function answerAsk(sid, payload) {
     var a = asks[sid]; if (!a) return
@@ -597,7 +602,9 @@ Item {
     if (t === "extension_ui_request") {
       var mm = m.method
       if (mm === "confirm" || mm === "select" || mm === "input" || mm === "editor") {
+        var isNew = !asks[sid] || asks[sid].id !== m.id
         var na = asks; na[sid] = m; asks = na; askGen++
+        if (isNew) askRaised(sid, String(m.title || m.message || "needs your input"))
       }
       // notify / setStatus / setWidget etc. are UI directives, not questions.
       return
