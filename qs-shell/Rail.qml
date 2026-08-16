@@ -1846,16 +1846,31 @@ Item {
               Item {
                 readonly property var md: model.d
                 readonly property bool self: (md.rawName || md.name) === rail.selectedRaw
+                // needs-input outranks status here too: without it a collapsed
+                // roster hid a parked ask behind an ordinary green spinner.
+                readonly property bool hasAsk: {
+                  rail.agentd ? rail.agentd.askGen : 0
+                  return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
+                }
                 visible: !self
                 width: 12; height: 12
                 Component.onCompleted: rail.probeDotCreates++
                 Spinner {
-                  anchors.centerIn: parent; visible: parent.visible && md.status === "streaming"
+                  anchors.centerIn: parent; visible: parent.visible && !parent.hasAsk && md.status === "streaming"
                   running: visible; color: Theme.green; dotSize: 2.0
                 }
                 Rectangle {
-                  anchors.centerIn: parent; visible: parent.visible && md.status !== "streaming"
+                  anchors.centerIn: parent; visible: parent.visible && !parent.hasAsk && md.status !== "streaming"
                   width: 7; height: 7; radius: 3.5; color: rail.dotColor(md.status)
+                }
+                Rectangle {
+                  anchors.centerIn: parent; visible: parent.visible && parent.hasAsk
+                  width: 9; height: 9; radius: 4.5; color: Theme.orange
+                  SequentialAnimation on opacity {
+                    running: visible; loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                  }
                 }
               }
             }
