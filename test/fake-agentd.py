@@ -188,6 +188,22 @@ def driver():
                 broadcast({"type": "tool_execution_start", "session": "every-9001",
                            "toolName": "bash", "toolCallId": f"tc-{state['tooln']}",
                            "args": {"command": f"echo live-tool-{state['tooln']} && sleep 1"}})
+            elif c == "retry":
+                broadcast({"type": "auto_retry_start", "session": "every-9001",
+                           "attempt": 1, "maxAttempts": 3, "errorMessage": "529 overloaded_error: Overloaded"})
+            elif c == "retry_fail":
+                broadcast({"type": "auto_retry_end", "session": "every-9001",
+                           "success": False, "attempt": 3, "finalError": "529 overloaded"})
+            elif c == "compacting":
+                broadcast({"type": "compaction_start", "session": "every-9001"})
+                broadcast({"type": "compaction_end", "session": "every-9001"})
+            elif c == "toolfail":
+                state.setdefault("tooln", 0); state["tooln"] += 1
+                tc = f"tf-{state['tooln']}"
+                broadcast({"type": "tool_execution_start", "session": "every-9001",
+                           "toolName": "bash", "toolCallId": tc, "args": {"command": "false"}})
+                broadcast({"type": "tool_execution_end", "session": "every-9001",
+                           "toolCallId": tc, "result": {"isError": True}})
             elif c == "grow":
                 state["extra_turns"] += 2
                 # Both frames, in pi's order. message_delta ALONE is what the fake used to

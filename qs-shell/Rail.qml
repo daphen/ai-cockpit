@@ -580,6 +580,8 @@ Item {
         if (String(it.text || "").indexOf("⏹") === 0) interrupts++
         else errors++
       }
+      else if (it.kind === "cmd" && it.tool === "info") continue   // markers, not activity
+      else if (it.kind === "cmd" && it.failed === true) { counts[it.tool] = (counts[it.tool] || 0) + 1; errors++ }
       else if (it.kind === "group") counts[it.tool] = (counts[it.tool] || 0) + (it.cmds ? it.cmds.length : 1)
       else if (it.kind === "cmd") counts[it.tool] = (counts[it.tool] || 0) + 1
     }
@@ -674,6 +676,7 @@ Item {
     return Theme.fg_muted
   }
   function toolIcon(tool) {
+    if (tool === "info") return "circle-info"
     if (tool === "mcp") return "puzzle-piece"
     if (tool === "grep" || tool === "ripgrep" || tool === "search_files"
         || tool === "glob" || tool === "find") return "magnifier"
@@ -2444,7 +2447,9 @@ Item {
       width: parent ? parent.width : 400
       spacing: 6
       // Errors are the one row you must be able to READ: full text, wrapped, red.
+      // A failed tool call is an error OUTCOME on a normal row — same red, one line.
       readonly property bool isErr: entry.tool === "error"
+      readonly property bool isFailed: entry.failed === true
       // Bash rows carry the raw command — tap toggles it open underneath.
       readonly property bool canExpand: !isErr && String(entry.command || "").length > 0
       readonly property bool open: canExpand && typeof gkey !== "undefined" && rail.expandedGroups[gkey] === true
@@ -2453,13 +2458,13 @@ Item {
         spacing: 8
         Icon {
           name: rail.toolIcon(entry.tool); width: 13; height: 13
-          color: cmdCol.isErr ? Theme.red : Theme.fg_muted
+          color: (cmdCol.isErr || cmdCol.isFailed) ? Theme.red : Theme.fg_muted
           Layout.alignment: Qt.AlignTop
           Layout.topMargin: Math.max(0, Math.round(rail.fsBody * 1.3 - 13) / 2)
         }
         Text {
-          text: entry.text
-          color: cmdCol.isErr ? Theme.red : Theme.fg_secondary
+          text: entry.text + (cmdCol.isFailed ? "  — failed" : "")
+          color: cmdCol.isErr ? Theme.red : (cmdCol.isFailed ? Theme.red : Theme.fg_secondary)
           font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
           wrapMode: cmdCol.isErr ? Text.WordWrap : Text.NoWrap
           elide: cmdCol.isErr ? Text.ElideNone : Text.ElideRight

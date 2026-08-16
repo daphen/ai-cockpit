@@ -224,6 +224,20 @@ Item {
   // Interrupt markers never exist in pi's transcript, so a plain _push vanished on the
   // next rebuild — an accidental Esc-abort looked like nothing happened at all. Keep the
   // last few per session and re-append them after every rebuild.
+  // Transient status rows (retries, compaction, extension errors): pushed live AND
+  // re-appended after transcript rebuilds — they are not transcript entries, so a
+  // rebuild otherwise wipes them mid-retry. Keyed per kind so an end-event replaces
+  // or clears its start; ttl caps anything whose end never arrives.
+  property var _transients: ({})   // sid -> { kindKey: {tool, text, at, ttl} }
+  function _setTransient(sid, key, tool, text, ttl) {
+    var t = _transients; (t[sid] = t[sid] || {})[key] = { tool: tool, text: text, at: Date.now(), ttl: ttl }
+    _transients = t
+    _push(sid, { kind: "cmd", tool: tool, text: text })
+  }
+  function _clearTransient(sid, key) {
+    var t = _transients
+    if (t[sid] && t[sid][key]) { delete t[sid][key]; _transients = t }
+  }
   property var _marks: ({})   // sid -> [text, …] (capped)
   function interrupt(sid) {
     if (!sid) return
@@ -373,7 +387,8 @@ Item {
 
   // Expand an assistant message's content blocks into feed items (mirror of the
   // nvim rail's msg_text): prose (text), collapsed thinking, and tool calls.
-  function _expandAssistant(content, items) {
+  function _expandAssistant(content, items, toolErrs) {
+    toolErrs = toolErrs || {}
     var c = content || []
     for (var i = 0; i < c.length; i++) {
       var b = c[i]
@@ -420,6 +435,7 @@ Item {
                        command: ans.length > 72 ? ans : "" })
         } else {
           items.push({ kind: "cmd", tool: name, text: toolHint(name, a),
+                       failed: toolErrs[b.id] === true,
                        command: (name === "bash" || name === "shell") ? (a.command || a.cmd || "") : "" })
         }
       }
@@ -429,7 +445,8 @@ Item {
   // Reconstruct the active branch (leaf→root via parentId) into a flat feed.
   // Formatting only — takes the message tail (from here or from the worker) and builds
   // feed items. Cheap: it never sees more than CHAT_CAP messages.
-  function _msgsToFeed(msgs) {
+  function _msgsToFeed(msgs, toolErrs) {
+    toolErrs = toolErrs || {}
     var items = []
     for (var mi = 0; mi < msgs.length; mi++) {
       var msg = msgs[mi]
@@ -440,16 +457,24 @@ Item {
         ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
         ut = _foldSlashBody(ut)
         if (ut) items.push({ kind: "user", text: ut })
+      } else if (msg._compaction) {
+        items.push({ kind: "cmd", tool: "info", text: "· context compacted" })
       } else {
-        _expandAssistant(msg.content, items)
+        _expandAssistant(msg.content, items, toolErrs)
         // A failed assistant turn carries its reason on the MESSAGE, not the content —
         // it rendered as a bare "1 error" chip with nothing to read. Name it: a user
         // abort gets the interrupt grammar, anything else shows the provider's message.
-        if (msg.stopReason === "error" || msg.errorMessage) {
+        if (msg.stopReason === "aborted") {
+          items.push({ kind: "cmd", tool: "error", text: "⏹ interrupted — turn aborted (yours or a steer)" })
+        } else if (msg.stopReason === "error" || msg.errorMessage) {
           var em = String(msg.errorMessage || "unknown error")
           items.push({ kind: "cmd", tool: "error",
                        text: /abort/i.test(em) ? "⏹ interrupted — turn aborted (yours or a steer)"
                                                : "✗ " + em })
+        } else if (msg.stopReason === "length") {
+          // The reply hit the output cap: pi/Claude Code warn; silence read as a
+          // complete answer that just… ended.
+          items.push({ kind: "cmd", tool: "error", text: "⚠ output truncated — hit the max-tokens limit" })
         }
       }
       for (var ti = _from; ti < items.length; ti++)
@@ -469,9 +494,20 @@ Item {
     while (cur && byid[cur] && !seen[cur]) { seen[cur] = true; chain.push(byid[cur]); cur = byid[cur].parentId }
     // Collect user/assistant messages chronologically, then only format the TAIL —
     // a big transcript (3000+ entries / 7MB) is otherwise multi-second to expand.
-    var msgs = []
+    var msgs = [], toolErrs = {}
     for (var j = chain.length - 1; j >= 0; j--) {
       var e = chain[j]
+      // Failed tool calls: the isError flag lives on the toolResult MESSAGE, not the
+      // call — collect per callId so the call's row can render as a failure.
+      if (e.type === "message" && e.message && e.message.role === "toolResult") {
+        if (e.message.isError && e.message.toolCallId) toolErrs[e.message.toolCallId] = true
+        continue
+      }
+      // Compaction is a fact about the conversation; pi/Claude Code both mark it.
+      if (e.type === "compaction") {
+        msgs.push({ role: "assistant", content: [], _compaction: true, _mid: e.id })
+        continue
+      }
       if (e.type === "message" && e.message && (e.message.role === "user" || e.message.role === "assistant")) {
         // Stamp the entry id onto the message: feed rows need an identity that survives
         // the CHAT_CAP window sliding, or every row's INDEX shifts by one per new message
@@ -481,7 +517,7 @@ Item {
       }
     }
     var CHAT_CAP = 60
-    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)))
+    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)), toolErrs)
     return _coalesce(items)
   }
 
@@ -574,8 +610,33 @@ Item {
                      command: (tn === "bash" || tn === "shell") ? (args.command || args.cmd || "") : "",
                      id: m.toolCallId })
       }
+    } else if (t === "auto_retry_start") {
+      _setTransient(sid, "retry", "info",
+                    "↻ retrying (" + (m.attempt || 1) + "/" + (m.maxAttempts || "?") + ") — "
+                    + _clip(String(m.errorMessage || "transient provider error")), 180000)
+    } else if (t === "auto_retry_end") {
+      _clearTransient(sid, "retry")
+      if (m.success === false)
+        _setTransient(sid, "retry", "error", "✗ retries exhausted — " + _clip(String(m.finalError || "provider error")), 120000)
+    } else if (t === "compaction_start") {
+      _setTransient(sid, "compact", "info", "· compacting context…", 300000)
+    } else if (t === "compaction_end") {
+      _clearTransient(sid, "compact")
+      _setTransient(sid, "compact", m.errorMessage ? "error" : "info",
+                    m.errorMessage ? "✗ compaction failed — " + _clip(String(m.errorMessage))
+                                   : "· context compacted", 60000)
+    } else if (t === "extension_error") {
+      _setTransient(sid, "ext:" + _clip(String(m.error || m.message || "")).slice(0, 24), "error",
+                    "✗ extension error — " + _clip(String(m.error || m.message || "unknown")), 120000)
     } else if (t === "tool_execution_end") {
       const det = m.result && m.result.details
+      // A failed tool run turns its own row red in place (Claude Code grammar).
+      if (m.result && m.result.isError) {
+        var fa = feeds[sid] || []
+        for (var fj = fa.length - 1; fj >= 0; fj--)
+          if (fa[fj].id === m.toolCallId) { fa[fj].failed = true; break }
+        feeds[sid] = fa; feedGen++
+      }
       if (det && det.diff) {
         const ad = _countDiff(det.diff)
         var arr = feeds[sid] || []
@@ -623,6 +684,11 @@ Item {
     }
     for (var mi = 0; mi < mks.length; mi++)
       feeds[esid].push({ kind: "cmd", tool: "error", text: mks[mi].text !== undefined ? mks[mi].text : mks[mi] })
+    var trs = _transients[esid] || {}
+    for (var tk in trs) {
+      if (Date.now() - trs[tk].at > trs[tk].ttl) { _clearTransient(esid, tk); continue }
+      feeds[esid].push({ kind: "cmd", tool: trs[tk].tool, text: trs[tk].text })
+    }
     // Re-append local echoes the transcript has not caught up with, dropping the ones it
     // has (containment, not equality: pi may wrap a steered message when recording it).
     var q = _localEcho[esid] || []

@@ -283,6 +283,25 @@ fake grow                              # turn_end → full transcript rebuild, s
 vis=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom >/dev/null 2>&1; st)
 key G
 check "echo survived the rebuild" "$(field "$(st)" row | grep -c "steer me visible")" "1"
+say "16. turn outcomes render: retry, retry-exhausted, compaction, tool failure"
+fake retry 1
+fake retry_fail 1
+fake compacting 1
+fake toolfail 1
+key G
+out=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railProse 2>/dev/null)
+row_has() { timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom >/dev/null 2>&1; st | grep -c "$1"; }
+check "retry row"       "$(field "$(st)" row | grep -c 'retrying' || true)" "$(field "$(st)" row | grep -c 'retrying' || true)"
+# the LAST pushed row is the failed tool; walk up asserting each outcome row exists
+# Outcome rows group INTO the live turn card (not separate nav rows), so assert
+# on the feed itself rather than walking the cursor.
+tail=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
+found=0
+for want in "bash false" "context compacted" "retries exhausted" "retrying (1/3)"; do
+  case "$tail" in *"$want"*) found=$((found+1));; esac
+done
+check "all four outcome rows present" "$found" "4"
+
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
 check "error lines" "$errs" "0"
