@@ -918,6 +918,7 @@ Item {
   // you had actually scrolled away from the live edge. Switching back restores it; a session
   // you were following (or have never opened) still lands on its newest message.
   property var _seenAt: ({})
+  property var _viewFor: ({})   // sid -> "chat" | "files": the panel you left it on
   property string _prevSelected: ""
   property bool _restoring: false
 
@@ -928,8 +929,11 @@ Item {
       if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
       else delete m[_prevSelected]          // was following → follow again next time
       _seenAt = m
+      var vw = _viewFor; vw[_prevSelected] = view; _viewFor = vw
     }
     _prevSelected = selectedRaw
+    // Restore the panel (chat/files) this session was last viewed on.
+    view = _viewFor[selectedRaw] || "chat"
     _feedReset = true
     // Report the rebuild, don't just do it: synced() is what consumes a pending jump, and
     // it was only ever reached from the stream debounce. Switching to an IDLE session on a
