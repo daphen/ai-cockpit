@@ -2060,9 +2060,18 @@ Item {
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
           Text {
-            readonly property int qn: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0
-            text: qn + " queued — sends when the turn ends: “"
+            // queuedGen is the invalidation signal: `queued` is mutated in place, so
+            // without touching the gen these bindings froze at their first value
+            // (the pill appeared but said "0 queued: ''").
+            readonly property int qn: {
+              rail.agentd ? rail.agentd.queuedGen : 0
+              return rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0
+            }
+            text: {
+              rail.agentd ? rail.agentd.queuedGen : 0
+              return qn + " queued — sends when the turn ends: “"
                   + (rail.agentd ? rail.agentd.queuedFirst(rail.selectedRaw) : "").slice(0, 60) + "”"
+            }
             color: Theme.fg_muted
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             elide: Text.ElideRight
