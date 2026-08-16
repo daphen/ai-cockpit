@@ -850,7 +850,15 @@ Item {
   // remote → `vm-wt <ticket>`, which also makes the worktree + devenv slice + mirror
   property bool newOpen: false
   property string newMode: ""      // "" = choosing, then "local" | "remote"
-  function openNew()  { newOpen = true; newMode = ""; requestFocus() }
+  // Remote (VM worktree) sessions are a LOVABLE concept — the personal scope has no
+  // VM, so its new-session flow skips the l/r chooser and goes straight to local.
+  readonly property bool remoteOffered: Quickshell.env("HEIDR_SCOPE") === "lovable"
+  function openNew()  {
+    newOpen = true
+    newMode = remoteOffered ? "" : "local"
+    requestFocus()
+    if (!remoteOffered) Qt.callLater(rail.enterInsert)
+  }
   function closeNew() { newOpen = false; newMode = ""; exitInsert() }
   function createSession(name) {
     var n = String(name || "").trim()
@@ -1103,7 +1111,7 @@ Item {
     if (e.key === Qt.Key_Escape) { closeNew(); return true }
     if (newMode === "") {
       if (e.key === Qt.Key_L) { newMode = "local";  Qt.callLater(rail.enterInsert); return true }
-      if (e.key === Qt.Key_R) { newMode = "remote"; Qt.callLater(rail.enterInsert); return true }
+      if (e.key === Qt.Key_R && remoteOffered) { newMode = "remote"; Qt.callLater(rail.enterInsert); return true }
       return true
     }
     return false
@@ -2160,7 +2168,8 @@ Item {
             Row { spacing: 8; KeyCap { text: "l"; anchors.verticalCenter: parent.verticalCenter }
               Text { text: "local — a session here"; color: Theme.fg
                      font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
-            Row { spacing: 8; KeyCap { text: "r"; anchors.verticalCenter: parent.verticalCenter }
+            Row { visible: rail.remoteOffered
+              spacing: 8; KeyCap { text: "r"; anchors.verticalCenter: parent.verticalCenter }
               Text { text: "remote — worktree on the VM"; color: Theme.fg
                      font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
           }
