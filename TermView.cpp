@@ -102,12 +102,13 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   {
     const QByteArray rt = qgetenv("XDG_RUNTIME_DIR");
     const QString base = rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt);
-    // Candidates in preference order: the stable name, then pid-keyed, then pid-N. The
-    // pid alone is NOT collision-free: a QML hot-reload recreates this item inside the
-    // SAME process, and the replacement's nvim raced the dying one on an identical
-    // pid-keyed path — "--listen: address already in use", pane dead at a shell. Probe
-    // each candidate and take the first nobody answers on (a stale FILE is fine: nvim
-    // unlinks those itself; only a LIVE listener forces the next name).
+    // NO shared/stable name — ever. The old walk preferred /heidr-nvim.sock, and two
+    // instances relaunching in any order raced onto it: the loser's nvim died at a
+    // shell ("address already in use") and the winner's editor received the OTHER
+    // instance's landings and live-follows (work dashboards in the private heidr,
+    // personal follows in the work cockpit). Identity is pid + a per-item nonce
+    // (hot-reload recreates this item inside the SAME process), probed for liveness
+    // only to survive nonce collisions across reloads.
     const auto live = [](const QString &p) {
       QLocalSocket probe;
       probe.connectToServer(p);
@@ -115,10 +116,12 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
       probe.abort();
       return up;
     };
-    QStringList cands{ base + QStringLiteral("/heidr-nvim.sock"),
-                       base + QStringLiteral("/heidr-nvim-%1.sock").arg(static_cast<qint64>(::getpid())) };
-    for (int i = 2; i <= 9; ++i)
-      cands << base + QStringLiteral("/heidr-nvim-%1-%2.sock").arg(static_cast<qint64>(::getpid())).arg(i);
+    static int itemSeq = 0;
+    ++itemSeq;
+    QStringList cands;
+    for (int i = 0; i <= 9; ++i)
+      cands << base + QStringLiteral("/heidr-nvim-%1-%2.sock")
+                 .arg(static_cast<qint64>(::getpid())).arg(itemSeq + i);
     nvimSocket_ = cands.last();
     for (const QString &c : cands)
       if (!live(c)) { nvimSocket_ = c; break; }
