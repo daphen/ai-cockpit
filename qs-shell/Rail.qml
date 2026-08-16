@@ -1346,19 +1346,23 @@ Item {
   // chunks read as one-line activity summaries.
   readonly property int turnChunk: 12
   readonly property var groupedFeed: {
-    var f = feed, out = [], cur = null, acts = 0
+    var f = feed, out = [], cur = null, acts = 0, chunked = false
     for (var i = 0; i < f.length; i++) {
       var it = f[i]
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null; acts = 0 }
+        chunked = false
         out.push({ kind: "user", text: it.text, mid: it.mid, key: it.mid || ("i" + i) })
       } else {
-        if (!cur) { cur = { kind: "turn", items: [], key: it.mid || ("i" + i) }; acts = 0 }
+        if (!cur) { cur = { kind: "turn", items: [], key: it.mid || ("i" + i), contFrom: chunked }; acts = 0 }
         cur.items.push(it)
-        if (it.kind === "text") { out.push(cur); cur = null; acts = 0 }   // prose ends the card
+        if (it.kind === "text") { out.push(cur); cur = null; acts = 0; chunked = false }   // prose ends the card
         else {
           if (it.kind !== "think") acts++
-          if (acts >= turnChunk) { out.push(cur); cur = null; acts = 0 }
+          // A long tool run is CHUNKED (one card can't grow unbounded) — mark both
+          // sides of the cut so the pieces render as one continuing turn, not as
+          // finished turns that mysteriously never conclude.
+          if (acts >= turnChunk) { cur.cont = true; out.push(cur); cur = null; acts = 0; chunked = true }
         }
       }
     }
@@ -1595,6 +1599,15 @@ Item {
               property bool expanded: (ekey in rail.expandedGroups)
                                       ? rail.expandedGroups[ekey] === true
                                       : liveTurn
+            }
+
+            // Chunked mid-turn cut: say the turn continues, so a header-less next
+            // chunk (and the missing ✧ recap) read as intended, not as a bug.
+            Text {
+              visible: !turnDel.isUser && turnDel.turn.cont === true
+              text: "⋯ continues"
+              color: Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
           }
         }

@@ -98,7 +98,7 @@ ShellRoot {
       // Last N feed rows of the selected session, raw (test probe).
       function railTail(): string {
         var f = rail.agentd ? (rail.agentd.feeds[rail.selectedRaw] || []) : []
-        return JSON.stringify(f.slice(-8).map(x => (x.tool || x.kind) + ":" + String(x.text || "").slice(0, 40)))
+        return JSON.stringify(f.slice(-16).map(x => (x.tool || x.kind) + ":" + String(x.text || "").slice(0, 40)))
       }
       // Test-only sends, so the harness can drive the steer/queue/abort model.
       function railSend(t: string): string { if (rail.agentd) rail.agentd.submit(rail.selectedRaw, t); return "ok" }

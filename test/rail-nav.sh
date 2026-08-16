@@ -285,22 +285,23 @@ key G
 check "echo survived the rebuild" "$(field "$(st)" row | grep -c "steer me visible")" "1"
 say "16. turn outcomes render: retry, retry-exhausted, compaction, tool failure"
 fake retry 1
+live=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
+check "retry status shows live" "$(case "$live" in *"retrying (1/3)"*) echo 1;; *) echo 0;; esac)" "1"
 fake retry_fail 1
 fake compacting 1
 fake toolfail 1
-key G
-out=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railProse 2>/dev/null)
-row_has() { timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom >/dev/null 2>&1; st | grep -c "$1"; }
-check "retry row"       "$(field "$(st)" row | grep -c 'retrying' || true)" "$(field "$(st)" row | grep -c 'retrying' || true)"
-# the LAST pushed row is the failed tool; walk up asserting each outcome row exists
-# Outcome rows group INTO the live turn card (not separate nav rows), so assert
-# on the feed itself rather than walking the cursor.
+live=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
+check "failed tool row shows live" "$(case "$live" in *"bash false"*) echo 1;; *) echo 0;; esac)" "1"
+# After a transcript rebuild the lifecycle applies: the retry status is REPLACED by
+# its outcome, and the outcome rows persist via the transient overlay.
+sleep 6
 tail=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
 found=0
-for want in "bash false" "context compacted" "retries exhausted" "retrying (1/3)"; do
-  case "$tail" in *"$want"*) found=$((found+1));; esac
+for want in "context compacted" "retries exhausted"; do
+  case "$tail" in *"$want"*) found=$((found+1));; *) say "  MISSING: $want";; esac
 done
-check "all four outcome rows present" "$found" "4"
+check "outcomes persist across rebuilds" "$found" "2"
+check "retry status was replaced by its outcome" "$(case "$tail" in *"retrying (1/3)"*) echo 1;; *) echo 0;; esac)" "0"
 
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
