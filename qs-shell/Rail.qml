@@ -1218,8 +1218,13 @@ Item {
     switch (e.key) {
     case Qt.Key_I:      enterInsert(); return true
     case Qt.Key_Escape:
+      // Shift+Esc = surgical: kill only the RUNNING TOOL CALL (turn survives).
       // Esc = interrupt, everywhere: abort the open session's turn if it is
       // running; idle keeps the old escape-to-nvim.
+      if (shift) {
+        if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.abortTool(rail.selectedRaw)
+        return true
+      }
       if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.interrupt(rail.selectedRaw)
       else rail.focusNvim()
       return true
@@ -1238,12 +1243,6 @@ Item {
       return true
     case Qt.Key_N:      rail.openNew(); return true             // new session
     case Qt.Key_X:
-      // X (shift) = surgical: kill only the RUNNING TOOL CALL of the open
-      // session — the turn survives and the model adapts (hung network command).
-      if (shift) {
-        if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.abortTool(rail.selectedRaw)
-        return true
-      }
       // x kills the session under the ROSTER cursor and does nothing anywhere
       // else: interrupting a turn is Esc, and a kill should require aiming.
       if (rail.curSection() === "roster") {
@@ -2535,7 +2534,7 @@ Item {
               { k: "f",   l: rail.hinting ? "pick" : "links" },
               { k: "i",   l: "type" },
               { k: "h",   l: "nvim" }
-            ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }, { k: "X", l: "kill tool" }] : [])
+            ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }, { k: "S-esc", l: "kill tool" }] : [])
           }
           RowLayout {
             spacing: 4
