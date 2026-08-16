@@ -364,10 +364,11 @@ void TermView::applyMetrics(qreal dpr) {
   cellWD_ = std::max(1, (int)std::round(dm.horizontalAdvance(QChar('M'))));
   cellHD_ = std::max(1, (int)std::round(natural * 1.25));   // kitty modify_font cell_height 125%
   ascD_   = (int)std::round(dm.ascent() + (cellHD_ - natural) / 2.0);  // center glyph in cell
-  padTD_  = (int)std::round(18 * dpr); padRD_ = (int)std::round(16 * dpr);
-  padBD_  = 0; padLD_ = (int)std::round(10 * dpr);
+  padTD_  = (int)std::round(18 * dpr); padRD_ = (int)std::round(basePadR_ * dpr);
+  padBD_  = 0; padLD_ = (int)std::round(basePadL_ * dpr);
   cellW_  = cellWD_ / dpr;  cellH_ = cellHD_ / dpr;  ascent_ = ascD_ / dpr;
   padT_   = padTD_ / dpr;   padR_  = padRD_ / dpr;   padB_ = 0; padL_ = padLD_ / dpr;
+  hugGridRight(width());
   basePadT_ = padT_; basePadB_ = padB_;
 }
 
@@ -419,7 +420,11 @@ void TermView::relayoutGrid() {
   if (cellW_ <= 0 || cellH_ <= 0) return;
   const qreal w = width(), h = height();
   if (w <= 0 || h <= 0) return;
-  const int c = std::max(1, (int)((w - padL_ - padR_) / cellW_));
+  const int c = std::max(1, (int)((w - basePadL_ - basePadR_) / cellW_));
+  // The fractional-cell leftover used to pile up on the RIGHT, so lualine stopped
+  // up to a cell short of the rail divider — bias it onto the left edge instead,
+  // keeping the grid's right edge hugged at exactly basePadR_.
+  hugGridRight(w);
   // Rows never divide the height exactly, and the remainder used to pile up at the
   // bottom as a dead band below the statusline — with the cursor occasionally drawn
   // into it, which is what the stray dash past the lualine was. Split the remainder
@@ -438,6 +443,18 @@ void TermView::relayoutGrid() {
 // Distribute the vertical remainder around the grid. basePad* is the design padding
 // (kitty's window_padding_width); anything left over after whole rows is shared between
 // top and bottom so no unexplained strip survives at one edge.
+void TermView::hugGridRight(qreal viewW) {
+  if (cellW_ <= 0 || viewW <= 0) return;
+  const int c = std::max(1, (int)((viewW - basePadL_ - basePadR_) / cellW_));
+  qreal slack = viewW - basePadL_ - basePadR_ - c * cellW_;
+  if (slack < 0) slack = 0;
+  padL_ = basePadL_ + slack;
+  padR_ = basePadR_;
+  const qreal d = guiDpr_ > 0 ? guiDpr_ : 1.0;
+  padLD_ = (int)std::round(padL_ * d);
+  padRD_ = (int)std::round(padR_ * d);
+}
+
 void TermView::centerGrid(qreal viewH, int rows) {
   const qreal used = rows * cellH_;
   qreal slack = viewH - used - basePadT_ - basePadB_;

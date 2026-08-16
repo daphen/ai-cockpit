@@ -68,6 +68,7 @@ protected:
 
 private:
   void spawnPty();
+  void hugGridRight(qreal viewW);
   void writePty(const char *data, int len);  // worker-thread only (PTY fd owner)
   void pasteText(const QString &t);
   // The worker thread owns the PTY + ghostty state and does ALL rasterization,
@@ -126,6 +127,7 @@ private:
   int cols_ = 110, rows_ = 30;   // worker-thread only after start; reflows on resize
   // kitty window_padding_width 10 16 10 10 (top right bottom left)
   qreal padT_ = 18, padR_ = 5, padB_ = 0, padL_ = 10;   // top matches the rail's 18px window inset
+  qreal basePadL_ = 10, basePadR_ = 5;   // pre-slack values; hugGridRight adds the leftover to the LEFT
   GhosttyColorRgb palette_[256];
   GhosttyColorRgb defFg_{0xdd, 0xdd, 0xdd};
   GhosttyColorRgb defBg_{0x1e, 0x1e, 0x2e};
