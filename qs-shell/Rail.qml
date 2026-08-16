@@ -732,14 +732,15 @@ Item {
   }
   // The working orb's hue names the ACTION: reading is calm blue, editing is
   // green (something is changing), running commands is orange (side effects),
-  // mcp/asks are the identity electric. Thinking (no tool) idles on electric.
+  // mcp/asks and thinking (no tool) idle on the default azure -- electric's
+  // blue-violet read purple in the aurora orb and was voted out.
   function actionGlow(sid) {
     agentd ? agentd.curToolGen : 0
     var t = agentd ? agentd.curToolFor(sid) : ""
     if (t === "edit" || t === "write" || t === "create" || t === "str_replace") return Theme.green
     if (t === "bash" || t === "shell") return Theme.orange
     if (t === "read" || t === "grep" || t === "glob" || t === "find" || t === "ls" || t === "ripgrep" || t === "search_files") return Theme.sky
-    return Theme.electric
+    return "#3aa0ff"
   }
   function dotColor(st) {
     if (st === "streaming") return Theme.green
