@@ -429,14 +429,29 @@ Item {
   function attachRefs(t) {
     return String(t || "").replace(/\[image (\d+)\]/g, function (all, n) {
       var f = pastedImages[parseInt(n) - 1]
-      return f ? "@.heidr-pastes/" + f : all
+      if (!f) return all
+      // Remote: worktree-relative (the box's absolute path differs from ours).
+      // Local: the cache dir's absolute path — the project stays untouched.
+      return pasteRemote ? "@.heidr-pastes/" + f
+                         : "@" + Quickshell.env("HOME") + "/.cache/heidr-pastes/" + f
     })
+  }
+  // Local vs remote pastes are DIFFERENT problems. A remote (VM) session needs the
+  // file inside the worktree so mutagen/scp can carry it to the box, and the @ref
+  // must be worktree-relative (the box path differs). A LOCAL pi reads any absolute
+  // path — its pastes live in ~/.cache/heidr-pastes and never touch the project.
+  readonly property bool pasteRemote: {
+    var cwd = ""
+    if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
+      if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
+    return _isRemote(cwd)
   }
   property string pasteDirFor: {
     var cwd = ""
     if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
       if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
-    return (cwd ? rail._localPath(cwd) : Quickshell.env("HOME")) + "/.heidr-pastes"
+    if (!_isRemote(cwd)) return Quickshell.env("HOME") + "/.cache/heidr-pastes"
+    return rail._localPath(cwd) + "/.heidr-pastes"
   }
   Process {
     id: pasteProc
