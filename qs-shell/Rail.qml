@@ -2288,7 +2288,9 @@ Item {
               var pa = rail.pendingAsk
               if (pa && (pa.method === "input" || pa.method === "editor")) {
                 if (text.trim().length) rail.answerAsk({ value: text })
-              } else if ((text.trim().length || rail.pastedImages.length) && rail.agentd) {
+              } else if (rail.agentd && rail.attachRefs(text).trim().length) {
+                // Judge the OUTGOING message: a pasted-then-token-deleted image must
+                // not fire a blank prompt just because pastedImages is non-empty.
                 rail.agentd.submit(rail.selectedRaw, rail.attachRefs(text))
                 rail.rosterOverride = false   // sending = focus the conversation; roster compacts
               }
@@ -2330,7 +2332,7 @@ Item {
               // aborted), then send it as a fresh prompt. Plain Enter steers the live
               // turn instead — see onAccepted / submit().
               if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
-                if ((text.trim().length || rail.pastedImages.length) && rail.agentd && rail.selectedRaw) {
+                if (rail.agentd && rail.selectedRaw && rail.attachRefs(text).trim().length) {
                   rail.agentd.enqueue(rail.selectedRaw, rail.attachRefs(text))
                   rail.rosterOverride = false
                   rail.pastedImages = []
