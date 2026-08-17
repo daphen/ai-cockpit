@@ -25,7 +25,7 @@ Item {
   signal requestFocus()   // a click in the rail should pull focus here
 
   // Click a row: focus the rail, move the cursor there, and act on it.
-  function clickAt(idx) { requestFocus(); cur = idx; activateCur() }
+  function clickAt(idx) { _blurFeedKey = ""; requestFocus(); cur = idx; activateCur() }
   // Pull focus to the rail and land on the roster (Super+T from the desktop).
   // Super+T must work from ANYWHERE, including while typing: the composer holds the
   // keyboard in insert mode, so moving `cur` alone did nothing visible. Leave insert
@@ -34,6 +34,7 @@ Item {
     if (rosterOverride === false) rosterOverride = true
     exitInsert()
     _wasInsert = false
+    _blurFeedKey = ""   // explicit roster jump beats the blur-position restore
     // Land on the ACTIVE session's row, not row 0 — Super+T means "show me where I am",
     // and the top row was usually somebody else.
     var i = _rosterIndexOf(selectedRaw)
@@ -674,10 +675,29 @@ Item {
   // being force-cleared on every return, so leaving from the composer dumped you
   // back in the roster. Remember it across the blur instead.
   property bool _wasInsert: false
+  // The feed row the cursor held when focus LEFT the rail — restored on return
+  // so hopping to nvim and back doesn't lose your reading position. Explicit
+  // landing gestures (Super+T roster jump, a click) clear it and win.
+  property string _blurFeedKey: ""
   onFocusedChanged: {
-    if (!focused) { _wasInsert = insert; insert = false; return }
+    if (!focused) {
+      _wasInsert = insert; insert = false
+      _blurFeedKey = (cur >= rSize && groupedFeed[cur - rSize])
+        ? String(groupedFeed[cur - rSize].key || "") : ""
+      return
+    }
     if (_wasInsert) { enterInsert(); return }   // was typing → back into the composer
     insert = false
+    if (_blurFeedKey.length) {
+      var bi = _feedIndexOf(_blurFeedKey)
+      _blurFeedKey = ""
+      if (bi >= 0) {
+        cur = rSize + bi
+        feedScroll.cursorMoved(bi, bi === groupedFeed.length - 1)
+        forceActiveFocus()
+        return
+      }
+    }
     // A collapsed roster shows only a glance (no per-row cursor). If the
     // cursor was parked in the roster range, entering the rail would leave
     // nothing highlighted — land it on the latest chat message instead.
