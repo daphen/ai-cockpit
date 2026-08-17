@@ -273,6 +273,7 @@ Item {
   }
   property var _marks: ({})   // sid -> [text, …] (capped)
   property var _myAbortAt: ({})   // sid -> ms of the last abort WE sent (attribution)
+  function myAbortAgoFor(sid) { return _myAbortAt[sid] ? (Date.now() - _myAbortAt[sid]) : -1 }
   function interrupt(sid) {
     if (!sid) return
     if (!send({ type: "abort", session: sid })) return

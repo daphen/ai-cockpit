@@ -2457,6 +2457,13 @@ Item {
               var pa = rail.pendingAsk
               if (pa && (pa.method === "input" || pa.method === "editor")) {
                 if (text.trim().length) rail.answerAsk({ value: text })
+              } else if (rail.agentd && !rail.attachRefs(text).trim().length && !rail.featuredStreaming
+                         && rail.agentd.myAbortAgoFor(rail.selectedRaw) >= 0
+                         && rail.agentd.myAbortAgoFor(rail.selectedRaw) < 1800000) {
+                // Empty Enter after an interrupt = RESUME: pick the turn back up
+                // without typing the ritual "continue" by hand.
+                rail.agentd.submit(rail.selectedRaw, "Continue where you left off.")
+                rail.rosterOverride = false
               } else if (rail.agentd && rail.attachRefs(text).trim().length) {
                 // Judge the OUTGOING message: a pasted-then-token-deleted image must
                 // not fire a blank prompt just because pastedImages is non-empty.
