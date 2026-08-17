@@ -2556,7 +2556,10 @@ Item {
                 }
               }
               if (e.key === Qt.Key_Escape) { rail.exitInsert(); e.accepted = true }
-              else if (ctrl && e.key === Qt.Key_H) { rail.exitInsert(); rail.focusNvim(); e.accepted = true }
+              // No exitInsert here: clearing insert BEFORE the blur meant the
+              // focus handler recorded "wasn't typing" and returns landed in the
+              // chat. Leave insert set; the blur captures it and re-enters on return.
+              else if (ctrl && e.key === Qt.Key_H) { rail.focusNvim(); e.accepted = true }
               else if (ctrl && e.key === Qt.Key_K) {
                 rail.view = "chat"
                 rail.exitInsert()
