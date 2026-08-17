@@ -569,7 +569,10 @@ Item {
     // .git (a worktree's .git is a FILE holding a VM-absolute gitdir), so pointing the
     // dashboard at the mirror renders an almost-empty buffer — the "giant whitespace".
     // Fall back to the local checkout for the dashboard while still cd'ing to the mirror.
-    var repo = Quickshell.env("HOME") + "/work/lovable"
+    // The no-.git fallback repo is SCOPE-BOUND: the lovable checkout is only a
+    // sane dashboard home on the work instance — the private heidr was falling
+    // back to it and showing the lovable fleet dash for ~/personal sessions.
+    var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
     var dashAt = function (d) { return 'execute(\'lua require("heidr").dashboard("' + d + '")\')' }
     var dash = '((isdirectory("' + cwd + '/.git") || filereadable("' + cwd + '/.git")) ? '
              + dashAt(cwd) + ' : ' + dashAt(repo) + ')'
