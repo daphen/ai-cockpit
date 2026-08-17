@@ -1832,9 +1832,10 @@ Item {
         Item {
           id: glanceCol
           anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
-          // Tall enough for whatever sits in the name row (the working orb is 44px) —
-          // a fixed 32 clipped the orb against the sheet's edges.
-          implicitHeight: Math.max(32, glanceName.implicitHeight + 4)
+          // FIXED height, sized for the orb (44px + breathing room): deriving it
+          // from the row's content made the whole sheet jump every time the orb
+          // entered or left. The space is reserved whether or not it's running.
+          implicitHeight: 52
           opacity: rail.rosterExpanded ? 0 : 1
           visible: opacity > 0.01
           Behavior on opacity { NumberAnimation { duration: 220 } }
