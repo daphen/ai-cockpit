@@ -946,13 +946,112 @@ Item {
   // Remote (VM worktree) sessions are a LOVABLE concept — the personal scope has no
   // VM, so its new-session flow skips the l/r chooser and goes straight to local.
   readonly property bool remoteOffered: Quickshell.env("HEIDR_SCOPE") === "lovable"
+  // Folder-first new-session flow (declarative-sessions plan): n opens a
+  // FOLDER list; picking one shows resume-or-new for that folder.
+  property var newFolders: []       // [{path, name}] recent-first
+  property string newFolder: ""     // chosen folder ("" = still picking)
+  property int newCur: 0            // cursor within the current pane
+  property string newFilter: ""     // fuzzy filter while picking a folder
+  Process {
+    id: folderScan
+    running: false
+    stdout: SplitParser { onRead: data => {
+      var pth = String(data).trim()
+      if (!pth.length) return
+      var arr = rail.newFolders.slice()
+      arr.push({ path: pth, name: pth.split("/").pop() })
+      rail.newFolders = arr
+    } }
+  }
+  function scanFolders() {
+    newFolders = []
+    var home = Quickshell.env("HOME")
+    var cmd = remoteOffered
+      ? "ls -dt " + home + "/work/lovable " + home + "/work/lovable.*/ 2>/dev/null | sed 's:/*$::'"
+      : "ls -dt " + home + "/personal/*/ 2>/dev/null | sed 's:/*$::'"
+    folderScan.command = ["sh", "-c", cmd]
+    folderScan.running = true
+  }
+  // Sessions living in a folder (live + asleep), for pane 2.
+  function sessionsIn(path) {
+    var out = []
+    if (!agentd) return out
+    for (var i = 0; i < agentd.sessions.length; i++) {
+      var sess = agentd.sessions[i]
+      if (sess.cwd === path) out.push(sess)
+    }
+    return out
+  }
+  // Rows for pane 2: existing sessions first, then "new session".
+  readonly property var newWhichRows: {
+    if (!newFolder.length) return []
+    var rows = sessionsIn(newFolder).map(sess => ({ kind: "resume", sess: sess }))
+    for (var i = 0; i < newOrphans.length; i++) rows.push({ kind: "adopt", id: newOrphans[i] })
+    rows.push({ kind: "new" })
+    return rows
+  }
+  readonly property var newFolderRows: {
+    var f = newFilter.toLowerCase()
+    if (!f.length) return newFolders
+    return newFolders.filter(d => d.name.toLowerCase().indexOf(f) >= 0)
+  }
   function openNew()  {
     newOpen = true
-    newMode = remoteOffered ? "" : "local"
+    newMode = ""   // folder-first; "remote" only via r on the work instance
+    newFolder = ""; newCur = 0; newFilter = ""
+    scanFolders()
     requestFocus()
-    if (!remoteOffered) Qt.callLater(rail.enterInsert)
   }
-  function closeNew() { newOpen = false; newMode = ""; exitInsert() }
+  // Orphaned pi transcripts in the folder — conversations agentd forgot
+  // (crashes, stops). Offered as resumable so nothing is stranded.
+  property var newOrphans: []
+  Process {
+    id: orphanScan
+    running: false
+    stdout: SplitParser { onRead: data => {
+      var f = String(data).trim()
+      if (!f.length) return
+      var id = f.split("/").pop().replace(/\.jsonl$/, "")
+      var owned = false
+      if (rail.agentd) for (var i = 0; i < rail.agentd.sessions.length; i++) {
+        var ss = rail.agentd.sessions[i]
+        if (ss.ident === id || ss.name === id) { owned = true; break }
+      }
+      if (!owned) { var a = rail.newOrphans.slice(); a.push(id); rail.newOrphans = a }
+    } }
+  }
+  function pickFolder(path) {
+    newFolder = path
+    newCur = 0
+    newOrphans = []
+    var enc = "--" + path.replace(/^\/+|\/+$/g, "").replace(/\//g, "-") + "--"
+    orphanScan.command = ["sh", "-c",
+      "ls -t \"$HOME/.pi/agent/sessions/" + enc + "\"/*.jsonl 2>/dev/null | head -5"]
+    orphanScan.running = true
+  }
+  function newSessionName(path) {
+    // dir basename; suffix -2, -3… when taken (any scope's roster counts).
+    var base = path.split("/").pop().toLowerCase()
+    var taken = {}
+    if (agentd) for (var i = 0; i < agentd.sessions.length; i++) taken[agentd.sessions[i].name] = true
+    if (!taken[base]) return base
+    for (var n = 2; n < 100; n++) if (!taken[base + "-" + n]) return base + "-" + n
+    return base
+  }
+  function activateWhich(row) {
+    if (!row) return
+    if (row.kind === "resume" && agentd) {
+      activeRaw = row.sess.rawName || row.sess.id || row.sess.name
+      rosterOverride = false
+      Qt.callLater(rail.enterInsert)
+    } else if (row.kind === "adopt" && agentd) {
+      agentd.send({ type: "spawn", session: newSessionName(newFolder), cwd: newFolder, adoptId: row.id })
+    } else if (row.kind === "new" && agentd) {
+      agentd.send({ type: "spawn", session: newSessionName(newFolder), cwd: newFolder })
+    }
+    closeNew()
+  }
+  function closeNew() { newOpen = false; newMode = ""; newFolder = ""; newFilter = ""; exitInsert() }
   function createSession(name) {
     var n = String(name || "").trim()
     if (!n) return
@@ -1205,13 +1304,29 @@ Item {
   // New-session panel: l/r pick the kind (then the input takes over in insert);
   // everything else is swallowed while choosing. Esc closes in any phase.
   function keyNew(e) {
-    if (e.key === Qt.Key_Escape) { closeNew(); return true }
-    if (newMode === "") {
-      if (e.key === Qt.Key_L) { newMode = "local";  Qt.callLater(rail.enterInsert); return true }
-      if (e.key === Qt.Key_R && remoteOffered) { newMode = "remote"; Qt.callLater(rail.enterInsert); return true }
+    if (e.key === Qt.Key_Escape) {
+      if (newFolder.length) { newFolder = ""; newCur = 0; return true }  // back to folders
+      closeNew(); return true
+    }
+    // Remote (VM worktree) stays behind r on the work instance.
+    if (remoteOffered && newFolder === "" && e.key === Qt.Key_R && !newFilter.length) {
+      newMode = "remote"; Qt.callLater(rail.enterInsert); return true
+    }
+    if (newMode === "remote") return false   // name input owns the keys
+    var rows = newFolder.length ? newWhichRows : newFolderRows
+    if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { newCur = Math.min(rows.length - 1, newCur + 1); return true }
+    if (e.key === Qt.Key_K || e.key === Qt.Key_Up)   { newCur = Math.max(0, newCur - 1); return true }
+    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
+      if (!newFolder.length) { var d = newFolderRows[newCur]; if (d) pickFolder(d.path) }
+      else activateWhich(newWhichRows[newCur])
       return true
     }
-    return false
+    // Folder pane: type to fuzzy-filter, backspace edits.
+    if (!newFolder.length) {
+      if (e.key === Qt.Key_Backspace) { newFilter = newFilter.slice(0, -1); newCur = 0; return true }
+      if (e.text && e.text.length === 1 && e.text >= " ") { newFilter += e.text; newCur = 0; return true }
+    }
+    return true
   }
 
   // A pending question owns its keys: y/n (confirm), 1–9 (select), i (type a
@@ -2365,23 +2480,72 @@ Item {
                     leftMargin: 18; rightMargin: 16; topMargin: 12 }
           spacing: 8
           Text {
-            text: "new session"; color: Theme.electric
+            text: rail.newFolder.length ? ("new session · " + rail.newFolder.split("/").pop()) : "new session — pick a folder"
+            color: Theme.electric
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
           }
-          Row {
-            spacing: 20
-            visible: rail.newMode === ""
-            Row { spacing: 8; KeyCap { text: "l"; anchors.verticalCenter: parent.verticalCenter }
-              Text { text: "local — a session here"; color: Theme.fg
-                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
-            Row { visible: rail.remoteOffered
-              spacing: 8; KeyCap { text: "r"; anchors.verticalCenter: parent.verticalCenter }
-              Text { text: "remote — worktree on the VM"; color: Theme.fg
-                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+          // Pane 1 — folders (recent-first, fuzzy-filtered by typing).
+          Text {
+            visible: rail.newMode !== "remote" && !rail.newFolder.length && rail.newFilter.length > 0
+            text: "filter: " + rail.newFilter
+            color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          }
+          Column {
+            width: newCol.width
+            visible: rail.newMode !== "remote" && !rail.newFolder.length
+            spacing: 2
+            Repeater {
+              model: rail.newFolderRows.slice(0, 12)
+              Rectangle {
+                width: parent.width; implicitHeight: 30; radius: 8
+                color: index === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                Row {
+                  anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                  spacing: 8
+                  Text { text: modelData.name; color: Theme.fg
+                         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody }
+                  Text {
+                    // how many sessions already live there — the resume signal
+                    text: { rail.agentd ? rail.agentd.sessions.length : 0
+                            var c = rail.sessionsIn(modelData.path).length
+                            return c > 0 ? c + " session" + (c > 1 ? "s" : "") : "" }
+                    color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                    anchors.verticalCenter: parent.verticalCenter
+                  }
+                }
+                TapHandler { onTapped: rail.pickFolder(modelData.path) }
+              }
+            }
+          }
+          // Pane 2 — resume an existing session or start new in the folder.
+          Column {
+            width: newCol.width
+            visible: rail.newMode !== "remote" && rail.newFolder.length > 0
+            spacing: 2
+            Repeater {
+              model: rail.newWhichRows
+              Rectangle {
+                width: parent.width; implicitHeight: 30; radius: 8
+                color: index === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                Row {
+                  anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                  spacing: 8
+                  Text {
+                    text: modelData.kind === "new"   ? "+ new session (" + rail.newSessionName(rail.newFolder) + ")"
+                        : modelData.kind === "adopt" ? "adopt orphaned transcript · " + modelData.id.slice(0, 19)
+                        : (modelData.sess.name + "  ·  " + (modelData.sess.status || "?"))
+                    color: modelData.kind === "new" ? Theme.electric
+                         : modelData.kind === "adopt" ? Theme.fg_muted : Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+                  }
+                }
+                TapHandler { onTapped: { rail.newCur = index; rail.activateWhich(modelData) } }
+              }
+            }
           }
           Rectangle {
             width: newCol.width
-            visible: rail.newMode !== ""
+            visible: rail.newMode === "remote"
             implicitHeight: 44; height: implicitHeight
             radius: 10
             color: Theme.surface0
@@ -2413,8 +2577,8 @@ Item {
           }
           Text {
             text: rail.newMode === "remote" ? "ticket id, e.g. EVERY-2739 · esc cancels"
-                : rail.newMode === "local"  ? "session name · esc cancels"
-                : "esc cancels"
+                : rail.newFolder.length     ? "j/k + enter — resume or start new · esc back"
+                : "type to filter · j/k + enter picks a folder" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
             color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
         }
