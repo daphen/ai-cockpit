@@ -290,6 +290,12 @@ Item {
   // with the size noted so it's clear something was expanded rather than lost.
   function _foldSlashBody(t) {
     var s0 = String(t || "")
+    // pi expands a /skill invocation into an inline <skill ...>...</skill> block
+    // (the whole SKILL.md); render it as a one-line chip, keep any real text.
+    var sk = /<skill\s+name="([^"]+)"[^>]*>[\s\S]*?<\/skill>\s*/g
+    if (sk.test(s0)) {
+      s0 = s0.replace(sk, function(_, n) { return "_(/" + n + " — skill instructions folded)_\n" }).trim()
+    }
     if (s0.charAt(0) !== "/") return s0
     var nl = s0.indexOf("\n")
     if (nl < 0 || s0.length < 400) return s0
