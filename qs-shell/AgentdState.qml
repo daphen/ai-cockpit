@@ -101,10 +101,12 @@ Item {
   property var _curTool: ({})
   property var _curToolAt: ({})     // sid -> Date.now() of the RUNNING tool call
   property var _curToolLive: ({})   // sid -> true while a tool call is executing
+  property var _curToolId: ({})     // sid -> toolCallId of the RUNNING call (feed row highlight)
   property int curToolGen: 0
   function curToolFor(sid) { return _curTool[sid] || "" }
   function curToolAtFor(sid) { return _curToolAt[sid] || 0 }
   function curToolLiveFor(sid) { return _curToolLive[sid] === true }
+  function curToolIdFor(sid) { return _curToolId[sid] || "" }
   // Kill just the running tool call's subprocesses; the turn survives.
   function abortTool(sid) { send({ type: "abort_tool", session: sid }) }
   // Last file each session touched — so switching TO a mid-turn session can land
@@ -675,6 +677,7 @@ Item {
       var ct = _curTool; ct[sid] = act; _curTool = ct
       var ca = _curToolAt; ca[sid] = Date.now(); _curToolAt = ca
       var cl = _curToolLive; cl[sid] = true; _curToolLive = cl
+      var ci = _curToolId; ci[sid] = m.toolCallId || ""; _curToolId = ci
       curToolGen++
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
@@ -718,7 +721,9 @@ Item {
       _setTransient(sid, "toolkill", "error",
                     "⨯ killed the running tool call (" + (m.killed || 0) + " process" + ((m.killed || 0) === 1 ? "" : "es") + ") — the turn continues", 60000)
     } else if (t === "tool_execution_end") {
-      var cl2 = _curToolLive; delete cl2[sid]; _curToolLive = cl2; curToolGen++
+      var cl2 = _curToolLive; delete cl2[sid]; _curToolLive = cl2
+      var ci2 = _curToolId; delete ci2[sid]; _curToolId = ci2
+      curToolGen++
       const det = m.result && m.result.details
       // A failed tool run turns its own row red in place (Claude Code grammar).
       if (m.result && m.result.isError) {

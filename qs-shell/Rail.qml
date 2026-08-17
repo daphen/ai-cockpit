@@ -737,6 +737,15 @@ Item {
   // 1s heartbeat for elapsed-time displays (running tool call duration).
   property int nowTick: 0
   Timer { interval: 1000; repeat: true; running: true; onTriggered: rail.nowTick++ }
+  // "<tool> · 1m32" for the RUNNING tool call, ticking; "" when idle.
+  function runningToolLabel(sid) {
+    nowTick
+    agentd ? agentd.curToolGen : 0
+    if (!agentd || !agentd.curToolLiveFor(sid)) return ""
+    var secs = Math.max(0, Math.round((Date.now() - agentd.curToolAtFor(sid)) / 1000))
+    var el = secs >= 60 ? Math.floor(secs / 60) + "m" + String(secs % 60).padStart(2, "0") : secs + "s"
+    return (agentd.curToolFor(sid) || "tool") + " · " + el
+  }
   function actionGlow(sid) {
     agentd ? agentd.curToolGen : 0
     var t = agentd ? agentd.curToolFor(sid) : ""
@@ -1888,6 +1897,15 @@ Item {
               nodes: 16
               glow: rail.actionGlow(rail.selectedRaw)
             }
+            // What it's doing and for how long — the judgment input for
+            // Shift+Esc ("this should NOT take 4 minutes").
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: text.length > 0
+              text: rail.runningToolLabel(rail.selectedRaw)
+              color: Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            }
           }
           Row {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
@@ -2739,7 +2757,12 @@ Item {
           Layout.topMargin: Math.max(0, Math.round(rail.fsBody * 1.3 - 13) / 2)
         }
         Text {
+          readonly property bool liveNow: {
+            rail.agentd ? rail.agentd.curToolGen : 0
+            return rail.agentd && entry.id && rail.agentd.curToolIdFor(rail.selectedRaw) === entry.id
+          }
           text: entry.text + (cmdCol.isFailed ? "  — failed" : "")
+                + (liveNow ? "  · " + rail.runningToolLabel(rail.selectedRaw).split("· ").pop() : "")
           color: cmdCol.isErr ? Theme.red : (cmdCol.isFailed ? Theme.red : Theme.fg_secondary)
           font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
           wrapMode: cmdCol.isErr ? Text.WordWrap : Text.NoWrap
