@@ -185,6 +185,10 @@ Item {
     return ""
   }
   function sendPrompt(sid, text) {
+    // Moving on ends the interrupt bridge: without this, an accidental Esc
+    // kept re-appending "interrupted by you" after every later message until
+    // the 60s cap.
+    var nmk = _marks; delete nmk[sid]; _marks = nmk
     // agentd/pi expect `message`, not `text`.
     if (!send({ type: "prompt", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text })   // optimistic echo; get_entries refreshes it
@@ -770,8 +774,13 @@ Item {
       var caughtUp = false
       for (var fi = 0; fi < feeds[esid].length && !caughtUp; fi++) {
         var its = feeds[esid][fi].items || []
-        for (var ii = 0; ii < its.length; ii++)
-          if (String(its[ii].text || "").indexOf("⏹ interrupted") === 0) { caughtUp = true; break }
+        for (var ii = 0; ii < its.length; ii++) {
+          // Any abort-derived row counts: once later messages exist, pi's own
+          // row renders as the mid-chain steer marker, not "⏹ interrupted".
+          var mt = String(its[ii].text || "")
+          if (mt.indexOf("⏹ interrupted") === 0 || mt.indexOf("· redirected mid-turn") === 0
+              || mt.indexOf("⚡ aborted externally") === 0) { caughtUp = true; break }
+        }
       }
       mks = caughtUp ? [] : mks.filter(mm => (Date.now() - (mm.at || 0)) < 60000)
       var nm = _marks
