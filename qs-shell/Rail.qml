@@ -1694,17 +1694,29 @@ Item {
               }
             }
 
-            // A turn with no events yet (pi thinking, nothing streamed): say so
-            // instead of rendering a bare "agent" header over emptiness.
+            // A turn with nothing VISIBLE (no events yet, or only empty thinking
+            // blocks): say what's happening instead of a bare header over
+            // emptiness — live turns show a spinner, ended ones say so.
             Row {
               spacing: 8
-              visible: !turnDel.isUser && (turnDel.turn.items || []).length === 0
+              readonly property bool blank: {
+                var its = turnDel.turn.items || []
+                for (var bi = 0; bi < its.length; bi++) {
+                  var bit = its[bi]
+                  if (bit.kind === "think" && !String(bit.text || "").trim()) continue
+                  return false
+                }
+                return true
+              }
+              visible: !turnDel.isUser && blank
               Spinner {
+                visible: rail.featuredStreaming
                 anchors.verticalCenter: parent.verticalCenter
                 running: visible; color: Theme.fg_muted; dotSize: 1.6
               }
               Text {
-                text: "thinking — nothing streamed yet"
+                text: rail.featuredStreaming ? "thinking — nothing streamed yet"
+                                             : "· turn ended without visible output"
                 color: Theme.fg_muted
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 anchors.verticalCenter: parent.verticalCenter
