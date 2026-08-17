@@ -1694,6 +1694,23 @@ Item {
               }
             }
 
+            // A turn with no events yet (pi thinking, nothing streamed): say so
+            // instead of rendering a bare "agent" header over emptiness.
+            Row {
+              spacing: 8
+              visible: !turnDel.isUser && (turnDel.turn.items || []).length === 0
+              Spinner {
+                anchors.verticalCenter: parent.verticalCenter
+                running: visible; color: Theme.fg_muted; dotSize: 1.6
+              }
+              Text {
+                text: "thinking — nothing streamed yet"
+                color: Theme.fg_muted
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
             // User message body.
             Text {
               visible: turnDel.isUser
