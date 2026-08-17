@@ -305,15 +305,19 @@ Item {
   // Underline is left to the anchor, so links still read as links.
   readonly property string summaryHex: rail._hex(summaryColor)
   function colorizeLinks(t) {
+    // A label that LOOKS like a URL gets re-autolinked by Qt inside our colored
+    // span (palette dark blue wins over the font tag) — a zero-width space after
+    // :// breaks the re-detection, invisibly.
+    function safeLabel(x) { return String(x).replace("://", "://\u200B") }
     var out = String(t || "").replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g,
       function (all, label, url) {
-        return "[<font color=\"" + rail.summaryHex + "\"><u>" + label + "</u></font>](" + url + ")"
+        return "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(label) + "</u></font>](" + url + ")"
       })
     // Bare URLs too: Qt autolinks them but paints with the PALETTE link color
     // (near-invisible dark blue on the dark ground), ignoring linkColor — so wrap
     // them into explicit colored markdown links ourselves.
     return out.replace(/(^|[\s])(https?:\/\/[^\s)<>"]+)/g, function (all, pre, url) {
-      return pre + "[<font color=\"" + rail.summaryHex + "\"><u>" + url + "</u></font>](" + url + ")"
+      return pre + "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(url) + "</u></font>](" + url + ")"
     })
   }
   // Inline hint badge. Qt's MARKDOWN path passes <font color> through but STRIPS
