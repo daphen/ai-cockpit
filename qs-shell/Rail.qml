@@ -747,16 +747,12 @@ Item {
     // and on a raw string that's undefined -> the outline computed a garbage hue.
     return Qt.color("#3aa0ff")
   }
-  // The orb ring's exact tint of the current action hue -- shared by the orb
-  // (QsLib draws the same formula) and the composer outline so they move as one.
-  readonly property color activeRing: {
-    var g = actionGlow(selectedRaw)
-    var h = g.hslHue < 0 ? 0 : g.hslHue
-    // Whisper of the hue, not a statement: a 2px outline spanning the whole
-    // composer amplifies chroma that looks calm on the small orb ring.
-    var s2 = Math.min(1, Math.max(0.75, g.hslSaturation)) * 0.30
-    return Qt.hsla(h, s2, Theme.mode === "light" ? 0.40 : 0.90, 1)
-  }
+  // Composer chrome color is FIXED per theme, not action-reactive — the input
+  // frame recoloring with every tool change was too much motion. Light rides
+  // electric; dark keeps the pale azure "thinking" tint.
+  readonly property color activeRing: Theme.mode === "light"
+    ? Theme.electric
+    : Qt.hsla(0.583, 0.29, 0.90, 1)
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
