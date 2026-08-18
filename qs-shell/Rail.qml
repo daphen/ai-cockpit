@@ -1142,6 +1142,18 @@ Item {
   // lua where the editor state lives.
   Connections {
     target: rail.agentd
+    function onEditHunk(sid, path, line) {
+      if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
+      var cwd = ""
+      for (var i = 0; i < rail.agentd.sessions.length; i++)
+        if (rail.agentd.sessions[i].id === sid) { cwd = rail.agentd.sessions[i].cwd; break }
+      if (!cwd) return
+      var lcwd = rail._localPath(cwd)
+      var p = rail._localPath(String(path))
+      if (p.charAt(0) !== "/") p = lcwd + "/" + p
+      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
+        'v:lua.require("heidr").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'])
+    }
     function onEditSeen(sid, path) {
       if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
       var cwd = ""

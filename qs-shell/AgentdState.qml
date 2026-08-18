@@ -96,6 +96,10 @@ Item {
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
   signal editSeen(string sid, string path)
+  // Fired when an edit's diff lands (tool_execution_end): the first hunk's
+  // new-file line — cross-repo edits have no local diff data, so this is the
+  // only line signal that always exists.
+  signal editHunk(string sid, string path, int line)
   // What the session is DOING right now (last tool started this exchange) — feeds
   // the working orb's action hue.
   property var _curTool: ({})
@@ -741,7 +745,12 @@ Item {
         const ad = _countDiff(det.diff)
         var arr = feeds[sid] || []
         for (var i = arr.length - 1; i >= 0; i--) {
-          if (arr[i].id === m.toolCallId) { arr[i].add = ad[0]; arr[i].del = ad[1]; break }
+          if (arr[i].id === m.toolCallId) {
+            arr[i].add = ad[0]; arr[i].del = ad[1]
+            var hm = String(det.diff).match(/@@ -\d+(?:,\d+)? \+(\d+)/)
+            if (hm && arr[i].path) root.editHunk(sid, String(arr[i].path), parseInt(hm[1]))
+            break
+          }
         }
         feeds[sid] = arr; feedGen++
       }
