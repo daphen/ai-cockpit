@@ -40,6 +40,13 @@ fi
 # window. The private mode runs a symlink MIRROR of qs-shell (same live QML, distinct
 # path — the rail-nav harness pattern).
 shellDir="$PWD/qs-shell"
+# Rename transition: export COCKPIT_* twins of every HEIDR_* var so readers
+# can migrate independently; the HEIDR_ set retires in a later pass.
+for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DEV VENDORED_GHOSTTY; do
+  hv="HEIDR_$v"
+  if [ -n "${!hv:-}" ]; then export "COCKPIT_$v=${!hv}"; fi
+done
+
 if [ "${HEIDR_SCOPE:-lovable}" = "personal" ]; then
   export HEIDR_TITLE="${HEIDR_TITLE:-heidr-qs · private}"
   mirror="$HOME/.local/state/heidr/private-shell"
@@ -49,6 +56,7 @@ if [ "${HEIDR_SCOPE:-lovable}" = "personal" ]; then
 else
   export HEIDR_TITLE="${HEIDR_TITLE:-heidr-qs · lovable}"
 fi
+export COCKPIT_SCOPE="${COCKPIT_SCOPE:-$HEIDR_SCOPE}" COCKPIT_TITLE="${COCKPIT_TITLE:-$HEIDR_TITLE}" COCKPIT_NEW_CWD="${COCKPIT_NEW_CWD:-${HEIDR_NEW_CWD:-}}"
 
 # Clear a stale instance of THIS MODE only (config-path scoped): a relaunch must show
 # the current QML, but the OTHER mode's cockpit keeps running — that is the whole point
