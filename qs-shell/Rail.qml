@@ -2288,14 +2288,18 @@ Item {
         radius: 6
         color: Theme.surface0
         border.width: 1; border.color: Theme.hairline
-        Row {
-          anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+        RowLayout {
+          anchors { left: parent.left; right: parent.right; leftMargin: 10; rightMargin: 10
+                    verticalCenter: parent.verticalCenter }
           spacing: 8
-          Text {
-            text: "⏳"; color: Theme.fg_muted
-            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          Icon {
+            name: "alarm-clock--outline--18"
+            width: 13; height: 13; color: Theme.fg_muted
+            Layout.preferredWidth: 13; Layout.preferredHeight: 13
+            Layout.alignment: Qt.AlignVCenter
           }
           Text {
+            Layout.fillWidth: true
             // queuedGen is the invalidation signal: `queued` is mutated in place, so
             // without touching the gen these bindings froze at their first value
             // (the pill appeared but said "0 queued: ''").
