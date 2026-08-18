@@ -996,9 +996,18 @@ Item {
   }
   readonly property var newFolderRows: {
     var f = newFilter.toLowerCase()
+    // A typed PATH (~/x or /x) becomes a pickable row — folders outside the
+    // scope roots are one keystroke away instead of unreachable.
+    if (f.charAt(0) === "~" || f.charAt(0) === "/") {
+      var pth = newFilter.replace(/^~/, Quickshell.env("HOME"))
+      return [{ path: pth, name: newFilter, typed: true }]
+    }
     if (!f.length) return newFolders
     return newFolders.filter(d => d.name.toLowerCase().indexOf(f) >= 0)
   }
+  // The visible window FOLLOWS the cursor (a fixed first-12 slice let j walk
+  // the selection off-stage).
+  readonly property int newWinStart: Math.max(0, Math.min(newCur - 11, newFolderRows.length - 12))
   function openNew()  {
     newOpen = true
     newMode = ""   // folder-first; "remote" only via r on the work instance
@@ -2499,10 +2508,10 @@ Item {
             visible: rail.newMode !== "remote" && !rail.newFolder.length
             spacing: 2
             Repeater {
-              model: rail.newFolderRows.slice(0, 12)
+              model: rail.newFolderRows.slice(rail.newWinStart, rail.newWinStart + 12)
               Rectangle {
                 width: parent.width; implicitHeight: 30; radius: 8
-                color: index === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                color: (rail.newWinStart + index) === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
                 Row {
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   spacing: 8
@@ -2582,7 +2591,7 @@ Item {
           Text {
             text: rail.newMode === "remote" ? "ticket id, e.g. EVERY-2739 · esc cancels"
                 : rail.newFolder.length     ? "j/k + enter — resume or start new · esc back"
-                : "type to filter · j/k + enter picks a folder" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
+                : "type to filter, or ~/path for any folder · j/k + enter picks" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
             color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
         }
