@@ -812,6 +812,10 @@ Item {
       for (var qi = 0; qi < q.length; qi++) {
         var qe = q[qi], qt = qe.text !== undefined ? qe.text : String(qe)
         if (joined.indexOf(qt) >= 0) continue             // transcript caught up
+        // A /skill invocation is RECORDED expanded (<skill name=...> replaces the
+        // literal text), so the echo never matched and re-appended forever.
+        var sk = qt.match(/^\/(?:skill:)?([\w-]+)\b/)
+        if (sk && joined.indexOf('<skill name="' + sk[1] + '"') >= 0) continue
         // An echo can wait out a long tool run while a STREAMING turn holds the steer —
         // but an IDLE session with a stale echo means the message provably died (pi
         // rejected or never received it). Say so once instead of ghosting it forever.
