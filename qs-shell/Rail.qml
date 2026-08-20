@@ -994,6 +994,44 @@ Item {
     rows.push({ kind: "new" })
     return rows
   }
+  // Pane 3 — "do you have a plan?": bind a vault plan slug at spawn time (the
+  // only moment a plan CAN bind — there is no set_plan on a live session yet).
+  // newSpawnPending non-null = pane 3 is up, holding the pane-2 choice.
+  property var newSpawnPending: null
+  property var newPlans: []
+  Process {
+    id: planScan
+    running: false
+    stdout: SplitParser { onRead: data => {
+      var f = String(data).trim()
+      if (!f.length) return
+      var arr = rail.newPlans.slice()
+      arr.push(f.split("/").pop().replace(/\.md$/, ""))
+      rail.newPlans = arr
+    } }
+  }
+  function scanPlans() {
+    newPlans = []
+    planScan.command = ["sh", "-c",
+      "ls -t \"$HOME/personal/notes/storage/plans\"/*.md 2>/dev/null | head -30"]
+    planScan.running = true
+  }
+  readonly property var newPlanRows: {
+    var f = newFilter.toLowerCase()
+    var rows = [{ none: true }]
+    for (var i = 0; i < newPlans.length; i++)
+      if (!f.length || newPlans[i].toLowerCase().indexOf(f) >= 0) rows.push({ slug: newPlans[i] })
+    return rows
+  }
+  readonly property int newPlanWinStart: Math.max(0, Math.min(newCur - 11, newPlanRows.length - 12))
+  function activatePlan(row) {
+    if (!row || !agentd || !newSpawnPending) return
+    var msg = { type: "spawn", session: newSessionName(newFolder), cwd: newFolder }
+    if (newSpawnPending.adoptId) msg.adoptId = newSpawnPending.adoptId
+    if (!row.none) msg.plan = row.slug
+    agentd.send(msg)
+    closeNew()
+  }
   readonly property var newFolderRows: {
     var f = newFilter.toLowerCase()
     // A typed PATH (~/x or /x) becomes a pickable row — folders outside the
@@ -1057,14 +1095,15 @@ Item {
       activeRaw = row.sess.rawName || row.sess.id || row.sess.name
       rosterOverride = false
       Qt.callLater(rail.enterInsert)
-    } else if (row.kind === "adopt" && agentd) {
-      agentd.send({ type: "spawn", session: newSessionName(newFolder), cwd: newFolder, adoptId: row.id })
-    } else if (row.kind === "new" && agentd) {
-      agentd.send({ type: "spawn", session: newSessionName(newFolder), cwd: newFolder })
+      closeNew()
+    } else if ((row.kind === "adopt" || row.kind === "new") && agentd) {
+      // Spawning waits one more beat: pane 3 asks about a plan first.
+      newSpawnPending = { adoptId: row.kind === "adopt" ? row.id : "" }
+      newFilter = ""; newCur = 0
+      scanPlans()
     }
-    closeNew()
   }
-  function closeNew() { newOpen = false; newMode = ""; newFolder = ""; newFilter = ""; exitInsert() }
+  function closeNew() { newOpen = false; newMode = ""; newFolder = ""; newFilter = ""; newSpawnPending = null; exitInsert() }
   function createSession(name) {
     var n = String(name || "").trim()
     if (!n) return
@@ -1330,6 +1369,7 @@ Item {
   // everything else is swallowed while choosing. Esc closes in any phase.
   function keyNew(e) {
     if (e.key === Qt.Key_Escape) {
+      if (newSpawnPending) { newSpawnPending = null; newFilter = ""; newCur = 0; return true }  // back to pane 2
       if (newFolder.length) { newFolder = ""; newCur = 0; return true }  // back to folders
       closeNew(); return true
     }
@@ -1338,16 +1378,17 @@ Item {
       newMode = "remote"; Qt.callLater(rail.enterInsert); return true
     }
     if (newMode === "remote") return false   // name input owns the keys
-    var rows = newFolder.length ? newWhichRows : newFolderRows
+    var rows = newSpawnPending ? newPlanRows : newFolder.length ? newWhichRows : newFolderRows
     if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { newCur = Math.min(rows.length - 1, newCur + 1); return true }
     if (e.key === Qt.Key_K || e.key === Qt.Key_Up)   { newCur = Math.max(0, newCur - 1); return true }
     if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
-      if (!newFolder.length) { var d = newFolderRows[newCur]; if (d) pickFolder(d.path) }
+      if (newSpawnPending) activatePlan(newPlanRows[newCur])
+      else if (!newFolder.length) { var d = newFolderRows[newCur]; if (d) pickFolder(d.path) }
       else activateWhich(newWhichRows[newCur])
       return true
     }
-    // Folder pane: type to fuzzy-filter, backspace edits.
-    if (!newFolder.length) {
+    // Folder + plan panes: type to fuzzy-filter, backspace edits.
+    if (!newFolder.length || newSpawnPending) {
       if (e.key === Qt.Key_Backspace) { newFilter = newFilter.slice(0, -1); newCur = 0; return true }
       if (e.text && e.text.length === 1 && e.text >= " ") { newFilter += e.text; newCur = 0; return true }
     }
@@ -2509,13 +2550,14 @@ Item {
                     leftMargin: 18; rightMargin: 16; topMargin: 12 }
           spacing: 8
           Text {
-            text: rail.newFolder.length ? ("new session · " + rail.newFolder.split("/").pop()) : "new session — pick a folder"
+            text: rail.newSpawnPending ? ("new session · " + rail.newFolder.split("/").pop() + " — do you have a plan?")
+                : rail.newFolder.length ? ("new session · " + rail.newFolder.split("/").pop()) : "new session — pick a folder"
             color: Theme.electric
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
           }
           // Pane 1 — folders (recent-first, fuzzy-filtered by typing).
           Text {
-            visible: rail.newMode !== "remote" && !rail.newFolder.length && rail.newFilter.length > 0
+            visible: rail.newMode !== "remote" && (!rail.newFolder.length || !!rail.newSpawnPending) && rail.newFilter.length > 0
             text: "filter: " + rail.newFilter
             color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
@@ -2549,7 +2591,7 @@ Item {
           // Pane 2 — resume an existing session or start new in the folder.
           Column {
             width: newCol.width
-            visible: rail.newMode !== "remote" && rail.newFolder.length > 0
+            visible: rail.newMode !== "remote" && rail.newFolder.length > 0 && !rail.newSpawnPending
             spacing: 2
             Repeater {
               model: rail.newWhichRows
@@ -2569,6 +2611,29 @@ Item {
                   }
                 }
                 TapHandler { onTapped: { rail.newCur = index; rail.activateWhich(modelData) } }
+              }
+            }
+          }
+          // Pane 3 — bind a vault plan (or none) before the spawn goes out.
+          Column {
+            width: newCol.width
+            visible: !!rail.newSpawnPending
+            spacing: 2
+            Repeater {
+              model: rail.newPlanRows.slice(rail.newPlanWinStart, rail.newPlanWinStart + 12)
+              Rectangle {
+                width: parent.width; implicitHeight: 30; radius: 8
+                color: (rail.newPlanWinStart + index) === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                Row {
+                  anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                  spacing: 8
+                  Text {
+                    text: modelData.none ? "no plan — just a session" : modelData.slug
+                    color: modelData.none ? Theme.fg_muted : Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+                  }
+                }
+                TapHandler { onTapped: { rail.newCur = rail.newPlanWinStart + index; rail.activatePlan(modelData) } }
               }
             }
           }
@@ -2606,6 +2671,7 @@ Item {
           }
           Text {
             text: rail.newMode === "remote" ? "ticket id, e.g. EVERY-2739 · esc cancels"
+                : rail.newSpawnPending      ? "type to filter plans · j/k + enter binds · esc back"
                 : rail.newFolder.length     ? "j/k + enter — resume or start new · esc back"
                 : "type to filter, or ~/path for any folder · j/k + enter picks" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
             color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
