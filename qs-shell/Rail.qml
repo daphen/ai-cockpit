@@ -745,10 +745,10 @@ Item {
   readonly property bool live: !demo
   readonly property bool daemonUp: !!(agentd && agentd.connected)
 
+  // Strip worktree prefixes only — never trim after the ticket id: sibling
+  // sessions like every-2741-runtime must stay distinguishable from every-2741.
   function shortName(n) {
-    var s = String(n).replace(/^lovable\.daphen-/, "").replace(/^daphen-/, "")
-    var m = s.match(/^([a-z]+-\d+)/)
-    return m ? m[1] : s
+    return String(n).replace(/^lovable\.daphen-/, "").replace(/^daphen-/, "")
   }
   function stateLabel(st) {
     if (st === "streaming") return "working"
