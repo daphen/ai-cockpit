@@ -185,13 +185,9 @@ ShellRoot {
           }
         }
 
-        // Divider stops at the chin's top hairline — the two meet in a clean
-        // corner instead of the divider's tail running past it to the edge.
-        Rectangle { width: 1; height: parent.height - chin.height; color: Theme.hairline }
-
         Rail {
           id: rail
-          width: parent.width - termCol.width - 1
+          width: parent.width - termCol.width
           height: parent.height
           agentd: agentd
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
