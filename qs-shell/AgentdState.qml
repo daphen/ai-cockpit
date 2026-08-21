@@ -148,6 +148,11 @@ Item {
   signal askRaised(string sid, string title)
   function askCount() { var n = 0; for (var k in asks) n++; return n }
   function askFor(sid) { return asks[sid] || null }
+  function isUserBashAsk(ask) { return ask && ask.title === "__cockpit_user_bash__" }
+  function userBashPayload(ask) {
+    if (!isUserBashAsk(ask)) return null
+    try { return JSON.parse(String(ask.message || "")) } catch (e) { return null }
+  }
   function answerAsk(sid, payload) {
     if (!asks[sid]) return
     send({ type: "answer", session: sid, response: payload })
@@ -452,8 +457,9 @@ Item {
 
   // Expand an assistant message's content blocks into feed items (mirror of the
   // nvim rail's msg_text): prose (text), collapsed thinking, and tool calls.
-  function _expandAssistant(content, items, toolErrs) {
+  function _expandAssistant(content, items, toolErrs, toolResults) {
     toolErrs = toolErrs || {}
+    toolResults = toolResults || {}
     var c = content || []
     for (var i = 0; i < c.length; i++) {
       var b = c[i]
@@ -489,11 +495,21 @@ Item {
             if (a.old_string) del += String(a.old_string).split("\n").length
           }
           items.push({ kind: "edit", tool: name, file: _base(p), path: p, add: add, del: del })
+        } else if (name === "request_user_bash") {
+          var ub = toolResults[b.id] || ""
+          items.push({ kind: "userbash", tool: name, command: String(a.command || ""),
+                       reason: String(a.reason || ""), result: ub,
+                       failed: toolErrs[b.id] === true })
         } else if (name === "ask_user") {
           // The QUESTION AND ANSWER live here in the transcript (the answer is the
           // tool call's result) — render them as a persistent row, or the answered
           // question only ever existed as an optimistic push the next rebuild ate.
           var q = String(a.title || a.message || "question")
+          // User-bash approval asks carry a sentinel title + JSON payload; render
+          // the actual command (matches the live echo, which retires against this row).
+          if (a.title === "__cockpit_user_bash__") {
+            try { q = "! " + String(JSON.parse(String(a.message || "")).command || "") } catch (e) {}
+          }
           var ans = _askAnswerText(b.result)
           items.push({ kind: "cmd", tool: "ask",
                        text: ans ? ("❯ " + q + "  ↳ " + _clip(ans)) : ("❯ " + q),
@@ -510,8 +526,9 @@ Item {
   // Reconstruct the active branch (leaf→root via parentId) into a flat feed.
   // Formatting only — takes the message tail (from here or from the worker) and builds
   // feed items. Cheap: it never sees more than CHAT_CAP messages.
-  function _msgsToFeed(msgs, toolErrs, sid) {
+  function _msgsToFeed(msgs, toolErrs, sid, toolResults) {
     toolErrs = toolErrs || {}
+    toolResults = toolResults || {}
     var items = []
     for (var mi = 0; mi < msgs.length; mi++) {
       var msg = msgs[mi]
@@ -530,7 +547,7 @@ Item {
         // as compaction failures.
         items.push({ kind: "sys", tool: "info", text: "· context compacted" })
       } else {
-        _expandAssistant(msg.content, items, toolErrs)
+        _expandAssistant(msg.content, items, toolErrs, toolResults)
         // A failed assistant turn carries its reason on the MESSAGE, not the content —
         // it rendered as a bare "1 error" chip with nothing to read. Name it: a user
         // abort gets the interrupt grammar, anything else shows the provider's message.
@@ -595,13 +612,19 @@ Item {
     while (cur && byid[cur] && !seen[cur]) { seen[cur] = true; chain.push(byid[cur]); cur = byid[cur].parentId }
     // Collect user/assistant messages chronologically, then only format the TAIL —
     // a big transcript (3000+ entries / 7MB) is otherwise multi-second to expand.
-    var msgs = [], toolErrs = {}
+    var msgs = [], toolErrs = {}, toolResults = {}
     for (var j = chain.length - 1; j >= 0; j--) {
       var e = chain[j]
       // Failed tool calls: the isError flag lives on the toolResult MESSAGE, not the
       // call — collect per callId so the call's row can render as a failure.
       if (e.type === "message" && e.message && e.message.role === "toolResult") {
-        if (e.message.isError && e.message.toolCallId) toolErrs[e.message.toolCallId] = true
+        if (e.message.toolCallId) {
+          if (e.message.isError) toolErrs[e.message.toolCallId] = true
+          var rt = "", rc = e.message.content || []
+          for (var ri = 0; ri < rc.length; ri++)
+            if (rc[ri].type === "text" && rc[ri].text) rt += (rt ? "\n" : "") + rc[ri].text
+          toolResults[e.message.toolCallId] = rt
+        }
         continue
       }
       // Compaction is a fact about the conversation; pi/Claude Code both mark it.
@@ -618,7 +641,7 @@ Item {
       }
     }
     var CHAT_CAP = 60
-    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)), toolErrs, _feedSid)
+    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)), toolErrs, _feedSid, toolResults)
     return _coalesce(items)
   }
 
@@ -704,12 +727,14 @@ Item {
         // "↳ approved" left no trace of what was approved — consecutive answers read
         // as one duplicated reply.
         var asked = asks[sid]
-        var q = asked ? String(asked.title || asked.message || "").split("\n")[0] : ""
+        var bp = userBashPayload(asked)
+        var q = bp ? ("! " + String(bp.command || ""))
+                   : (asked ? String(asked.title || asked.message || "").split("\n")[0] : "")
         if (q.length > 72) q = q.slice(0, 71) + "…"
         var echo = "↳ " + label + (q ? " — " + q : "")
         var echoes = _answerEchoes
         var list = (echoes[sid] || []).slice(-4)
-        list.push({ text: echo, at: Date.now() })
+        list.push({ text: echo, at: Date.now(), q: q })
         echoes[sid] = list
         _answerEchoes = echoes
         _push(sid, { kind: "user", text: echo })
@@ -837,8 +862,22 @@ Item {
     // toolResult lands ("❯ question ↳ answer"), so an echo re-appended past that
     // point duplicates the answer at the bottom of every later rebuild — hard
     // 60s cap, exactly like the marks' never-caught-up guard.
-    var answers = (_answerEchoes[esid] || []).filter(a =>
-      typeof a === "object" && (Date.now() - (a.at || 0)) < 60000)
+    // An echo is spent as soon as the rebuilt transcript renders the answered
+    // ask itself ("❯ question ↳ answer") — re-appending past that point tacks a
+    // stale approval onto the bottom of every later rebuild. The 60s clock is
+    // only the backstop for asks whose turn never records a result.
+    var answers = (_answerEchoes[esid] || []).filter(a => {
+      if (typeof a !== "object" || (Date.now() - (a.at || 0)) >= 60000) return false
+      var qkey = String(a.q || "").slice(0, 40)
+      if (!qkey.length) return true
+      for (var fi = 0; fi < feeds[esid].length; fi++) {
+        var it = feeds[esid][fi]
+        if (it.kind === "cmd" && it.tool === "ask"
+            && String(it.text || "").indexOf("↳") >= 0
+            && String(it.text || "").indexOf(qkey) >= 0) return false
+      }
+      return true
+    })
     var ne = _answerEchoes
     if (answers.length) ne[esid] = answers; else delete ne[esid]
     _answerEchoes = ne
