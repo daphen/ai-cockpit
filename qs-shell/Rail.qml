@@ -2237,11 +2237,15 @@ Item {
                   return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
                 }
                 visible: !self
-                width: 12; height: 12
+                width: 16; height: 16
                 Component.onCompleted: rail.probeDotCreates++
-                Spinner {
-                  anchors.centerIn: parent; visible: parent.visible && !parent.hasAsk && md.status === "streaming"
-                  running: visible; color: Theme.green; dotSize: 2.0
+                // The working signifier is the ORB here too — same grammar as the
+                // expanded rows and the composer glance, not a separate spinner.
+                ThinkingOrb {
+                  anchors.centerIn: parent
+                  width: 16; height: 16
+                  running: parent.visible && !parent.hasAsk && md.status === "streaming"
+                  glow: rail.actionGlow(md.rawName || md.name)
                 }
                 Rectangle {
                   anchors.centerIn: parent; visible: parent.visible && !parent.hasAsk && md.status !== "streaming"
