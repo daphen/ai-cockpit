@@ -160,6 +160,8 @@ Rectangle {
       // Wide like the old lualine glyph cell (two block chars), not a skinny bar.
       width: 16; height: 18; radius: 3
       color: Theme.surface0
+      border.width: 1
+      border.color: Theme.hairline
       Rectangle {
         width: parent.width; height: 5; radius: 2.5
         // The special scroll-timeline red lualine used, not the theme red.
