@@ -2264,6 +2264,23 @@ Item {
               font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
           }
+          // Expanded: the right slot shows where the ACTIVE session runs — the same
+          // cloud/laptop grammar as the list rows, which no longer carry its row.
+          Icon {
+            anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+            name: {
+              var arr = rail.liveSessions
+              for (var i = 0; i < arr.length; i++)
+                if (arr[i].name === rail.selectedRaw)
+                  return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
+              return "laptop--outline--18"
+            }
+            width: 15; height: 15
+            color: Theme.fg
+            opacity: rail.rosterExpanded ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 220 } }
+          }
           Row {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
