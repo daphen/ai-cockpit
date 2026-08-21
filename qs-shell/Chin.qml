@@ -5,8 +5,11 @@ import QsLib
 
 // The cockpit's statusline: renders the state nvim pushes via cockpit/chin.lua
 // (a watched JSON file, one per cockpit mode). Mirrors the retired lualine
-// layout — left: path+modified · diagnostics · searchcount; middle: macro pill;
-// right: filetype · worktree diff · plan chip · ticket chip · scrollbar glyph.
+// layout — left: path+modified · diagnostics · searchcount · REC pill;
+// right: filetype · worktree diff · plan chip · ticket chip · scrollbar glyph —
+// but animated: values crossfade (out-up / in-from-below), numbers pop, and
+// items glide open/closed instead of hard-cutting, since the chin lives in QML
+// where lualine could only repaint cells.
 Rectangle {
   id: chin
   implicitHeight: 30
@@ -18,12 +21,80 @@ Rectangle {
     return s || "personal"
   }
   function _n(v) { return typeof v === "number" ? v : 0 }
-  // lualine's scroll-timeline glyph: position within the buffer, doubled.
   readonly property var _sbar: ["▔", "🮂", "🬂", "🮃", "▀", "▄", "▃", "🬭", "▂", "▁"]
   function scrollGlyph() {
     var lines = _n(st.lines); if (lines < 1) return ""
     var i = Math.min(_sbar.length - 1, Math.floor((_n(st.line) - 1) / lines * _sbar.length))
     return _sbar[i] + _sbar[i]
+  }
+
+  // Animated value cell: crossfades text changes (old rises out, new enters from
+  // below), pops numbers when `pop`, and glides its width — including its own
+  // trailing gap — to zero when empty, so neighbors reflow smoothly.
+  component Swap: Item {
+    id: sw
+    property string value: ""
+    property color tint: Theme.fg
+    property int px: 11
+    property bool pop: false
+    property real gap: 10
+    clip: true
+    height: ta.implicitHeight + 8
+    width: _w
+    property real _w: 0
+    Behavior on _w { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    property bool _front: true
+    onValueChanged: {
+      var inc = _front ? tb : ta
+      var out = _front ? ta : tb
+      _front = !_front
+      if (value.length) {
+        inc.text = value
+        _w = inc.implicitWidth + gap
+        inAnimFor(inc).restart()
+      } else {
+        _w = 0
+      }
+      outAnimFor(out).restart()
+    }
+    function inAnimFor(t)  { return t === ta ? aIn  : bIn }
+    function outAnimFor(t) { return t === ta ? aOut : bOut }
+    Text {
+      id: ta
+      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px }
+      anchors.verticalCenter: parent.verticalCenter
+      opacity: 0
+      transformOrigin: Item.Center
+    }
+    Text {
+      id: tb
+      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px }
+      anchors.verticalCenter: parent.verticalCenter
+      opacity: 0
+      transformOrigin: Item.Center
+    }
+    ParallelAnimation {
+      id: aIn
+      NumberAnimation { target: ta; property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+      NumberAnimation { target: ta; property: "anchors.verticalCenterOffset"; from: 7; to: 0; duration: 180; easing.type: Easing.OutCubic }
+      NumberAnimation { target: ta; property: "scale"; from: sw.pop ? 1.25 : 1; to: 1; duration: 220; easing.type: Easing.OutBack }
+    }
+    ParallelAnimation {
+      id: aOut
+      NumberAnimation { target: ta; property: "opacity"; to: 0; duration: 140; easing.type: Easing.InCubic }
+      NumberAnimation { target: ta; property: "anchors.verticalCenterOffset"; to: -7; duration: 140; easing.type: Easing.InCubic }
+    }
+    ParallelAnimation {
+      id: bIn
+      NumberAnimation { target: tb; property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
+      NumberAnimation { target: tb; property: "anchors.verticalCenterOffset"; from: 7; to: 0; duration: 180; easing.type: Easing.OutCubic }
+      NumberAnimation { target: tb; property: "scale"; from: sw.pop ? 1.25 : 1; to: 1; duration: 220; easing.type: Easing.OutBack }
+    }
+    ParallelAnimation {
+      id: bOut
+      NumberAnimation { target: tb; property: "opacity"; to: 0; duration: 140; easing.type: Easing.InCubic }
+      NumberAnimation { target: tb; property: "anchors.verticalCenterOffset"; to: -7; duration: 140; easing.type: Easing.InCubic }
+    }
   }
 
   FileView {
@@ -40,50 +111,29 @@ Rectangle {
   Row {
     id: left
     anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-    spacing: 10
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      text: String(chin.st.path || "")
-      color: Theme.fg
-      font { family: Theme.fontFamily; pixelSize: 12 }
-      elide: Text.ElideMiddle
-      width: Math.min(implicitWidth, chin.width - right.implicitWidth - 120)
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: chin._n(chin.st.err) > 0
-      text: "✗ " + chin.st.err
-      color: Theme.red
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: chin._n(chin.st.warn) > 0
-      text: "▲ " + chin.st.warn
-      color: Theme.yellow
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: chin._n(chin.st.info) > 0
-      text: "● " + chin.st.info
-      color: Theme.sky
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: !!chin.st.search
-      text: String(chin.st.search || "")
-      color: Theme.fg_muted
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    // Macro-recording pill — lualine's red REC block.
+    spacing: 0
+    height: parent.height
+    Swap { anchors.verticalCenter: parent.verticalCenter
+           value: String(chin.st.path || ""); tint: Theme.fg; px: 12 }
+    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
+           value: chin._n(chin.st.err)  > 0 ? "✗ " + chin.st.err  : ""; tint: Theme.red }
+    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
+           value: chin._n(chin.st.warn) > 0 ? "▲ " + chin.st.warn : ""; tint: Theme.yellow }
+    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
+           value: chin._n(chin.st.info) > 0 ? "● " + chin.st.info : ""; tint: Theme.sky }
+    Swap { anchors.verticalCenter: parent.verticalCenter
+           value: String(chin.st.search || ""); tint: Theme.fg_muted }
+    // Macro-recording pill — lualine's red REC block, popping in/out.
     Rectangle {
-      visible: !!chin.st.rec
+      anchors.verticalCenter: parent.verticalCenter
       radius: 4
       width: recText.implicitWidth + 12; height: 18
-      anchors.verticalCenter: parent.verticalCenter
       color: Theme.red
+      opacity: chin.st.rec ? 1 : 0
+      scale: chin.st.rec ? 1 : 0.6
+      visible: opacity > 0.01
+      Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+      Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
       Text {
         id: recText
         anchors.centerIn: parent
@@ -97,45 +147,18 @@ Rectangle {
   Row {
     id: right
     anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
-    spacing: 12
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: !!chin.st.ft
-      text: String(chin.st.ft || "")
-      color: Theme.fg_muted
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    Row {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: chin._n(chin.st.add) + chin._n(chin.st.del) > 0
-      spacing: 6
-      Text {
-        visible: chin._n(chin.st.add) > 0
-        text: "+" + chin.st.add
-        color: Theme.green
-        font { family: Theme.fontFamily; pixelSize: 11 }
-      }
-      Text {
-        visible: chin._n(chin.st.del) > 0
-        text: "−" + chin.st.del
-        color: Theme.red
-        font { family: Theme.fontFamily; pixelSize: 11 }
-      }
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: !!chin.st.plan
-      text: String(chin.st.plan || "")
-      color: Theme.electric
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: !!chin.st.root
-      text: " " + String(chin.st.root || "")
-      color: Theme.fg_muted
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
+    spacing: 0
+    height: parent.height
+    Swap { anchors.verticalCenter: parent.verticalCenter
+           value: String(chin.st.ft || ""); tint: Theme.fg_muted }
+    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true; gap: 6
+           value: chin._n(chin.st.add) > 0 ? "+" + chin.st.add : ""; tint: Theme.green }
+    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
+           value: chin._n(chin.st.del) > 0 ? "−" + chin.st.del : ""; tint: Theme.red }
+    Swap { anchors.verticalCenter: parent.verticalCenter
+           value: String(chin.st.plan || ""); tint: Theme.electric }
+    Swap { anchors.verticalCenter: parent.verticalCenter
+           value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg_muted }
     Text {
       anchors.verticalCenter: parent.verticalCenter
       text: chin.scrollGlyph()
