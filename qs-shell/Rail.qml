@@ -1639,17 +1639,9 @@ Item {
       if (featuredStreaming && agentd && selectedRaw) agentd.abortTool(selectedRaw)
     }
   }
-  // The rail's ground matches the editor side (Theme.bg): the hairline border
-  // below does the separating, so the panes read as one surface with a seam
-  // instead of two stacked layers.
-  Rectangle { anchors.fill: parent; color: Theme.bg; z: -1 }
-  Rectangle {
-    anchors.fill: parent
-    color: "transparent"
-    border.width: 1
-    border.color: Theme.hairline
-    z: 50
-  }
+  // The rail's own ground: one step darker than the editor side (Theme.bgDim), so the
+  // two panes read as distinct layers without a divider doing the work.
+  Rectangle { anchors.fill: parent; color: Theme.bgDim; z: -1 }
 
   // Daemon health banner (boot self-check failed): the whole scope is broken, not
   // one session — pin it above everything so it can't be scrolled away or missed.
@@ -1899,8 +1891,8 @@ Item {
         height: 44
         z: 2
         gradient: Gradient {
-          GradientStop { position: 0.0; color: Theme.bg }
-          GradientStop { position: 1.0; color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0) }
+          GradientStop { position: 0.0; color: Theme.bgDim }
+          GradientStop { position: 1.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
         }
       }
       Rectangle {
@@ -1910,8 +1902,8 @@ Item {
         opacity: (feedView.originY + feedView.contentHeight - feedView.height - feedView.contentY) > 8 ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 150 } }
         gradient: Gradient {
-          GradientStop { position: 0.0; color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0) }
-          GradientStop { position: 1.0; color: Theme.bg }
+          GradientStop { position: 0.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
+          GradientStop { position: 1.0; color: Theme.bgDim }
         }
       }
       onCountChanged: feedScroll.contentChanged()
