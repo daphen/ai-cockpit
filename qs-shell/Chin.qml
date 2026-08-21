@@ -29,7 +29,7 @@ Rectangle {
     id: sw
     property string value: ""
     property color tint: Theme.fg
-    property int px: 11
+    property int px: 14
     property bool pop: false
     property real gap: 10
     clip: true
@@ -108,7 +108,7 @@ Rectangle {
     spacing: 0
     height: parent.height
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.path || ""); tint: Theme.fg; px: 12 }
+           value: String(chin.st.path || ""); tint: Theme.fg }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
            value: chin._n(chin.st.err)  > 0 ? "✗ " + chin.st.err  : ""; tint: Theme.red }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
@@ -121,7 +121,7 @@ Rectangle {
     Rectangle {
       anchors.verticalCenter: parent.verticalCenter
       radius: 4
-      width: recText.implicitWidth + 12; height: 18
+      width: recText.implicitWidth + 14; height: 22
       color: Theme.red
       opacity: chin.st.rec ? 1 : 0
       scale: chin.st.rec ? 1 : 0.6
@@ -133,7 +133,7 @@ Rectangle {
         anchors.centerIn: parent
         text: "REC @" + String(chin.st.rec || "").toUpperCase()
         color: Theme.bg
-        font { family: Theme.fontFamily; pixelSize: 10; bold: true }
+        font { family: Theme.fontFamily; pixelSize: 14; bold: true }
       }
     }
   }
