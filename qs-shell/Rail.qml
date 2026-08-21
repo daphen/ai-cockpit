@@ -34,6 +34,14 @@ Item {
   // Super+T must work from ANYWHERE, including while typing: the composer holds the
   // keyboard in insert mode, so moving `cur` alone did nothing visible. Leave insert
   // and clear the restore flag, or the next focus change would drop you back into it.
+  // Jump straight to a session by name (Super+i on a live question): select it
+  // and put the keyboard in the rail so the ask card's keys work immediately.
+  function jumpToSession(n) {
+    if (!n) return
+    activeRaw = n
+    rosterOverride = false
+    requestFocus()
+  }
   function focusRoster() {
     if (rosterOverride === false) rosterOverride = true
     exitInsert()
