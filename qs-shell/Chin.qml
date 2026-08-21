@@ -21,12 +21,6 @@ Rectangle {
     return s || "personal"
   }
   function _n(v) { return typeof v === "number" ? v : 0 }
-  readonly property var _sbar: ["▔", "🮂", "🬂", "🮃", "▀", "▄", "▃", "🬭", "▂", "▁"]
-  function scrollGlyph() {
-    var lines = _n(st.lines); if (lines < 1) return ""
-    var i = Math.min(_sbar.length - 1, Math.floor((_n(st.line) - 1) / lines * _sbar.length))
-    return _sbar[i] + _sbar[i]
-  }
 
   // Animated value cell: crossfades text changes (old rises out, new enters from
   // below), pops numbers when `pop`, and glides its width — including its own
@@ -159,18 +153,18 @@ Rectangle {
            value: String(chin.st.plan || ""); tint: Theme.electric }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg_muted }
+    // Scroll position as a real track: the thumb slides over the unscrolled
+    // remainder — a proper miniature scrollbar, not lualine's glyph cell.
     Rectangle {
       anchors.verticalCenter: parent.verticalCenter
-      radius: 4
-      width: scrollText.implicitWidth + 12
-      height: 18
+      width: 5; height: 18; radius: 2.5
       color: Theme.surface0
-      Text {
-        id: scrollText
-        anchors.centerIn: parent
-        text: chin.scrollGlyph()
+      Rectangle {
+        width: parent.width; height: 6; radius: 2.5
         color: Theme.red
-        font { family: Theme.fontFamily; pixelSize: 11 }
+        y: (parent.height - height)
+           * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
+        Behavior on y { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
       }
     }
   }
