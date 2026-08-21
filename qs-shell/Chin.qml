@@ -30,6 +30,7 @@ Rectangle {
     property string value: ""
     property color tint: Theme.fg
     property int px: 16
+    property bool bold: false
     property bool pop: false
     property real gap: 14
     clip: true
@@ -55,14 +56,14 @@ Rectangle {
     function outAnimFor(t) { return t === ta ? aOut : bOut }
     Text {
       id: ta
-      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px }
+      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
       anchors.verticalCenter: parent.verticalCenter
       opacity: 0
       transformOrigin: Item.Center
     }
     Text {
       id: tb
-      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px }
+      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
       anchors.verticalCenter: parent.verticalCenter
       opacity: 0
       transformOrigin: Item.Center
@@ -108,7 +109,7 @@ Rectangle {
     spacing: 0
     height: parent.height
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.path || ""); tint: Theme.fg }
+           value: String(chin.st.path || ""); tint: Theme.fg; bold: true }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
            value: chin._n(chin.st.err)  > 0 ? "✗ " + chin.st.err  : ""; tint: Theme.red }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
