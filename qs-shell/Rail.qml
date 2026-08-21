@@ -655,13 +655,14 @@ Item {
   }
   // Thinking blocks — shown inline (the visible thought-process trail).
   function turnThinks(items) { return (items || []).filter(x => x.kind === "think") }
+  function turnUserBash(items) { return (items || []).filter(x => x.kind === "userbash") }
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
   // counted): "4 bash · 6 read · edited 3".
   function turnActivitySummary(items) {
     var counts = {}, edits = 0, interrupts = 0, errors = 0
     for (var i = 0; i < (items || []).length; i++) {
       var it = items[i]
-      if (it.kind === "text" || it.kind === "think") continue
+      if (it.kind === "text" || it.kind === "think" || it.kind === "userbash") continue
       else if (it.kind === "edit") edits++
       else if (it.kind === "cmd" && it.tool === "error") {
         // "1 error" says nothing. Name the interrupt; other errors count as words.
@@ -682,7 +683,7 @@ Item {
     return parts.join("  ·  ")
   }
   function turnActivityItems(items) {
-    return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && !(x.kind === "cmd" && x.tool === "info"))
+    return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && x.kind !== "userbash" && !(x.kind === "cmd" && x.tool === "info"))
   }
   function turnInfos(items) {
     return (items || []).filter(x => x.kind === "cmd" && x.tool === "info").map(x => String(x.text || ""))
@@ -898,6 +899,7 @@ Item {
     return agentd.askFor(selectedRaw)
   }
   function answerAsk(payload) { if (agentd && pendingAsk) agentd.answerAsk(selectedRaw, payload) }
+  readonly property var pendingUserBash: agentd ? agentd.userBashPayload(pendingAsk) : null
   // A question the agent stopped on, found in the transcript. It cannot be answered from
   // here (the resolver died with the process that asked), so it is a notice, not a card —
   // the way forward is a fresh prompt carrying the decision.
@@ -2072,6 +2074,15 @@ Item {
               }
             }
 
+            Repeater {
+              model: turnDel.isUser ? [] : rail.turnUserBash(turnDel.turn.items)
+              Loader {
+                width: cardCol.width
+                property var entry: modelData
+                sourceComponent: userBashRow
+              }
+            }
+
             // Compact activity summary — "4 bash · 6 read · edited 3", expandable.
             Loader {
               active: !turnDel.isUser && rail.turnActivitySummary(turnDel.turn.items).length > 0
@@ -2183,8 +2194,8 @@ Item {
               visible: rail.selectedPlan.length > 0
               width: Math.min(implicitWidth, 240)
               elide: Text.ElideMiddle
-              text: "plan · " + rail.selectedPlan
-              color: Theme.electric
+              text: rail.selectedPlan
+              color: Theme.fg_muted
               font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
             // The "thinking" signifier lives HERE now (the floating pill is gone):
@@ -2515,6 +2526,7 @@ Item {
     Rectangle {
       id: askCard
       readonly property var ask: rail.pendingAsk
+      readonly property var userBash: rail.pendingUserBash
       visible: ask !== null && rail.view === "chat"
       Layout.fillWidth: true
       implicitHeight: askCol.implicitHeight + 28
@@ -2536,17 +2548,20 @@ Item {
         spacing: 9
 
         Text {
-          text: "needs your input"
+          text: askCard.userBash ? "run as you" : "needs your input"
           color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
         }
         Text {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
-          text: askCard.ask ? (askCard.ask.title || "") : ""
+          text: askCard.userBash ? ("! " + String(askCard.userBash.command || ""))
+                                 : (askCard.ask ? (askCard.ask.title || "") : "")
           color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         }
         Text {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
-          text: askCard.ask ? (askCard.ask.message || "") : ""
+          text: askCard.userBash
+              ? (String(askCard.userBash.reason || "") + "\n" + String(askCard.userBash.host || "") + ":" + String(askCard.userBash.cwd || ""))
+              : (askCard.ask ? (askCard.ask.message || "") : "")
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
 
@@ -2573,12 +2588,14 @@ Item {
           spacing: 20
           visible: askCard.ask && askCard.ask.method === "confirm"
           Row { spacing: 8; KeyCap { text: "y"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+            Text { text: askCard.userBash ? "Run" : "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+            TapHandler { onTapped: rail.answerAsk({ confirmed: true }) } }
           Row { spacing: 8; KeyCap { text: "n"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+            Text { text: askCard.userBash ? "Decline" : "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+            TapHandler { onTapped: rail.answerAsk({ confirmed: false }) } }
           // Neither yes nor no: release the agent from the question and open the composer,
           // for the common case where the question itself is the thing worth discussing.
-          Row { spacing: 8; KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
+          Row { visible: !askCard.userBash; spacing: 8; KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
         }
 
@@ -2623,7 +2640,8 @@ Item {
         }
 
         Text {
-          text: (askCard.ask && askCard.ask.method === "select")
+          text: askCard.userBash ? "click Run · y runs · n declines · esc cancels"
+              : (askCard.ask && askCard.ask.method === "select")
                 ? "press a number · t to talk · esc cancels" : "t to talk · esc cancels"
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
@@ -3093,6 +3111,59 @@ Item {
     }
   }
   Component {
+    id: userBashRow
+    Rectangle {
+      id: ubCard
+      width: parent ? parent.width : 400
+      implicitHeight: ubCol.implicitHeight + 18
+      radius: 9
+      color: Theme.bgDim
+      readonly property bool waiting: !entry.failed && !String(entry.result || "").length
+                                      && rail.pendingUserBash
+                                      && String(rail.pendingUserBash.command || "") === String(entry.command || "")
+      border.width: 1
+      border.color: entry.failed ? Theme.red : Theme.hairline
+      Column {
+        id: ubCol
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 9 }
+        spacing: 6
+        RowLayout {
+          width: parent.width
+          Icon { name: "chevron-right"; width: 13; height: 13; color: entry.failed ? Theme.red : Theme.orange }
+          Text {
+            text: "! " + String(entry.command || "")
+            color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+            wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+          }
+          Text {
+            text: entry.failed ? "failed" : (String(entry.result || "").length ? "done" : (ubCard.waiting ? "requested" : "interrupted"))
+            color: entry.failed ? Theme.red : Theme.fg_muted
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          }
+        }
+        Text {
+          visible: String(entry.reason || "").length > 0
+          width: parent.width; text: String(entry.reason || "")
+          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          wrapMode: Text.WordWrap
+        }
+        Rectangle {
+          visible: String(entry.result || "").length > 0
+          width: parent.width; implicitHeight: ubResult.implicitHeight + 14
+          radius: 7; color: Theme.surface0
+          Text {
+            id: ubResult
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 7 }
+            text: String(entry.result || "")
+            color: entry.failed ? Theme.red : Theme.fg_secondary
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            wrapMode: Text.WrapAnywhere
+          }
+        }
+      }
+    }
+  }
+  Component {
     id: activityRow
     // Collapsed one-liner of a turn's tool activity; tap to expand the full list.
     Column {
@@ -3157,7 +3228,7 @@ Item {
         Text {
           readonly property bool liveNow: {
             rail.agentd ? rail.agentd.curToolGen : 0
-            return rail.agentd && entry.id && rail.agentd.curToolIdFor(rail.selectedRaw) === entry.id
+            return !!(rail.agentd && entry.id && rail.agentd.curToolIdFor(rail.selectedRaw) === entry.id)
           }
           text: entry.text + (cmdCol.isFailed ? "  — failed" : "")
                 + (liveNow ? "  · " + rail.runningToolLabel(rail.selectedRaw).split("· ").pop() : "")
