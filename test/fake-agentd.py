@@ -11,7 +11,8 @@ import json, os, socket, sys, threading, time
 SOCK = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fake-agentd.sock"
 
 BASE = ["alpha-1000", "every-9001", "zulu-9999"]
-state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0, "transcript_ask": None}
+state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0, "transcript_ask": None,
+         "user_bash": None}
 clients = []
 lock = threading.Lock()
 
@@ -57,6 +58,25 @@ def entries_for(sid):
                              "type": "toolResult", "toolCallId": "call_fake_ask",
                              "content": [{"type": "text", "text": "approved"}]}]}})
             parent = eid
+    if state["user_bash"] in ("approved", "declined"):
+        eid = f"{sid}-user-bash"
+        ents.append({"id": eid, "parentId": parent, "type": "message",
+                     "message": {"role": "assistant", "content": [{
+                         "type": "toolCall", "id": "call_fake_user_bash", "name": "request_user_bash",
+                         "arguments": {"command": "printf immutable-command", "reason": "prove exact execution"}}]}})
+        parent = eid
+        if state["user_bash"] == "approved":
+            eid = f"{sid}-user-bash-approval"
+            ents.append({"id": eid, "parentId": parent, "type": "custom",
+                         "customType": "cockpit-user-bash-approval",
+                         "data": {"command": "printf immutable-command", "decision": "approved"}})
+            parent = eid
+        eid = f"{sid}-user-bash-result"
+        result = "Command completed with exit status 0.\nimmutable-command" if state["user_bash"] == "approved" else "Command declined; nothing was executed."
+        ents.append({"id": eid, "parentId": parent, "type": "message",
+                     "message": {"role": "toolResult", "toolCallId": "call_fake_user_bash",
+                                 "content": [{"type": "text", "text": result}], "isError": False}})
+        parent = eid
     return ents, parent
 
 
@@ -116,10 +136,19 @@ def serve(conn):
                 state["streaming"] = None
                 broadcast({"type": "agent_end", "session": m.get("session", "")})
                 push_roster()
-            if t == "extension_ui_response":
+            if t in ("answer", "extension_ui_response"):
                 with open(SOCK + ".answers", "a") as fh:
                     fh.write(json.dumps(m) + "\n")
-                broadcast({"type": "turn_end", "session": m.get("session", "every-9001")})
+                sid = m.get("session", "every-9001")
+                response = m.get("response", m)
+                if response.get("confirmed") is not None and state["user_bash"] == "pending":
+                    state["user_bash"] = "approved" if response.get("confirmed") else "declined"
+                answered = {"type": "ask_answered", "session": sid}
+                for key in ("confirmed", "value", "cancelled"):
+                    if key in response:
+                        answered[key] = response[key]
+                broadcast(answered)
+                broadcast({"type": "turn_end", "session": sid})
             if t == "get_entries":
                 sid = m.get("session")
 
@@ -173,6 +202,14 @@ def driver():
                 broadcast({"type": "extension_ui_request", "session": "every-9001",
                            "method": "confirm", "id": "fake-live-1",
                            "title": "T-live: proceed?", "message": "live question"})
+            elif c == "user_bash":
+                state["user_bash"] = "pending"
+                broadcast({"type": "extension_ui_request", "session": "every-9001",
+                           "method": "confirm", "id": "fake-user-bash-1",
+                           "title": "__cockpit_user_bash__",
+                           "message": json.dumps({"command": "printf immutable-command",
+                                                  "cwd": "/tmp/exact cwd", "host": "vm-test",
+                                                  "reason": "prove exact execution"})})
             elif c == "ask_in_transcript":
                 state["transcript_ask"] = "open"
             elif c == "answer_in_transcript":

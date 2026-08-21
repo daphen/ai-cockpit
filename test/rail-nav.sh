@@ -215,7 +215,7 @@ a1=$(st)
 check "ask arrived"            "$(field "$a1" ask)" "True"
 check "insert escaped on ask"  "$(field "$a1" ins)" "False"
 key y; sleep 2
-ans=$(grep -c '"id": "fake-live-1"' "$SOCK.answers" 2>/dev/null)
+ans=$(grep -c '"type": "answer".*"confirmed": true' "$SOCK.answers" 2>/dev/null || true)
 check "answer reached the daemon" "${ans:-0}" "1"
 check "card cleared"              "$(field "$(st)" ask)" "False"
 
@@ -312,6 +312,29 @@ key g; key enter; sleep 2                 # select alpha-1000 (NOT the ask targe
 fake ask 1                                # live ask lands on every-9001
 check "ask counted while another session selected" "$(field "$(st)" asksTotal)" "1"
 check "selected session's chin NOT hijacked" "$(field "$(st)" ask)" "False"
+
+say "18. command cards wait for one explicit human Run and keep the result inline"
+key g; key j; key j; key enter; sleep 1
+check "command target selected" "$(field "$(st)" sel)" "every-9001"
+rm -f "$SOCK.answers"
+fake user_bash 1
+check "command card arrived" "$(field "$(st)" ask)" "True"
+preauth=$(grep -c 'fake-user-bash-1\|confirmed' "$SOCK.answers" 2>/dev/null || true)
+check "nothing authorized before Run" "${preauth:-0}" "0"
+key y; sleep 2
+runs=$(grep -c '"confirmed": true' "$SOCK.answers" 2>/dev/null || true)
+check "Run authorized exactly once" "${runs:-0}" "1"
+check "command card cleared" "$(field "$(st)" ask)" "False"
+key G; sleep 1
+output=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null || true)
+check "durable approval rebuilt in place" "$(case "$output" in *"ask:❯ ! printf immutable-command"*) echo 1;; *) echo 0;; esac)" "1"
+check "user-bash skipped the temporary echo" "$(python3 -c 'import sys; print(sys.argv[1].count("printf immutable-command"))' "$output")" "1"
+check "command output stayed inline" "$(case "$output" in *"Command completed with exit status 0"*) echo 1;; *) echo 0;; esac)" "1"
+rm -f "$SOCK.answers"
+fake user_bash 1
+key n; sleep 1
+declines=$(grep -c '"confirmed": false' "$SOCK.answers" 2>/dev/null || true)
+check "Decline answered once without Run" "${declines:-0}" "1"
 
 say "6. no QML errors during the run"
 errs=$(grep -icE 'WARN|Error' "$LOG")
