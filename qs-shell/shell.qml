@@ -147,25 +147,38 @@ ShellRoot {
       Row {
         anchors.fill: parent
 
-        TermView {
-          id: term
-          // Device-pixel EXACT size. The offscreen frame is ceil(w*dpr) wide and the
-          // paint texture is too, so unless w*dpr is a whole number the painter's scale
-          // is ceil(w*dpr)/w rather than dpr and every blit resamples the frame by ~1+ε.
-          // With smoothing off that is nearest-neighbour, which is what made glyph stems
-          // uneven — some crisp, some smeared. Snapping the item removes the mismatch.
-          // term.dpr comes from the widget itself (window()->effectiveDevicePixelRatio()),
-          // because QML's Screen.devicePixelRatio reported 1 while the window ran at 1.75.
+        Column {
+          id: termCol
           width: Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
-          height: Math.round(parent.height * win.termDpr) / win.termDpr
-          // Focus is managed IMPERATIVELY (onPaneChanged + click). A `focus:`
-          // binding here fights forceActiveFocus and leaves the terminal unable
-          // to hold keyboard focus — same lesson the rail notes for itself.
-          active: activeFocus   // show the block cursor only while the terminal truly holds focus
-          Component.onCompleted: forceActiveFocus()
-          // Keep pane in sync when focus is grabbed by a click (not just Ctrl+h/l),
-          // else tryFocus() sees a stale pane and the C-l/C-h cross no-ops.
-          onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+          height: parent.height
+          TermView {
+            id: term
+            // Device-pixel EXACT size. The offscreen frame is ceil(w*dpr) wide and the
+            // paint texture is too, so unless w*dpr is a whole number the painter's scale
+            // is ceil(w*dpr)/w rather than dpr and every blit resamples the frame by ~1+ε.
+            // With smoothing off that is nearest-neighbour, which is what made glyph stems
+            // uneven — some crisp, some smeared. Snapping the item removes the mismatch.
+            // term.dpr comes from the widget itself (window()->effectiveDevicePixelRatio()),
+            // because QML's Screen.devicePixelRatio reported 1 while the window ran at 1.75.
+            width: parent.width
+            height: Math.round((parent.height - chin.implicitHeight) * win.termDpr) / win.termDpr
+            // Focus is managed IMPERATIVELY (onPaneChanged + click). A `focus:`
+            // binding here fights forceActiveFocus and leaves the terminal unable
+            // to hold keyboard focus — same lesson the rail notes for itself.
+            active: activeFocus   // show the block cursor only while the terminal truly holds focus
+            Component.onCompleted: forceActiveFocus()
+            // Keep pane in sync when focus is grabbed by a click (not just Ctrl+h/l),
+            // else tryFocus() sees a stale pane and the C-l/C-h cross no-ops.
+            onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+          }
+          // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the
+          // window's true bottom edge, so the terminal grid's row slack hides at this
+          // seam instead of rendering as a phantom row under an in-grid statusline.
+          Chin {
+            id: chin
+            width: parent.width
+            height: parent.height - term.height
+          }
         }
 
         Rectangle { width: 1; height: parent.height; color: Theme.hairline }
