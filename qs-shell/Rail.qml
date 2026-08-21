@@ -1787,7 +1787,7 @@ Item {
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
-        out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, key: it.mid || ("i" + i) })
+        out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, sender: it.sender || "", key: it.mid || ("i" + i) })
       } else if (it.kind === "sys") {
         // Housekeeping (compaction) gets its OWN card so it never colors the
         // neighboring turn's errors.
@@ -1977,7 +1977,7 @@ Item {
                 color: turnDel.isUser ? Theme.orange : Theme.electric
               }
               Text {
-                text: turnDel.isUser ? "you" : "agent"
+                text: turnDel.isUser ? (turnDel.turn.sender || "you") : "agent"
                 color: Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
                 anchors.verticalCenter: parent.verticalCenter

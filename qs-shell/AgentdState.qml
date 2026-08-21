@@ -546,7 +546,17 @@ Item {
         for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
         ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
         ut = _foldSlashBody(ut)
-        if (ut) items.push({ kind: "user", text: ut, steered: prevAborted })
+        if (ut) {
+          // Relayed prompts arrive sender-stamped by the daemon ("⇄ <name>" first
+          // line, #84): lift the sender into the row instead of showing it as text.
+          var sender = ""
+          if (ut.indexOf("\u21c4 ") === 0) {
+            var nl = ut.indexOf("\n")
+            sender = (nl > 0 ? ut.slice(2, nl) : ut.slice(2)).trim()
+            ut = nl > 0 ? ut.slice(nl + 1).trim() : ""
+          }
+          if (ut || sender) items.push({ kind: "user", text: ut, steered: prevAborted, sender: sender })
+        }
       } else if (msg._compaction) {
         // sys, not cmd: compaction is housekeeping between turns — inlining it in
         // the following turn's card made its neighbors ("output truncated") read
