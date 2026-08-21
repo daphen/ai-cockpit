@@ -126,6 +126,9 @@ Item {
   // sid -> Date.now() while a compaction is in flight (live glance feedback).
   property var _compacting: ({})
   function compactingSince(sid) { return _compacting[sid] || 0 }
+  // sid -> Date.now() of the last session-tagged event (roster recency sort).
+  property var _lastAct: ({})
+  function lastActFor(sid) { return _lastAct[sid] || 0 }
   property var _curTool: ({})
   property var _curToolAt: ({})     // sid -> Date.now() of the RUNNING tool call
   property var _curToolLive: ({})   // sid -> true while a tool call is executing
@@ -716,6 +719,10 @@ Item {
     if (t === "response" && m.command === "get_entries") { onEntries(m); return }
     const sid = m.session
     if (!sid) return
+    // Recency: any session-tagged event is activity. Silent (no gen bump) — the
+    // roster re-sorts on the daemon's own roster pushes, which land at exactly
+    // the status boundaries where order should change.
+    _lastAct[sid] = Date.now()
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
     if (t === "agent_end") { var ct0 = _curTool; delete ct0[sid]; _curTool = ct0; curToolGen++ }

@@ -969,15 +969,23 @@ Item {
     var all = liveSessions, children = {}, roots = []
     for (var i = 0; i < all.length; i++) {
       var s = all[i]
-      if (s.parent && all.some(x => x.name === s.parent))
+      // The ACTIVE session lives in the header glance, not the list — but its
+      // children stay listed (they have nowhere else to nest).
+      if (s.parent && all.some(x => x.name === s.parent) && s.parent !== rail.selectedRaw)
         (children[s.parent] = children[s.parent] || []).push(s)
-      else roots.push(s)
+      else if ((s.rawName || s.name) !== rail.selectedRaw) roots.push(s)
     }
-    // Stable order by name so rows never jump when the daemon reorders on a
-    // status change (streaming/idle floats sessions around otherwise).
-    var byName = (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-    roots.sort(byName)
-    for (var key in children) children[key].sort(byName)
+    // Recency-first (last session event), name as the stable tiebreak. Order
+    // only actually shifts on roster pushes (status boundaries), so rows don't
+    // dance mid-stream.
+    var act = (x) => rail.agentd ? rail.agentd.lastActFor(x.rawName || x.name) : 0
+    var byRecency = (a, b) => {
+      var d = act(b) - act(a)
+      if (d !== 0) return d
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    }
+    roots.sort(byRecency)
+    for (var key in children) children[key].sort(byRecency)
     var out = []
     function walk(s, depth, parentCwd) {
       out.push({ name: shortName(s.name), rawName: s.name, idle: stateLabel(s.status),
