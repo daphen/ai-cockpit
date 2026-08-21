@@ -181,11 +181,9 @@ ShellRoot {
           }
         }
 
-        Rectangle { width: 1; height: parent.height; color: Theme.hairline }
-
         Rail {
           id: rail
-          width: parent.width - term.width - 1
+          width: parent.width - termCol.width
           height: parent.height
           agentd: agentd
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
