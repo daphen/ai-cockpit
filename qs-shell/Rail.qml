@@ -2205,11 +2205,14 @@ Item {
         // The ONE geometry animation. The sheet has no Behavior of its own — its
         // height binding follows this frame-by-frame, so container and content can
         // never separate; rows are revealed by this clip and fade in slower.
-        implicitHeight: (rail.rosterExpanded ? rosterInner.implicitHeight : glanceCol.implicitHeight) + 8
+        // The glance stays as the HEADER when expanded — the active session lives
+        // there (big title + orb), never duplicated as a list row.
+        implicitHeight: glanceCol.implicitHeight + (rail.rosterExpanded ? rosterInner.implicitHeight + 4 : 0) + 8
         Behavior on implicitHeight { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
 
-        // Collapsed glance: active session name on the left (the roster row grammar),
-        // status dots for the OTHER sessions on the right.
+        // Glance = the active session's home in BOTH states: collapsed it is the
+        // whole roster; expanded it becomes the header above the others-list.
+        // Only the right-side status dots are collapsed-only (the list shows them).
         Item {
           id: glanceCol
           anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
@@ -2217,9 +2220,6 @@ Item {
           // from the row's content made the whole sheet jump every time the orb
           // entered or left. The space is reserved whether or not it's running.
           implicitHeight: 52
-          opacity: rail.rosterExpanded ? 0 : 1
-          visible: opacity > 0.01
-          Behavior on opacity { NumberAnimation { duration: 220 } }
           Row {
             id: glanceName
             anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
@@ -2263,6 +2263,9 @@ Item {
           Row {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
+            opacity: rail.rosterExpanded ? 0 : 1
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 220 } }
             Repeater {
               // rosterModel, NOT a filtered array: the array's identity changed on every
               // roster push, so every dot (and running spinner) was destroyed and rebuilt
@@ -2313,7 +2316,7 @@ Item {
           opacity: rail.rosterExpanded ? 1 : 0
           visible: opacity > 0.01
           Behavior on opacity { NumberAnimation { duration: 220 } }
-          anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
+          anchors { left: parent.left; right: parent.right; top: glanceCol.bottom; topMargin: 4 }
           spacing: 3
           Repeater {
             model: rosterModel
