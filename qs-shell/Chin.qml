@@ -143,6 +143,10 @@ Rectangle {
     anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
+    // Language icon (nvim-web-devicons, same glyph+color lualine showed).
+    Swap { anchors.verticalCenter: parent.verticalCenter; gap: 6
+           value: String(chin.st.fticon || "")
+           tint: chin.st.fticolor ? Qt.color(chin.st.fticolor) : Theme.fg_muted }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: String(chin.st.ft || ""); tint: Theme.fg_muted }
     // The old lualine fancy_diff nerd glyphs, not bare +/-.
