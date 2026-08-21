@@ -2324,7 +2324,9 @@ Item {
               rail.agentd ? rail.agentd.askGen : 0
               return rail.agentd ? rail.agentd.askFor(modelData.rawName || modelData.name) !== null : false
             }
-              color: cursor ? Theme.fg
+              // Selection token, not a full fg inversion — pure white/black pills
+              // shouted over the whole rail.
+              color: cursor ? Theme.selection
                    : selected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
                    : hov.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.04) : "transparent"
               HoverHandler { id: hov }
@@ -2336,7 +2338,7 @@ Item {
                 // Nesting connector for spawned subagents.
                 Text {
                   visible: (modelData.depth || 0) > 0
-                  text: "↳"; color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                  text: "↳"; color: Theme.fg_muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                   Layout.alignment: Qt.AlignVCenter
                 }
@@ -2350,7 +2352,7 @@ Item {
                   width: 14; height: 14
                   Layout.preferredWidth: 14; Layout.preferredHeight: 14
                   Layout.alignment: Qt.AlignVCenter
-                  color: sessRow.cursor ? Theme.bg : Theme.fg
+                  color: Theme.fg
                 }
                 Text {
                   text: modelData.name
@@ -2368,7 +2370,7 @@ Item {
                   Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20
                                                 - (roleBadge.visible ? roleBadge.width + 8 : 0))
                   elide: Text.ElideRight
-                  color: sessRow.cursor ? Theme.bg : Theme.fg
+                  color: Theme.fg
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                   // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
                   // meant two rows shouting at once with no way to tell which you were on.
@@ -2386,7 +2388,7 @@ Item {
                     var seg = p.split("-")
                     return seg[seg.length - 1]
                   }
-                  color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                  color: Theme.fg_muted
                 }
                 // Spinner immediately right of the name. The slot is reserved even when idle
                 // so nothing shifts as a session starts or stops working. 20px is free (the
@@ -2406,7 +2408,7 @@ Item {
                     // pill fill already marks the cursor; a recolored orb read as a bug.
                     glow: rail.actionGlow(modelData.rawName || modelData.name)
                     seedKey: modelData.rawName || modelData.name
-                    invertRing: sessRow.cursor
+                    invertRing: false
                   }
                 }
                 Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
@@ -2443,7 +2445,7 @@ Item {
                   Layout.alignment: Qt.AlignVCenter
                   // One muted colour for every state: the orb by the name already says
                   // "working", so colouring the word too was saying it twice.
-                  color: sessRow.cursor ? Theme.bg : Theme.fg_muted
+                  color: Theme.fg_muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 }
                 Icon {
