@@ -64,15 +64,24 @@ done
 # the current QML, but the OTHER mode's cockpit keeps running — that is the whole point
 # of per-mode config paths. `qs kill -p` does not always take; verify and escalate.
 qs kill -p "$shellDir" >/dev/null 2>&1 || true
+# Argv is NOT a reliable identity: the qs launcher rewrites itself to a bare
+# ".quickshell-wrapped" with no args, so a "-p <path>" scan misses it and the
+# old instance survives every relaunch (new + old then fight over the same
+# shell id and crash). Identify by environment: only OUR launches carry this
+# mode's COCKPIT_TITLE.
+survivors_of_mode() {
+  for pid in $(pgrep -x qs; pgrep -x quickshell; pgrep -x '\.quickshell-wra'); do
+    [ "$pid" = "$$" ] && continue
+    if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qxF "COCKPIT_TITLE=$COCKPIT_TITLE"; then
+      echo "$pid"
+    fi
+  done
+}
 for _ in 1 2 3 4 5 6; do
-  survivors=$(ps -eo pid=,args= | awk -v p="$shellDir" '$0 ~ ("-p " p) && $0 !~ /awk/ {print $1}')
+  survivors=$(survivors_of_mode)
   [ -z "$survivors" ] && break
+  for pid in $survivors; do kill "$pid" 2>/dev/null || true; done
   sleep 0.5
-done
-for pid in ${survivors:-}; do
-  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = "qs" ] ||
-  [ "$(tr -d '\0' < /proc/$pid/comm 2>/dev/null)" = ".quickshell-wra" ] || continue
-  kill "$pid" 2>/dev/null || true
 done
 
 export QML2_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
