@@ -150,7 +150,7 @@ Rectangle {
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
            value: chin._n(chin.st.del) > 0 ? "−" + chin.st.del : ""; tint: Theme.red }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.plan || ""); tint: Theme.electric }
+           value: String(chin.st.plan || ""); tint: Theme.fg_muted }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg_muted }
     // Scroll position as a real track: the thumb slides over the unscrolled
