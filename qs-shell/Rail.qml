@@ -808,11 +808,10 @@ Item {
     return Qt.color("#3aa0ff")
   }
   // Composer chrome color is FIXED per theme, not action-reactive — the input
-  // frame recoloring with every tool change was too much motion. Light rides
-  // electric; dark keeps the pale azure "thinking" tint.
-  readonly property color activeRing: Theme.mode === "light"
-    ? Theme.electric
-    : Qt.hsla(0.583, 0.29, 0.90, 1)
+  // frame recoloring with every tool change was too much motion. Ink both
+  // modes (dark ink is pale, light ink is dark), so the frames match instead
+  // of light riding electric.
+  readonly property color activeRing: Theme.ink
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
