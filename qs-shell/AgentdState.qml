@@ -123,6 +123,9 @@ Item {
   signal editHunk(string sid, string path, int line)
   // What the session is DOING right now (last tool started this exchange) — feeds
   // the working orb's action hue.
+  // sid -> Date.now() while a compaction is in flight (live glance feedback).
+  property var _compacting: ({})
+  function compactingSince(sid) { return _compacting[sid] || 0 }
   property var _curTool: ({})
   property var _curToolAt: ({})     // sid -> Date.now() of the RUNNING tool call
   property var _curToolLive: ({})   // sid -> true while a tool call is executing
@@ -535,7 +538,10 @@ Item {
       var isLast = (mi === msgs.length - 1)
       var prevAborted = mi > 0 && msgs[mi - 1].role === "assistant" && msgs[mi - 1].stopReason === "aborted"
       var _from = items.length
-      if (msg.role === "user") {
+      if (msg.role === "userBashApproval") {
+        items.push({ kind: "cmd", tool: "ask",
+                     text: "❯ ! " + String(msg.command || "") + "  ↳ approved" })
+      } else if (msg.role === "user") {
         var uc = msg.content || [], ut = ""
         for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
         ut = ut.replace(/\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/g, "\n").trim()
@@ -632,6 +638,11 @@ Item {
         msgs.push({ role: "assistant", content: [], _compaction: true, _mid: e.id })
         continue
       }
+      if (e.type === "custom" && e.customType === "cockpit-user-bash-approval"
+          && e.data && e.data.decision === "approved") {
+        msgs.push({ role: "userBashApproval", command: e.data.command || "", _mid: e.id })
+        continue
+      }
       if (e.type === "message" && e.message && (e.message.role === "user" || e.message.role === "assistant")) {
         // Stamp the entry id onto the message: feed rows need an identity that survives
         // the CHAT_CAP window sliding, or every row's INDEX shifts by one per new message
@@ -722,14 +733,13 @@ Item {
       var label = m.cancelled ? "cancelled"
                 : (m.confirmed !== undefined ? (m.confirmed ? "approved" : "declined")
                 : (m.value !== undefined ? String(m.value) : ""))
-      if (label) {
+      var asked = asks[sid]
+      var bp = userBashPayload(asked)
+      if (label && !bp) {
         // Carry the QUESTION with the echo: the card vanishes on answer, so a bare
         // "↳ approved" left no trace of what was approved — consecutive answers read
         // as one duplicated reply.
-        var asked = asks[sid]
-        var bp = userBashPayload(asked)
-        var q = bp ? ("! " + String(bp.command || ""))
-                   : (asked ? String(asked.title || asked.message || "").split("\n")[0] : "")
+        var q = asked ? String(asked.title || asked.message || "").split("\n")[0] : ""
         if (q.length > 72) q = q.slice(0, 71) + "…"
         var echo = "↳ " + label + (q ? " — " + q : "")
         var echoes = _answerEchoes
@@ -804,8 +814,10 @@ Item {
         _setTransient(sid, "retry", "error", "✗ retries exhausted — " + _clip(String(m.finalError || "provider error")), 120000)
     } else if (t === "compaction_start") {
       _setTransient(sid, "compact", "info", "· compacting context…", 300000)
+      var cm = _compacting; cm[sid] = Date.now(); _compacting = cm; curToolGen++
     } else if (t === "compaction_end") {
       _clearTransient(sid, "compact")
+      var cm2 = _compacting; delete cm2[sid]; _compacting = cm2; curToolGen++
       _setTransient(sid, "compact", m.errorMessage ? "error" : "info",
                     m.errorMessage ? "✗ compaction failed — " + _clip(String(m.errorMessage))
                                    : "· context compacted", 60000)

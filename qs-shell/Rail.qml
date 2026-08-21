@@ -792,6 +792,12 @@ Item {
   function runningToolLabel(sid) {
     nowTick
     agentd ? agentd.curToolGen : 0
+    // Compaction is invisible otherwise: no tool runs, the orb just spins.
+    var cAt = agentd ? agentd.compactingSince(sid) : 0
+    if (cAt) {
+      var cs = Math.max(0, Math.round((Date.now() - cAt) / 1000))
+      return "compacting context · " + cs + "s"
+    }
     if (!agentd || !agentd.curToolLiveFor(sid)) return ""
     var secs = Math.max(0, Math.round((Date.now() - agentd.curToolAtFor(sid)) / 1000))
     var el = secs >= 60 ? Math.floor(secs / 60) + "m" + String(secs % 60).padStart(2, "0") : secs + "s"
