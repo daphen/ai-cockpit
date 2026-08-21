@@ -1061,7 +1061,8 @@ Item {
   readonly property var newWhichRows: {
     if (!newFolder.length) return []
     var rows = sessionsIn(newFolder).map(sess => ({ kind: "resume", sess: sess }))
-    for (var i = 0; i < newOrphans.length; i++) rows.push({ kind: "adopt", id: newOrphans[i] })
+    for (var i = 0; i < newOrphans.length; i++)
+      rows.push({ kind: "adopt", id: newOrphans[i].id, stamp: newOrphans[i].stamp })
     rows.push({ kind: "new" })
     return rows
   }
@@ -1111,20 +1112,29 @@ Item {
       closeNew()
       return
     }
-    var msg = { type: "spawn", session: newSessionName(newFolder), cwd: newFolder }
-    if (newSpawnPending.adoptId) msg.adoptId = newSpawnPending.adoptId
+    var msg = newSpawnMsg(newSessionName(newFolder))
     if (!row.none) msg.plan = row.slug
     agentd.send(msg)
     closeNew()
+  }
+  // One spawn-message builder for every pane-3 path. Profile is inferred from
+  // the folder: the main lovable checkout hosts THE orchestrator, worktrees
+  // host workers — the daemon default ("coding") is wrong for both and spawned
+  // role-less mongrels.
+  function newSpawnMsg(sid) {
+    var msg = { type: "spawn", session: sid, cwd: newFolder }
+    if (newSpawnPending && newSpawnPending.adoptId) msg.adoptId = newSpawnPending.adoptId
+    var home = Quickshell.env("HOME")
+    if (newFolder === home + "/work/lovable") msg.profile = "lovable-orchestrator"
+    else if (newFolder.indexOf(home + "/work/lovable.") === 0) msg.profile = "lovable-worker"
+    return msg
   }
   function submitPlanDescription(description) {
     var text = String(description || "").trim()
     if (!text.length || !agentd || !newSpawnPending) return
     var sid = newSpawnPending.session || newSessionName(newFolder)
     if (!newSpawnPending.rebind) {
-      var msg = { type: "spawn", session: sid, cwd: newFolder }
-      if (newSpawnPending.adoptId) msg.adoptId = newSpawnPending.adoptId
-      agentd.send(msg)
+      agentd.send(newSpawnMsg(sid))
     }
     agentd.enqueue(sid, "/plan-ticket " + text)
     closeNew()
@@ -1171,13 +1181,21 @@ Item {
     stdout: SplitParser { onRead: data => {
       var f = String(data).trim()
       if (!f.length) return
-      var id = f.split("/").pop().replace(/\.jsonl$/, "")
+      var stem = f.split("/").pop().replace(/\.jsonl$/, "")
+      // pi's session id is the part AFTER the timestamp prefix — adopting the
+      // full stem made pi "create a new session with that id" (empty session).
+      var us = stem.indexOf("_")
+      var id = us >= 0 ? stem.slice(us + 1) : stem
       var owned = false
       if (rail.agentd) for (var i = 0; i < rail.agentd.sessions.length; i++) {
         var ss = rail.agentd.sessions[i]
         if (ss.ident === id || ss.name === id) { owned = true; break }
       }
-      if (!owned) { var a = rail.newOrphans.slice(); a.push(id); rail.newOrphans = a }
+      if (!owned) {
+        var a = rail.newOrphans.slice()
+        a.push({ id: id, stamp: stem.slice(0, 19) })
+        rail.newOrphans = a
+      }
     } }
   }
   function pickFolder(path) {
@@ -2796,7 +2814,7 @@ Item {
                   spacing: 8
                   Text {
                     text: modelData.kind === "new"   ? "+ new session (" + rail.newSessionName(rail.newFolder) + ")"
-                        : modelData.kind === "adopt" ? "adopt orphaned transcript · " + modelData.id.slice(0, 19)
+                        : modelData.kind === "adopt" ? "adopt orphaned transcript · " + (modelData.stamp || modelData.id.slice(0, 19))
                         : (modelData.sess.name + "  ·  " + (modelData.sess.status || "?"))
                     color: modelData.kind === "new" ? Theme.electric
                          : modelData.kind === "adopt" ? Theme.fg_muted : Theme.fg
