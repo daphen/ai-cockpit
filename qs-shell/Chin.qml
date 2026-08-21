@@ -157,10 +157,11 @@ Rectangle {
     // remainder — a proper miniature scrollbar, not lualine's glyph cell.
     Rectangle {
       anchors.verticalCenter: parent.verticalCenter
-      width: 5; height: 18; radius: 2.5
+      // Wide like the old lualine glyph cell (two block chars), not a skinny bar.
+      width: 16; height: 18; radius: 3
       color: Theme.surface0
       Rectangle {
-        width: parent.width; height: 6; radius: 2.5
+        width: parent.width; height: 5; radius: 2.5
         color: Theme.red
         y: (parent.height - height)
            * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
