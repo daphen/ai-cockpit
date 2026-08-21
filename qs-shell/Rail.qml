@@ -3102,8 +3102,8 @@ Item {
           }
           RowLayout {
             spacing: 6
-            KeyCap { small: true; px: 14; text: modelData.k }
-            CapLabel { px: 16; text: modelData.l }
+            KeyCap { small: true; px: 11; text: modelData.k }
+            CapLabel { px: 12; text: modelData.l }
             Item { width: 6 }
           }
         }
