@@ -966,14 +966,16 @@ Item {
   // session. `parent` is the parent's NAME; roots are top-level sessions.
   readonly property var rosterList: {
     if (!live) return mockRoster
-    var all = liveSessions, children = {}, roots = []
+    var all = liveSessions, children = {}, roots = [], activeKids = [], activeCwd = ""
     for (var i = 0; i < all.length; i++) {
       var s = all[i]
-      // The ACTIVE session lives in the header glance, not the list — but its
-      // children stay listed (they have nowhere else to nest).
-      if (s.parent && all.some(x => x.name === s.parent) && s.parent !== rail.selectedRaw)
+      // The ACTIVE session lives in the header glance, not the list — its
+      // children lead the list, ↳-nested as if under the header.
+      if (s.name === rail.selectedRaw) { activeCwd = s.cwd || ""; continue }
+      if (s.parent === rail.selectedRaw) activeKids.push(s)
+      else if (s.parent && all.some(x => x.name === s.parent))
         (children[s.parent] = children[s.parent] || []).push(s)
-      else if ((s.rawName || s.name) !== rail.selectedRaw) roots.push(s)
+      else roots.push(s)
     }
     // Recency-first (last session event), name as the stable tiebreak. Order
     // only actually shifts on roster pushes (status boundaries), so rows don't
@@ -985,6 +987,7 @@ Item {
       return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
     }
     roots.sort(byRecency)
+    activeKids.sort(byRecency)
     for (var key in children) children[key].sort(byRecency)
     var out = []
     function walk(s, depth, parentCwd) {
@@ -1004,6 +1007,7 @@ Item {
       var kids = children[s.name] || []
       for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1, s.cwd || "")
     }
+    for (var k = 0; k < activeKids.length; k++) walk(activeKids[k], 1, activeCwd)
     for (var r = 0; r < roots.length; r++) walk(roots[r], 0)
     return out
   }
