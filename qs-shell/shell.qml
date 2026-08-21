@@ -142,7 +142,11 @@ ShellRoot {
 
     Rectangle {
       anchors.fill: parent
-      color: Theme.bg
+      // bgDim, not bg: the term column's dpr-snapped width is fractional, so a
+      // sub-pixel seam of this root can peek out at the term/rail boundary —
+      // in bg (white on light) that read as a stray white line. Every child
+      // paints its own ground, so the root only ever shows in seams.
+      color: Theme.bgDim
 
       Row {
         anchors.fill: parent
