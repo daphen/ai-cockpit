@@ -140,9 +140,7 @@ Rectangle {
 
   Row {
     id: right
-    // Flush right: the scroll track is the last item, so its right border lines
-    // up with the term/rail divider that lands on the chin's corner above it.
-    anchors { right: parent.right; rightMargin: 0; verticalCenter: parent.verticalCenter }
+    anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
     Swap { anchors.verticalCenter: parent.verticalCenter
