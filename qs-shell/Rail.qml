@@ -1809,7 +1809,7 @@ Item {
         // neighboring turn's errors.
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
-        out.push({ kind: "turn", items: [it], key: it.mid || _contentKey(it.kind, it.text) })
+        out.push({ kind: "turn", sys: true, items: [it], key: it.mid || _contentKey(it.kind, it.text) })
       } else {
         if (!cur) { cur = { kind: "turn", items: [], key: it.mid || _contentKey(it.kind, it.text || it.command), contFrom: chunked }; acts = 0 }
         cur.items.push(it)
@@ -1968,6 +1968,8 @@ Item {
         // own model property, so model.d is only readable at the delegate root.
         readonly property var turn: model.d
         readonly property bool isUser: turnDel.turn.kind === "user"
+        // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
+        readonly property bool isSys: turnDel.turn.sys === true
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
 
         Rectangle {
@@ -1994,6 +1996,7 @@ Item {
             // the label stays neutral and a touch bigger than the body text.
             Row {
               spacing: 8
+              visible: !turnDel.isSys
               Icon {
                 name: turnDel.isUser ? "paper-plane-2" : "sparkle-3"
                 variantSize: turnDel.isUser ? 12 : 0   // paper-plane-2--glyph--12 for "you"
@@ -2324,11 +2327,12 @@ Item {
               rail.agentd ? rail.agentd.askGen : 0
               return rail.agentd ? rail.agentd.askFor(modelData.rawName || modelData.name) !== null : false
             }
-              // Selection token, not a full fg inversion — pure white/black pills
-              // shouted over the whole rail.
+              // The theme's surface ladder, so cursor vs selected stay two clear
+              // steps apart in both modes: hover < selected (surface1) <
+              // cursor (selection). fg-alpha washes collapsed into one grey.
               color: cursor ? Theme.selection
-                   : selected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
-                   : hov.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.04) : "transparent"
+                   : selected ? Theme.surface1
+                   : hov.hovered ? Theme.surface : "transparent"
               HoverHandler { id: hov }
               // Collapsed: index doesn't map to the full list → just focus/expand.
               TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }

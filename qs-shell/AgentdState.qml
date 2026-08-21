@@ -593,7 +593,7 @@ Item {
           // Every agent card must STATE ITS OUTCOME. A turn-closing assistant message
           // with tools but no prose (the ⟢-summary contract violated, usually after
           // tool errors) rendered as bare chips — say mechanically what happened.
-          var closes = isLast || (msgs[mi + 1] && msgs[mi + 1].role === "user")
+          var closes = isLast || (msgs[mi + 1] && (msgs[mi + 1].role === "user" || msgs[mi + 1]._compaction))
           if (closes) {
             var ntools = 0, nerrs = 0, hastext = false
             for (var si = _from; si < items.length; si++) {
