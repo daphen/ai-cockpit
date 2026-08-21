@@ -4,9 +4,9 @@ import Quickshell.Io
 import QsLib
 
 // The cockpit's statusline: renders the state nvim pushes via cockpit/chin.lua
-// (a watched JSON file, one per cockpit mode). Replaces lualine inside the
-// cockpit so the bar sits flush with the true window edge — grid slack hides at
-// the term/chin seam instead of reading as a phantom row under a statusline.
+// (a watched JSON file, one per cockpit mode). Mirrors the retired lualine
+// layout — left: path+modified · diagnostics · searchcount; middle: macro pill;
+// right: filetype · worktree diff · plan chip · ticket chip · scrollbar glyph.
 Rectangle {
   id: chin
   implicitHeight: 30
@@ -18,6 +18,13 @@ Rectangle {
     return s || "personal"
   }
   function _n(v) { return typeof v === "number" ? v : 0 }
+  // lualine's scroll-timeline glyph: position within the buffer, doubled.
+  readonly property var _sbar: ["▔", "🮂", "🬂", "🮃", "▀", "▄", "▃", "🬭", "▂", "▁"]
+  function scrollGlyph() {
+    var lines = _n(st.lines); if (lines < 1) return ""
+    var i = Math.min(_sbar.length - 1, Math.floor((_n(st.line) - 1) / lines * _sbar.length))
+    return _sbar[i] + _sbar[i]
+  }
 
   FileView {
     path: Quickshell.env("HOME") + "/.local/state/cockpit/chin-" + chin.scope + ".json"
@@ -31,42 +38,59 @@ Rectangle {
   Rectangle { anchors { top: parent.top; left: parent.left; right: parent.right } height: 1; color: Theme.hairline }
 
   Row {
+    id: left
     anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
     spacing: 10
-    Rectangle {
-      radius: 6
-      width: modeText.implicitWidth + 14; height: 20
-      anchors.verticalCenter: parent.verticalCenter
-      color: {
-        var m = String(chin.st.mode || "")
-        if (m === "INSERT") return Theme.electric
-        if (m.indexOf("V") === 0 || m === "SELECT") return Theme.orange
-        if (m === "COMMAND" || m === "REPLACE") return Theme.red
-        return Theme.surface0
-      }
-      Text {
-        id: modeText
-        anchors.centerIn: parent
-        text: String(chin.st.mode || "NORMAL")
-        color: String(chin.st.mode || "") === "NORMAL" ? Theme.fg_muted : Theme.bg
-        font { family: Theme.fontFamily; pixelSize: 11; bold: true }
-      }
-    }
     Text {
       anchors.verticalCenter: parent.verticalCenter
       text: String(chin.st.path || "")
       color: Theme.fg
       font { family: Theme.fontFamily; pixelSize: 12 }
       elide: Text.ElideMiddle
-      // Leave the right cluster its room; the path is the only elastic piece.
-      width: Math.min(implicitWidth, chin.width - right.implicitWidth - modeText.implicitWidth - 80)
+      width: Math.min(implicitWidth, chin.width - right.implicitWidth - 120)
     }
     Text {
       anchors.verticalCenter: parent.verticalCenter
-      visible: !!chin.st.ft
-      text: String(chin.st.ft || "")
+      visible: chin._n(chin.st.err) > 0
+      text: "✗ " + chin.st.err
+      color: Theme.red
+      font { family: Theme.fontFamily; pixelSize: 11 }
+    }
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: chin._n(chin.st.warn) > 0
+      text: "▲ " + chin.st.warn
+      color: Theme.yellow
+      font { family: Theme.fontFamily; pixelSize: 11 }
+    }
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: chin._n(chin.st.info) > 0
+      text: "● " + chin.st.info
+      color: Theme.sky
+      font { family: Theme.fontFamily; pixelSize: 11 }
+    }
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: !!chin.st.search
+      text: String(chin.st.search || "")
       color: Theme.fg_muted
       font { family: Theme.fontFamily; pixelSize: 11 }
+    }
+    // Macro-recording pill — lualine's red REC block.
+    Rectangle {
+      visible: !!chin.st.rec
+      radius: 4
+      width: recText.implicitWidth + 12; height: 18
+      anchors.verticalCenter: parent.verticalCenter
+      color: Theme.red
+      Text {
+        id: recText
+        anchors.centerIn: parent
+        text: "REC @" + String(chin.st.rec || "").toUpperCase()
+        color: Theme.bg
+        font { family: Theme.fontFamily; pixelSize: 10; bold: true }
+      }
     }
   }
 
@@ -76,32 +100,46 @@ Rectangle {
     spacing: 12
     Text {
       anchors.verticalCenter: parent.verticalCenter
-      visible: !!chin.st.branch
-      text: " " + String(chin.st.branch || "")
+      visible: !!chin.st.ft
+      text: String(chin.st.ft || "")
       color: Theme.fg_muted
       font { family: Theme.fontFamily; pixelSize: 11 }
     }
-    Text {
+    Row {
       anchors.verticalCenter: parent.verticalCenter
-      visible: chin._n(chin.st.add) + chin._n(chin.st.chg) + chin._n(chin.st.del) > 0
-      text: (chin._n(chin.st.add) ? "+" + chin.st.add + " " : "")
-          + (chin._n(chin.st.chg) ? "~" + chin.st.chg + " " : "")
-          + (chin._n(chin.st.del) ? "−" + chin.st.del : "")
-      color: Theme.fg_muted
-      font { family: Theme.fontFamily; pixelSize: 11 }
-    }
-    Text {
-      anchors.verticalCenter: parent.verticalCenter
-      visible: chin._n(chin.st.err) + chin._n(chin.st.warn) > 0
-      text: (chin._n(chin.st.err) ? "✗" + chin.st.err + " " : "") + (chin._n(chin.st.warn) ? "▲" + chin.st.warn : "")
-      color: chin._n(chin.st.err) > 0 ? Theme.red : Theme.fg_muted
-      font { family: Theme.fontFamily; pixelSize: 11 }
+      visible: chin._n(chin.st.add) + chin._n(chin.st.del) > 0
+      spacing: 6
+      Text {
+        visible: chin._n(chin.st.add) > 0
+        text: "+" + chin.st.add
+        color: Theme.green
+        font { family: Theme.fontFamily; pixelSize: 11 }
+      }
+      Text {
+        visible: chin._n(chin.st.del) > 0
+        text: "−" + chin.st.del
+        color: Theme.red
+        font { family: Theme.fontFamily; pixelSize: 11 }
+      }
     }
     Text {
       anchors.verticalCenter: parent.verticalCenter
       visible: !!chin.st.plan
       text: String(chin.st.plan || "")
       color: Theme.electric
+      font { family: Theme.fontFamily; pixelSize: 11 }
+    }
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      visible: !!chin.st.root
+      text: " " + String(chin.st.root || "")
+      color: Theme.fg_muted
+      font { family: Theme.fontFamily; pixelSize: 11 }
+    }
+    Text {
+      anchors.verticalCenter: parent.verticalCenter
+      text: chin.scrollGlyph()
+      color: Theme.red
       font { family: Theme.fontFamily; pixelSize: 11 }
     }
   }
