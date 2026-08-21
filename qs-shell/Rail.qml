@@ -2242,6 +2242,10 @@ Item {
           // from the row's content made the whole sheet jump every time the orb
           // entered or left. The space is reserved whether or not it's running.
           implicitHeight: 52
+          // The header is the roster's handle: click to open it (and close it again).
+          TapHandler {
+            onTapped: rail.rosterExpanded ? rail.rosterOverride = false : rail.focusRoster()
+          }
           Row {
             id: glanceName
             anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
