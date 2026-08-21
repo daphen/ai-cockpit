@@ -12,7 +12,7 @@ import QsLib
 // where lualine could only repaint cells.
 Rectangle {
   id: chin
-  implicitHeight: 30
+  implicitHeight: 32
   color: Theme.bgDim
 
   property var st: ({})
@@ -29,7 +29,7 @@ Rectangle {
     id: sw
     property string value: ""
     property color tint: Theme.fg
-    property int px: 14
+    property int px: 16
     property bool pop: false
     property real gap: 10
     clip: true
@@ -121,7 +121,7 @@ Rectangle {
     Rectangle {
       anchors.verticalCenter: parent.verticalCenter
       radius: 4
-      width: recText.implicitWidth + 14; height: 22
+      width: recText.implicitWidth + 14; height: 24
       color: Theme.red
       opacity: chin.st.rec ? 1 : 0
       scale: chin.st.rec ? 1 : 0.6
@@ -133,7 +133,7 @@ Rectangle {
         anchors.centerIn: parent
         text: "REC @" + String(chin.st.rec || "").toUpperCase()
         color: Theme.bg
-        font { family: Theme.fontFamily; pixelSize: 14; bold: true }
+        font { family: Theme.fontFamily; pixelSize: 16; bold: true }
       }
     }
   }
