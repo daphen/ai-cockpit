@@ -12,7 +12,7 @@ import QsLib
 // where lualine could only repaint cells.
 Rectangle {
   id: chin
-  implicitHeight: 32
+  implicitHeight: 36
   color: Theme.bgDim
 
   property var st: ({})
@@ -31,7 +31,7 @@ Rectangle {
     property color tint: Theme.fg
     property int px: 16
     property bool pop: false
-    property real gap: 10
+    property real gap: 14
     clip: true
     height: ta.implicitHeight + 8
     // REACTIVE width: an imperative snapshot of implicitWidth desynced when the
@@ -104,7 +104,7 @@ Rectangle {
 
   Row {
     id: left
-    anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+    anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
     Swap { anchors.verticalCenter: parent.verticalCenter
@@ -140,7 +140,7 @@ Rectangle {
 
   Row {
     id: right
-    anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+    anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
     // Language icon (nvim-web-devicons, same glyph+color lualine showed).

@@ -3101,10 +3101,10 @@ Item {
             ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }, { k: "S-esc", l: "kill tool" }] : [])
           }
           RowLayout {
-            spacing: 4
-            KeyCap { small: true; text: modelData.k }
-            CapLabel { text: modelData.l }
-            Item { width: 4 }
+            spacing: 6
+            KeyCap { small: true; px: 14; text: modelData.k }
+            CapLabel { px: 16; text: modelData.l }
+            Item { width: 6 }
           }
         }
       }
