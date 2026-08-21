@@ -2494,7 +2494,9 @@ Item {
                   name: "plug-2"; width: 15; height: 15
                   Layout.preferredWidth: 15; Layout.preferredHeight: 15   // equal dims → no squish
                   Layout.alignment: Qt.AlignVCenter
-                  color: sessRow.cursor ? Theme.bg : Theme.green
+                  // No cursor inversion: the fill is Theme.selection now (a surface,
+                  // not near-inverse fg), so green stays legible on it.
+                  color: Theme.green
                 }
               }
             }
