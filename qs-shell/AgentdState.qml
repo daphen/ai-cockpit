@@ -498,7 +498,7 @@ Item {
         } else if (name === "request_user_bash") {
           var ub = toolResults[b.id] || ""
           items.push({ kind: "userbash", tool: name, command: String(a.command || ""),
-                       reason: String(a.reason || ""), result: ub,
+                       reason: String(a.reason || ""), result: ub, text: ub,
                        failed: toolErrs[b.id] === true })
         } else if (name === "ask_user") {
           // The QUESTION AND ANSWER live here in the transcript (the answer is the
@@ -863,11 +863,13 @@ Item {
     // point duplicates the answer at the bottom of every later rebuild — hard
     // 60s cap, exactly like the marks' never-caught-up guard.
     // An echo is spent as soon as the rebuilt transcript renders the answered
-    // ask itself ("❯ question ↳ answer") — re-appending past that point tacks a
-    // stale approval onto the bottom of every later rebuild. The 60s clock is
-    // only the backstop for asks whose turn never records a result.
+    // ask itself ("❯ question ↳ answer") — and, regardless, after 10s. It exists
+    // only to bridge the rebuild that would otherwise eat the just-pushed echo;
+    // user-bash approvals never produce a transcript ask row (the command renders
+    // as its own bash card), so a long clock meant the echo kept re-appending
+    // BELOW newer turns on every rebuild. Brief and gone beats sticky and wrong.
     var answers = (_answerEchoes[esid] || []).filter(a => {
-      if (typeof a !== "object" || (Date.now() - (a.at || 0)) >= 60000) return false
+      if (typeof a !== "object" || (Date.now() - (a.at || 0)) >= 10000) return false
       var qkey = String(a.q || "").slice(0, 40)
       if (!qkey.length) return true
       for (var fi = 0; fi < feeds[esid].length; fi++) {
