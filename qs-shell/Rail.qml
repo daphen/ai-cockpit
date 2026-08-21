@@ -1780,6 +1780,13 @@ Item {
   // gives a sequence instead, and since only the newest card auto-expands, the older
   // chunks read as one-line activity summaries.
   readonly property int turnChunk: 12
+  // Fallback row key when no transcript mid exists (live pushes, streaming
+  // turns): derived from CONTENT, so the key survives both index shifts and
+  // the live->rebuild swap — index-based keys re-keyed whole stretches and
+  // tore down every delegate below (the feed "blink").
+  function _contentKey(kind, text) {
+    return "c:" + kind + ":" + String(text || "").slice(0, 60)
+  }
   readonly property var groupedFeed: {
     var f = feed, out = [], cur = null, acts = 0, chunked = false
     for (var i = 0; i < f.length; i++) {
@@ -1787,15 +1794,15 @@ Item {
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
-        out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, sender: it.sender || "", key: it.mid || ("i" + i) })
+        out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, sender: it.sender || "", key: it.mid || _contentKey("user", it.text) })
       } else if (it.kind === "sys") {
         // Housekeeping (compaction) gets its OWN card so it never colors the
         // neighboring turn's errors.
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
-        out.push({ kind: "turn", items: [it], key: it.mid || ("i" + i) })
+        out.push({ kind: "turn", items: [it], key: it.mid || _contentKey(it.kind, it.text) })
       } else {
-        if (!cur) { cur = { kind: "turn", items: [], key: it.mid || ("i" + i), contFrom: chunked }; acts = 0 }
+        if (!cur) { cur = { kind: "turn", items: [], key: it.mid || _contentKey(it.kind, it.text || it.command), contFrom: chunked }; acts = 0 }
         cur.items.push(it)
         if (it.kind === "text") { out.push(cur); cur = null; acts = 0; chunked = false }   // prose ends the card
         else {
@@ -1808,6 +1815,14 @@ Item {
       }
     }
     if (cur) out.push(cur)
+    // Duplicate content (two "continue" rows) must not share a key — suffix
+    // repeats by occurrence, which is order-stable across rebuilds.
+    var seenK = {}
+    for (var oi = 0; oi < out.length; oi++) {
+      var bk = out[oi].key
+      if (seenK[bk] === undefined) seenK[bk] = 0
+      else { seenK[bk]++; out[oi].key = bk + "#" + seenK[bk] }
+    }
     return out
   }
 
@@ -2213,6 +2228,7 @@ Item {
               running: rail.featuredStreaming
               nodes: 16
               glow: rail.actionGlow(rail.selectedRaw)
+              seedKey: rail.selectedRaw
             }
             // What it's doing and for how long — the judgment input for
             // Shift+Esc ("this should NOT take 4 minutes").
@@ -2252,6 +2268,7 @@ Item {
                   width: 16; height: 16
                   running: parent.visible && !parent.hasAsk && md.status === "streaming"
                   glow: rail.actionGlow(md.rawName || md.name)
+                  seedKey: md.rawName || md.name
                 }
                 Rectangle {
                   anchors.centerIn: parent; visible: parent.visible && !parent.hasAsk && md.status !== "streaming"
@@ -2379,6 +2396,7 @@ Item {
                     // Same action hue whether or not the cursor is on the row — the
                     // pill fill already marks the cursor; a recolored orb read as a bug.
                     glow: rail.actionGlow(modelData.rawName || modelData.name)
+                    seedKey: modelData.rawName || modelData.name
                     invertRing: sessRow.cursor
                   }
                 }
