@@ -159,11 +159,19 @@ Rectangle {
            value: String(chin.st.plan || ""); tint: Theme.electric }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg_muted }
-    Text {
+    Rectangle {
       anchors.verticalCenter: parent.verticalCenter
-      text: chin.scrollGlyph()
-      color: Theme.red
-      font { family: Theme.fontFamily; pixelSize: 11 }
+      radius: 4
+      width: scrollText.implicitWidth + 12
+      height: 18
+      color: Theme.surface0
+      Text {
+        id: scrollText
+        anchors.centerIn: parent
+        text: chin.scrollGlyph()
+        color: Theme.red
+        font { family: Theme.fontFamily; pixelSize: 11 }
+      }
     }
   }
 }
