@@ -155,9 +155,9 @@ Rectangle {
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
            value: chin._n(chin.st.del) > 0 ? " " + chin.st.del : ""; tint: Theme.red }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.plan || ""); tint: Theme.fg_muted }
+           value: String(chin.st.plan || ""); tint: Theme.fg }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg_muted }
+           value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg }
     // Scroll position as a real track: the thumb slides over the unscrolled
     // remainder — a proper miniature scrollbar, not lualine's glyph cell.
     Rectangle {
