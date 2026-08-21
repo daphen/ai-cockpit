@@ -162,7 +162,8 @@ Rectangle {
       color: Theme.surface0
       Rectangle {
         width: parent.width; height: 5; radius: 2.5
-        color: Theme.red
+        // The special scroll-timeline red lualine used, not the theme red.
+        color: "#ED333B"
         y: (parent.height - height)
            * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
         Behavior on y { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
