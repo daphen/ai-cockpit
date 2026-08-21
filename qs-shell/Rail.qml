@@ -2203,16 +2203,16 @@ Item {
     // bottom edge with no arithmetic. (This used to be a hardcoded 108 plus per-panel
     // fudge factors, which is how the new-session card ended up overflowing.)
     clip: true
-    height: chinCol.implicitHeight + 20 + radius   // 14 top pad + 6 visible bottom pad
+    height: chinCol.implicitHeight + 26 + radius   // 14 top pad + 12 visible bottom pad
     color: Theme.surface0
 
     ColumnLayout {
       id: chinCol
       // Bottom-anchored so the composer + hints stay put and the roster grows UPWARD
       // when it expands (the sheet's top edge rises; the input never moves).
-      // 6, not 14: puts the hint row's center ~15px above the window edge — the
-      // same band the nvim chin centers its items in, so the two chins align.
-      anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20; bottomMargin: 6 + chin.radius }
+      // 12 visible: with the 16px hint row the old 6px left the caps flush with
+      // the window edge; 12 recenters the band on the (now 36px) nvim chin.
+      anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20; bottomMargin: 12 + chin.radius }
       spacing: 10
 
 
