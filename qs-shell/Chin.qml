@@ -34,9 +34,12 @@ Rectangle {
     property real gap: 10
     clip: true
     height: ta.implicitHeight + 8
-    width: _w
-    property real _w: 0
-    Behavior on _w { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    // REACTIVE width: an imperative snapshot of implicitWidth desynced when the
+    // custom font settled late (creation-time metrics underestimated, neighbors
+    // started early and rows mashed together). A binding tracks font/layout.
+    readonly property Item _active: _front ? ta : tb
+    width: value.length ? _active.implicitWidth + gap : 0
+    Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
     property bool _front: true
     onValueChanged: {
       var inc = _front ? tb : ta
@@ -44,10 +47,7 @@ Rectangle {
       _front = !_front
       if (value.length) {
         inc.text = value
-        _w = inc.implicitWidth + gap
         inAnimFor(inc).restart()
-      } else {
-        _w = 0
       }
       outAnimFor(out).restart()
     }
