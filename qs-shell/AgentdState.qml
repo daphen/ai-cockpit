@@ -14,14 +14,18 @@ Item {
   property var sessions: []      // merged roster across every scope, each tagged .scope
   property int gen: 0            // bumped on every roster push
 
-  // One socket per scope. HEIDR_AGENTD_SOCKS (comma-separated) shows the local
-  // orchestrator and a tunneled lovbox side by side; HEIDR_AGENTD_SOCK (singular)
+  function cockpitEnv(name) {
+    return Quickshell.env("COCKPIT_" + name) || Quickshell.env("HEIDR_" + name)
+  }
+
+  // One socket per scope. COCKPIT_AGENTD_SOCKS (comma-separated) shows the local
+  // orchestrator and a tunneled lovbox side by side; COCKPIT_AGENTD_SOCK (singular)
   // still selects a single daemon. Order matters: on a name collision the EARLIER
   // socket wins, so list the local scope first to keep it addressable.
   readonly property var sockPaths: {
-    var multi = String(Quickshell.env("HEIDR_AGENTD_SOCKS") || "").trim()
+    var multi = String(cockpitEnv("AGENTD_SOCKS") || "").trim()
     if (multi) return multi.split(",").map(p => p.trim()).filter(p => p.length > 0)
-    var one = Quickshell.env("HEIDR_AGENTD_SOCK")
+    var one = cockpitEnv("AGENTD_SOCK")
     return [one || (Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-" + root.scope + ".sock")]
   }
   property var _rosters: ({})
@@ -34,6 +38,7 @@ Item {
   }   // socket index -> its sessions[]
   property var _sockOf: ({})    // session name -> owning socket index (routing table)
   property var _socks: ({})     // socket index -> Socket object
+  property string presenceSession: ""
 
   function _scopeOf(path) {
     var m = String(path).match(/agentd-([^/]+)\.sock$/)
@@ -60,6 +65,7 @@ Item {
     _sockOf = owner
     root.sessions = out
     root.gen++
+    for (var k in _socks) _writePresence(k)
   }
   // True once every CONNECTED socket has pushed its first roster, so consumers can
   // wait before picking a landing session. Without this the rail latches onto
@@ -79,11 +85,26 @@ Item {
       if (_socks[k] && _socks[k].connected && !_reported[k]) return
     settled = true
   }
-  function _registerSock(i, obj) { _socks[i] = obj; _recomputeConnected() }
+  function _registerSock(i, obj) {
+    _socks[i] = obj
+    _recomputeConnected()
+    _writePresence(i)
+  }
   function _recomputeConnected() {
     var any = false
     for (var k in _socks) if (_socks[k] && _socks[k].connected) { any = true; break }
     root.connected = any
+  }
+  function _writePresence(i) {
+    var s = _socks[i]
+    if (!s || !s.connected) return
+    var owner = presenceSession && _sockOf[presenceSession] !== undefined
+              ? _sockOf[presenceSession] : -1
+    s.write(JSON.stringify({ type: "presence", session: owner === Number(i) ? presenceSession : "" }) + "\n")
+  }
+  function setPresence(sid) {
+    presenceSession = sid || ""
+    for (var k in _socks) _writePresence(k)
   }
 
   // Per-session activity feed. `feeds` is mutated in place; `feedGen` bumps so
@@ -119,6 +140,7 @@ Item {
   function lastEditFor(sid) { return _lastEdit[sid] || "" }
 
   property var asks: ({})
+  property var _answerEchoes: ({})
   property int askGen: 0
   // A session stopped on a question — fired once per ask id, so the UI can badge
   // the roster and raise a desktop notification for NON-selected sessions (a
@@ -127,16 +149,8 @@ Item {
   function askCount() { var n = 0; for (var k in asks) n++; return n }
   function askFor(sid) { return asks[sid] || null }
   function answerAsk(sid, payload) {
-    var a = asks[sid]; if (!a) return
-    var msg = { type: "extension_ui_response", session: sid, id: a.id }
-    for (var k in payload) msg[k] = payload[k]
-    send(msg)
-    // Echo the reply into the feed so there's a record of what you answered.
-    var label = payload.cancelled ? "cancelled"
-              : (payload.confirmed !== undefined ? (payload.confirmed ? "approved" : "declined")
-              : (payload.value !== undefined ? String(payload.value) : ""))
-    if (label) _push(sid, { kind: "user", text: "↳ " + label })
-    var na = asks; delete na[sid]; asks = na; askGen++
+    if (!asks[sid]) return
+    send({ type: "answer", session: sid, response: payload })
   }
 
   // Per-session changed-files (from the daemon's `changes` diff broadcast).
@@ -542,6 +556,25 @@ Item {
           // The reply hit the output cap: pi/Claude Code warn; silence read as a
           // complete answer that just… ended.
           items.push({ kind: "cmd", tool: "error", text: "⚠ response hit its output cap and was cut off — send “continue” to resume" })
+        } else {
+          // Every agent card must STATE ITS OUTCOME. A turn-closing assistant message
+          // with tools but no prose (the ⟢-summary contract violated, usually after
+          // tool errors) rendered as bare chips — say mechanically what happened.
+          var closes = isLast || (msgs[mi + 1] && msgs[mi + 1].role === "user")
+          if (closes) {
+            var ntools = 0, nerrs = 0, hastext = false
+            for (var si = _from; si < items.length; si++) {
+              var it = items[si]
+              if (it.kind === "text") hastext = true
+              if (it.kind === "cmd" || it.kind === "edit") { ntools++; if (it.failed) nerrs++ }
+            }
+            if (!hastext && ntools > 0)
+              items.push({ kind: "cmd", tool: nerrs ? "error" : "info",
+                           text: "· turn ended without a summary — " + ntools + " tool call" + (ntools > 1 ? "s" : "")
+                               + (nerrs ? " (" + nerrs + " failed)" : "") })
+            else if (!hastext && ntools === 0)
+              items.push({ kind: "cmd", tool: "info", text: "· turn produced no output" })
+          }
         }
       }
       for (var ti = _from; ti < items.length; ti++)
@@ -656,6 +689,34 @@ Item {
         send({ type: "prompt", session: sid, message: sp.text })
     }
 
+    if (t === "plan_set") {
+      var plan = String(m.plan || "")
+      _setTransient(sid, "plan-receipt", "info",
+                    plan.length ? "↳ plan bound: " + plan : "↳ plan cleared", 60000)
+      return
+    }
+    if (t === "ask_answered") {
+      var label = m.cancelled ? "cancelled"
+                : (m.confirmed !== undefined ? (m.confirmed ? "approved" : "declined")
+                : (m.value !== undefined ? String(m.value) : ""))
+      if (label) {
+        // Carry the QUESTION with the echo: the card vanishes on answer, so a bare
+        // "↳ approved" left no trace of what was approved — consecutive answers read
+        // as one duplicated reply.
+        var asked = asks[sid]
+        var q = asked ? String(asked.title || asked.message || "").split("\n")[0] : ""
+        if (q.length > 72) q = q.slice(0, 71) + "…"
+        var echo = "↳ " + label + (q ? " — " + q : "")
+        var echoes = _answerEchoes
+        var list = (echoes[sid] || []).slice(-4)
+        list.push({ text: echo, at: Date.now() })
+        echoes[sid] = list
+        _answerEchoes = echoes
+        _push(sid, { kind: "user", text: echo })
+      }
+      var answered = asks; delete answered[sid]; asks = answered; askGen++
+      return
+    }
     if (t === "extension_ui_request") {
       var mm = m.method
       if (mm === "confirm" || mm === "select" || mm === "input" || mm === "editor") {
@@ -771,6 +832,18 @@ Item {
     if (!esid) return
     _feedSid = esid
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
+    // Answer echoes are a BRIDGE, not history (same contract as the interrupt
+    // marks below): pi's transcript renders the answered ask itself once the
+    // toolResult lands ("❯ question ↳ answer"), so an echo re-appended past that
+    // point duplicates the answer at the bottom of every later rebuild — hard
+    // 60s cap, exactly like the marks' never-caught-up guard.
+    var answers = (_answerEchoes[esid] || []).filter(a =>
+      typeof a === "object" && (Date.now() - (a.at || 0)) < 60000)
+    var ne = _answerEchoes
+    if (answers.length) ne[esid] = answers; else delete ne[esid]
+    _answerEchoes = ne
+    for (var ai = 0; ai < answers.length; ai++)
+      feeds[esid].push({ kind: "user", text: answers[ai].text })
     // Interrupt markers are a BRIDGE, not history: pi records the aborted turn
     // itself (stopReason → the "⏹ interrupted" item), so once the rebuilt feed
     // carries any interrupt row the marks are duplicates — drop them for good.

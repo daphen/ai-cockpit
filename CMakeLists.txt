@@ -61,5 +61,5 @@ if(HEIDR_VENDORED_GHOSTTY)
   install(DIRECTORY ${CMAKE_BINARY_DIR}/qml/Heidr/ DESTINATION qml/Heidr
           FILES_MATCHING PATTERN "qmldir" PATTERN "*.qmltypes")
   install(FILES ${_ghostty_so} DESTINATION qml/Heidr RENAME libghostty-vt.so.0)
-  install(DIRECTORY ${CMAKE_SOURCE_DIR}/qs-shell DESTINATION share/heidr)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/qs-shell DESTINATION share/cockpit)
 endif()

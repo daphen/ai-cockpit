@@ -7,19 +7,23 @@
 # untestable against the real daemon, which you cannot make add a session on cue — so
 # this drives a fake one and asserts the rail's own state over its IPC.
 #
-#   ./test/rail-nav.sh          run the suite (spawns its own heidr, tears it down)
+#   COCKPIT_ALLOW_VISIBLE_TESTS=1 ./test/rail-nav.sh
 set -uo pipefail
+if [ "${COCKPIT_ALLOW_VISIBLE_TESTS:-}" != 1 ]; then
+  echo "refusing to open the visible Cockpit harness; set COCKPIT_ALLOW_VISIBLE_TESTS=1 explicitly" >&2
+  exit 2
+fi
 cd "$(dirname "$0")/.."
 B="$PWD"
-T="${TMPDIR:-/tmp}/heidr-rail-test"
-SOCK="${TMPDIR:-/tmp}/heidr-fake-agentd.sock"
+T="${TMPDIR:-/tmp}/cockpit-rail-test"
+SOCK="${TMPDIR:-/tmp}/cockpit-fake-agentd.sock"
 CMD="$SOCK.cmd"
 LOG="$T/qs.log"
 pass=0 fail=0
 
 say()  { printf '\033[36m[rail-test]\033[0m %s\n' "$*"; }
-st()   { timeout 10 qs -p "$T/qs-shell" ipc call heidr railState 2>/dev/null | tail -1; }
-key()  { timeout 10 qs -p "$T/qs-shell" ipc call heidr railKey "$1" >/dev/null 2>&1; }
+st()   { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railState 2>/dev/null | tail -1; }
+key()  { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railKey "$1" >/dev/null 2>&1; }
 fake() { echo "$1" >> "$CMD"; sleep "${2:-2.5}"; }
 
 # field <json> <key> — read one value without depending on jq
@@ -57,7 +61,7 @@ trap cleanup EXIT
 cleanup
 rm -rf "$T"; mkdir -p "$T/qs-shell"
 # Symlink the REAL qml: a copy would silently test a snapshot. A separate config dir is
-# what keeps `qs ipc` unambiguous while the user's own heidr keeps running.
+# what keeps `qs ipc` unambiguous while the user's own Cockpit keeps running.
 for f in "$B"/qs-shell/*.qml; do ln -s "$f" "$T/qs-shell/$(basename "$f")"; done
 
 say "start fake agentd"
@@ -66,11 +70,11 @@ echo $! > "$T/fake.pid"
 sleep 1.5
 [ -S "$SOCK" ] || { echo "fake agentd did not bind $SOCK"; exit 1; }
 
-say "launch heidr against it"
+say "launch Cockpit against it"
 setsid nohup env QML2_IMPORT_PATH="$B/build/qml:$HOME/.local/share/qml" \
   QML_IMPORT_PATH="$B/build/qml:$HOME/.local/share/qml" \
   LD_LIBRARY_PATH="$B/build" QT_QPA_PLATFORM=wayland \
-  HEIDR_AGENTD_SOCKS="$SOCK" HEIDR_COCKPIT_CMD='sh -c "while :; do sleep 60; done"' \
+  COCKPIT_AGENTD_SOCKS="$SOCK" COCKPIT_COCKPIT_CMD='sh -c "while :; do sleep 60; done"' \
   qs -p "$T/qs-shell" > "$LOG" 2>&1 < /dev/null &
 echo $! > "$T/qs.pid"
 for _ in $(seq 1 30); do sleep 1; [ -n "$(st)" ] && break; done
@@ -171,11 +175,11 @@ say "10. the feed stays pinned to the live edge as messages arrive"
 # past the 60-message cap the feed slides instead of growing, so a count is no evidence.
 key g; key j; key enter; sleep 3
 key G; sleep 1
-b0=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railScroll 2>/dev/null | tail -1)
+b0=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railScroll 2>/dev/null | tail -1)
 r0=$(field "$(st)" row)
 for _ in 1 2 3; do echo grow >> "$CMD"; sleep 1.2; done
 sleep 2
-b1=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railScroll 2>/dev/null | tail -1)
+b1=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railScroll 2>/dev/null | tail -1)
 r1=$(field "$(st)" row)
 say "  behind $(field "$b0" behind)px -> $(field "$b1" behind)px, mode $(field "$b1" mode)"
 say "  newest row: '$r0' -> '$r1'"
@@ -187,7 +191,7 @@ say "9. chat cards never overlap"
 # Inside a ListView add/displaced transition that growth never reaches the layout, so rows
 # were positioned as 57px and painted over each other — visible on screen, invisible to
 # every state probe. Assert on the delegates' own geometry instead.
-geom=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom 2>/dev/null | tail -1)
+geom=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railGeom 2>/dev/null | tail -1)
 ov=$(python3 - "$geom" <<'PY'
 import json, sys
 rows = json.loads(sys.argv[1] or "[]")
@@ -259,7 +263,7 @@ say "14. enter steers a live turn; ctrl+enter queues; abort flushes the queue"
 rm -f "$SOCK.answers"
 fake insert 1                          # restore a 3-row roster (13 killed zulu-9999)
 fake stream_on
-ipc_send() { timeout 10 qs -p "$T/qs-shell" ipc call heidr "$1" "$2" >/dev/null 2>&1; }
+ipc_send() { timeout 10 qs -p "$T/qs-shell" ipc call cockpit "$1" "$2" >/dev/null 2>&1; }
 ipc_send railSend "redirect please"; sleep 1.5
 steered=$(grep -c '"type": "steer", "session": "every-9001", "message": "redirect please"' "$SOCK.answers" 2>/dev/null)
 check "enter while busy STEERED" "${steered:-0}" "1"
@@ -280,22 +284,22 @@ say "15. a steered message stays visible until the transcript catches up"
 fake stream_on
 ipc_send railSend "steer me visible"; sleep 1
 fake grow                              # turn_end → full transcript rebuild, steer NOT in it
-vis=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railGeom >/dev/null 2>&1; st)
+vis=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railGeom >/dev/null 2>&1; st)
 key G
 check "echo survived the rebuild" "$(field "$(st)" row | grep -c "steer me visible")" "1"
 say "16. turn outcomes render: retry, retry-exhausted, compaction, tool failure"
 fake retry 1
-live=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
+live=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null | tail -1)
 check "retry status shows live" "$(case "$live" in *"retrying (1/3)"*) echo 1;; *) echo 0;; esac)" "1"
 fake retry_fail 1
 fake compacting 1
 fake toolfail 1
-live=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
+live=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null | tail -1)
 check "failed tool row shows live" "$(case "$live" in *"bash false"*) echo 1;; *) echo 0;; esac)" "1"
 # After a transcript rebuild the lifecycle applies: the retry status is REPLACED by
 # its outcome, and the outcome rows persist via the transient overlay.
 sleep 6
-tail=$(timeout 10 qs -p "$T/qs-shell" ipc call heidr railTail 2>/dev/null | tail -1)
+tail=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null | tail -1)
 found=0
 for want in "context compacted" "retries exhausted"; do
   case "$tail" in *"$want"*) found=$((found+1));; *) say "  MISSING: $want";; esac

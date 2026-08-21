@@ -6,7 +6,7 @@ Window {
   visible: true
   width: 1200
   height: 800
-  title: "heidr × libghostty-vt spike"
+  title: "Cockpit × libghostty-vt"
   color: "#181818"
 
   Row {

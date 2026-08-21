@@ -44,7 +44,7 @@ public:
   // Grid geometry probe (debug/IPC): what the terminal believes about its layout.
   Q_PROPERTY(QString gridInfo READ gridInfo NOTIFY dprChanged)
   // The nvim RPC socket THIS instance's nvim listens on. Per-instance, so the rail
-  // never talks to a path a different heidr may have unlinked.
+  // never talks to a path a different Cockpit may have unlinked.
   Q_PROPERTY(QString nvimSocket READ nvimSocket CONSTANT)
   qreal dpr() const { return guiDpr_ > 0 ? guiDpr_ : 1.0; }
   QString gridInfo() const {

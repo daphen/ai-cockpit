@@ -4,16 +4,14 @@ import Quickshell.Io
 import QsLib
 import Heidr
 
-// Heidr cockpit: nvim (libghostty terminal) left, the agent rail right.
+// Cockpit: nvim (libghostty terminal) left, the agent rail right.
 // Super+h/l focus moves nvim <-> rail via the IpcHandler below (niri calls it,
 // falling back to window-focus at the edges — the "smart-splits" bridge).
 ShellRoot {
   FloatingWindow {
     id: win
-    // Per-mode title (launcher sets HEIDR_TITLE: "heidr-qs · lovable" / "heidr-qs · private")
-    // so two instances can coexist: niri-jump-or-exec cycles every "heidr-qs" match, and
-    // heidr-ipc routes to the instance whose title equals the FOCUSED window's.
-    title: Quickshell.env("HEIDR_TITLE") || "heidr-qs"
+    // Per-mode title lets both Cockpit instances coexist and keeps focused-window IPC routing exact.
+    title: Quickshell.env("COCKPIT_TITLE") || Quickshell.env("HEIDR_TITLE") || "cockpit-qs"
     visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
     // Wide by default: the cockpit is two panes (nvim ~60% + rail ~40%), so 1600
     // left the terminal too narrow for real code once the rail took its share.
@@ -23,6 +21,17 @@ ShellRoot {
     onClosed: Qt.quit()              // niri close-window quits (FloatingWindow ignores it otherwise)
 
     property string pane: "nvim"   // "nvim" | "rail"
+
+    readonly property bool windowFocused: term.activeFocus || rail.activeFocus
+    function syncPresence() {
+      agentd.setPresence(windowFocused ? rail.selectedRaw : "")
+    }
+    onWindowFocusedChanged: syncPresence()
+    Component.onCompleted: syncPresence()
+    Connections {
+      target: rail
+      function onSelectedRawChanged() { win.syncPresence() }
+    }
 
     // Returns "consumed" if it moved internal focus, "passed" if already at the
     // edge (the niri script then does its normal window focus).
@@ -47,7 +56,7 @@ ShellRoot {
     }
 
     IpcHandler {
-      target: "heidr"
+      target: "cockpit"
       function focusLeft(): string  { return win.tryFocus("left") }
       function focusRight(): string { return win.tryFocus("right") }
       function pane(): string {
@@ -57,9 +66,9 @@ ShellRoot {
         if (term.activeFocus && win.pane !== "nvim") win.pane = "nvim"
         return win.pane
       }
-      function title(): string      { return win.title }   // heidr-ipc instance routing
+      function title(): string      { return win.title }   // cockpit-ipc instance routing
       // Parent binding for the pane's nvim: its NVIM_LISTEN_ADDRESS is unique to THIS
-      // instance, so heidr-cross can target its own heidr without asking niri anything.
+      // instance, so cockpit-cross can target its own Cockpit without asking niri anything.
       function nvimSock(): string   { return term.nvimSocket }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
       // `i` on the nvim dashboard: jump straight into the rail composer instead of
@@ -113,7 +122,7 @@ ShellRoot {
       // else reports it: mode says "follow" while the view sits a card and a half behind.
       function railScroll(): string { return JSON.stringify(rail.feedScrollState()) }
       // Merged roster as "scope/name status" lines — proves which daemon owns what
-      // when several sockets are wired up (HEIDR_AGENTD_SOCKS).
+      // when several sockets are wired up (COCKPIT_AGENTD_SOCKS).
       function sessions(): string {
         var out = []
         for (var i = 0; i < agentd.sessions.length; i++) {
@@ -166,7 +175,7 @@ ShellRoot {
           width: parent.width - term.width - 1
           height: parent.height
           agentd: agentd
-          // One path per heidr instance, straight from the terminal that spawned nvim.
+          // One path per Cockpit instance, straight from the terminal that spawned nvim.
           nvimSock: term.nvimSocket
           focused: win.pane === "rail"
           onFocusNvim: win.pane = "nvim"

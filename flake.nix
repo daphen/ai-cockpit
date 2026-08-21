@@ -1,5 +1,5 @@
 {
-  description = "Heidr — cockpit: nvim (libghostty terminal) + agentd rail in one Quickshell window";
+  description = "Cockpit: nvim terminal and agentd rail in one Quickshell window";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
   # Same quickshell the system runs (v0.3.0). When consumed from ~/nixos both
@@ -16,11 +16,11 @@
       qt = pkgs.qt6;
 
       # The C++ QML plugin (the libghostty terminal). Built against the vendored
-      # libghostty-vt so the nix build stays offline/reproducible. The Heidr qml
+      # libghostty-vt so the nix build stays offline/reproducible. The legacy Heidr QML ABI
       # module, its impl lib, and the native lib all land in one dir with an
       # $ORIGIN rpath so they resolve each other at runtime.
       plugin = pkgs.stdenv.mkDerivation {
-        pname = "heidr-termplugin";
+        pname = "cockpit-termplugin";
         version = "0.1.0";
         # Exclude local build dirs — a stale build/CMakeCache.txt (absolute paths
         # from the dev tree) makes nix's cmake abort with a source-mismatch.
@@ -38,11 +38,11 @@
         # libs in $out/qml/Heidr with an $ORIGIN rpath and copy qs-shell.
       };
 
-      heidr = pkgs.writeShellApplication {
-        name = "heidr-qs";   # distinct from the old nvim-rail `heidr` script (coexist)
+      cockpit = pkgs.writeShellApplication {
+        name = "cockpit-qs";
         runtimeInputs = [ pkgs.quickshell pkgs.procps pkgs.coreutils pkgs.util-linux ];
         text = ''
-          # QsLib (the live dotfiles design system) wins; the Heidr plugin module
+          # QsLib (the live dotfiles design system) wins; the legacy Heidr plugin module
           # is appended so `import Heidr` resolves.
           # Native Wayland — otherwise Qt falls back to XWayland (xcb), which
           # renders differently AND lets the window hold an X11 keyboard grab that
@@ -50,69 +50,63 @@
           export QT_QPA_PLATFORM=wayland
           export QML2_IMPORT_PATH="$HOME/.local/share/qml:${plugin}/qml''${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
 
-          # Dev: HEIDR_DEV=/path/to/repo runs the working-tree rail (hot-reload)
-          # against the installed plugin. Otherwise use the packaged snapshot.
-          shell="${plugin}/share/heidr/qs-shell"
-          if [ -n "''${HEIDR_DEV:-}" ] && [ -d "$HEIDR_DEV/qs-shell" ]; then
-            shell="$HEIDR_DEV/qs-shell"
-          fi
+          for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE FORCE_NEW DEV; do
+            cv="COCKPIT_$v"; hv="HEIDR_$v"
+            if [ -n "''${!cv:-}" ]; then export "$hv=''${!cv}"
+            elif [ -n "''${!hv:-}" ]; then export "$cv=''${!hv}"
+            fi
+          done
 
-          # Per-mode identity: distinct title + qs config path, so a private and a work
-          # cockpit run SIMULTANEOUSLY (Super+y cycles them via niri-jump-or-exec;
-          # heidr-ipc routes to the focused one by title).
-          if [ "''${HEIDR_SCOPE:-lovable}" = "personal" ]; then
-            export HEIDR_TITLE="''${HEIDR_TITLE:-heidr-qs · private}"
-            mirror="$HOME/.local/state/heidr/private-shell-pkg"
-            mkdir -p "$mirror"; rm -f "$mirror"/*.qml
-            for f in "$shell"/*.qml; do ln -sf "$f" "$mirror/$(basename "$f")"; done
-            shell="$mirror"
-          else
-            export HEIDR_TITLE="''${HEIDR_TITLE:-heidr-qs · lovable}"
-          fi
+          shell="${plugin}/share/cockpit/qs-shell"
+          if [ -n "''${COCKPIT_DEV:-}" ] && [ -d "$COCKPIT_DEV/qs-shell" ]; then shell="$COCKPIT_DEV/qs-shell"; fi
 
-          # Single-instance PER MODE: focus this mode's existing window if one is mapped
-          # (skipped by HEIDR_FORCE_NEW=1 — the Super+Shift+Y always-spawn path). Heidr
-          # connects to the already-running agentd; no daemon of its own to spawn.
-          # Put the USER profile first so the wrapped `nvim` (with the full config)
-          # wins over the system's unwrapped nvim; keep system bin as a fallback so
-          # qs/tools still resolve when launched from a minimal niri env.
           _u=$(id -un)
           export PATH="/etc/profiles/per-user/$_u/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
 
-          # MODE by launch context (mirrors run-qs.sh): DEFAULT = PRIVATE, personal
-          # scope only, everything on this machine. The lovable workspace is the
-          # special case that wires the full work cockpit (lovable + VM work +
-          # personal; ticket names win collisions). Previously this launcher set no
-          # sockets at all, so the rail silently fell back to lovable-only.
-          if [ -z "''${HEIDR_AGENTD_SOCKS:-}" ] && [ -z "''${HEIDR_AGENTD_SOCK:-}" ]; then
+          if [ -z "''${COCKPIT_AGENTD_SOCKS:-}" ] && [ -z "''${COCKPIT_AGENTD_SOCK:-}" ]; then
             ws=$(niri msg --json workspaces 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true)
             case "''${ws:-}" in
               lovable*)
                 scopes="lovable work"
-                export HEIDR_SCOPE="''${HEIDR_SCOPE:-lovable}"
-                export HEIDR_NEW_CWD="''${HEIDR_NEW_CWD:-$HOME/work/lovable}"
+                export COCKPIT_SCOPE="''${COCKPIT_SCOPE:-lovable}"
+                export COCKPIT_NEW_CWD="''${COCKPIT_NEW_CWD:-$HOME/work/lovable}"
                 ;;
               *)
                 scopes="personal"
-                export HEIDR_SCOPE="''${HEIDR_SCOPE:-personal}"
-                export HEIDR_NEW_CWD="''${HEIDR_NEW_CWD:-$HOME/personal}"
+                export COCKPIT_SCOPE="''${COCKPIT_SCOPE:-personal}"
+                export COCKPIT_NEW_CWD="''${COCKPIT_NEW_CWD:-$HOME/personal}"
                 ;;
             esac
             socks=""
             for sc in $scopes; do socks="''${socks:+$socks,}''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/agentd-$sc.sock"; done
-            export HEIDR_AGENTD_SOCKS="$socks"
+            export COCKPIT_AGENTD_SOCKS="$socks"
           fi
-          if [ -z "''${HEIDR_FORCE_NEW:-}" ] && command -v niri >/dev/null 2>&1 \
-             && niri msg --json windows 2>/dev/null | ${pkgs.jq}/bin/jq -e --arg t "$HEIDR_TITLE" '.[]|select(.title==$t)' >/dev/null 2>&1; then
-            niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r --arg t "$HEIDR_TITLE" '.[]|select(.title==$t)|.id' | head -1)" 2>/dev/null || true
+
+          if [ "''${COCKPIT_SCOPE:-lovable}" = "personal" ]; then
+            export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · private}"
+            mirror="$HOME/.local/state/cockpit/private-shell-pkg"
+            mkdir -p "$mirror"; rm -f "$mirror"/*.qml
+            for f in "$shell"/*.qml; do ln -sf "$f" "$mirror/$(basename "$f")"; done
+            shell="$mirror"
+          else
+            export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · lovable}"
+          fi
+
+          for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE FORCE_NEW DEV; do
+            cv="COCKPIT_$v"; hv="HEIDR_$v"
+            [ -n "''${!cv:-}" ] && export "$hv=''${!cv}"
+          done
+          if [ -z "''${COCKPIT_FORCE_NEW:-}" ] && command -v niri >/dev/null 2>&1 \
+             && niri msg --json windows 2>/dev/null | ${pkgs.jq}/bin/jq -e --arg t "$COCKPIT_TITLE" '.[]|select(.title==$t)' >/dev/null 2>&1; then
+            niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r --arg t "$COCKPIT_TITLE" '.[]|select(.title==$t)|.id' | head -1)" 2>/dev/null || true
             exit 0
           fi
           exec qs -p "$shell"
         '';
       };
     in {
-      packages.${system} = { inherit plugin; heidr-qs = heidr; default = heidr; };
-      apps.${system}.default = { type = "app"; program = "${heidr}/bin/heidr-qs"; };
+      packages.${system} = { inherit plugin; cockpit-qs = cockpit; heidr-qs = cockpit; default = cockpit; };
+      apps.${system}.default = { type = "app"; program = "${cockpit}/bin/cockpit-qs"; };
       devShells.${system}.default = import ./shell.nix { inherit pkgs; };
     };
 }

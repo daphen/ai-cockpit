@@ -18,11 +18,15 @@ Item {
   property var agentd: null
   // Set by shell.qml from TermView.nvimSocket — the socket THIS instance's nvim listens
   // on. Never rebuild this path here: a guessed shared name is how the rail ended up
-  // talking to a socket a newer heidr had already unlinked.
+  // talking to a socket a newer Cockpit had already unlinked.
   property string nvimSock: ""
   property bool focused: false
   signal focusNvim()
   signal requestFocus()   // a click in the rail should pull focus here
+
+  function cockpitEnv(name) {
+    return Quickshell.env("COCKPIT_" + name) || Quickshell.env("HEIDR_" + name)
+  }
 
   // Click a row: focus the rail, move the cursor there, and act on it.
   function clickAt(idx) { _blurFeedKey = ""; requestFocus(); cur = idx; activateCur() }
@@ -373,8 +377,7 @@ Item {
     onTriggered: { rail.landNvim(rail.selectedRaw); n++; if (n >= 3) { running = false; n = 0; rail._landed = true } }
   }
   // Remote lovbox sessions report a BOX path (/home/lovable/…). The local nvim
-  // edits those files via the SSHFS mount, so rewrite box paths to the mount
-  // point ($HOME/lovbox/heidr/…). Local sessions (/home/<you>/…) pass through.
+  // edits those files via the SSHFS mount, so rewrite box paths to the Cockpit mirror.
   // Remote path → its local mutagen mirror. One entry per remote we sync: the old
   // lovbox rooted at /home/lovable, and the dev VM whose worktrees live under
   // ~<vmuser>/src (vm-wt mirrors those to ~/lovbox/vm). Without the VM entry,
@@ -382,12 +385,12 @@ Item {
   // is why the editor came up on an empty buffer.
   readonly property var _mirrors: [
     { remote: "/home/lovable",
-      local: Quickshell.env("HOME") + "/lovbox/heidr" },
+      local: Quickshell.env("HOME") + "/lovbox/cockpit" },
     // The VM's worktrees mirror into REAL local git worktrees (…/work/lovable.daphen-<t>),
     // not a bare directory: gitsigns, hunk jumping and the dashboard all need a
     // repository, and a plain mirror has none — mutagen has to skip .git because a
     // worktree's .git is a FILE holding a VM-absolute gitdir.
-    { remote: "/home/" + (Quickshell.env("HEIDR_VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable-",
+    { remote: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable-",
       local: Quickshell.env("HOME") + "/work/lovable.daphen-" }
   ]
   function _localPath(p) {
@@ -490,11 +493,11 @@ Item {
     if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
       if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
     if (!_isRemote(cwd)) return
-    var vmuser = Quickshell.env("HEIDR_VM_USER") || "david_karlsson_lovable_dev"
+    var vmuser = cockpitEnv("VM_USER") || "david_karlsson_lovable_dev"
     // Only the dev VM speaks plain ssh/scp; a lovbox mirror keeps mutagen as its carrier.
     if (cwd.indexOf("/home/" + vmuser + "/") !== 0) return
-    var host = Quickshell.env("HEIDR_VM_HOST")
-             || ((Quickshell.env("HEIDR_VM") || "dev-heidr-2a39") + ".workstation.lovable.net")
+    var host = cockpitEnv("VM_HOST")
+             || ((cockpitEnv("VM") || "dev-heidr-2a39") + ".workstation.lovable.net")
     var ssh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
             + " -o ControlMaster=auto -o ControlPath=" + Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-vm-cm"
             + " -o ControlPersist=600 -o ConnectTimeout=15"
@@ -531,28 +534,48 @@ Item {
   // (stop + spawn at a new dir) otherwise kept the OLD landing forever — nvim sat
   // on the previous dir's dashboard (or the lovable fallback) looking broken.
   property string _landedFor: ""
+  property bool _planRebindPending: false
+  property string _planRebindSid: ""
+  property string _planRebindSlug: ""
   Connections {
     target: rail.agentd
     function onSessionsChanged() {
-      if (!rail._landed || !rail.selectedRaw) return
+      if (!rail.selectedRaw) return
       for (var i = 0; i < rail.agentd.sessions.length; i++) {
         var ss = rail.agentd.sessions[i]
         if (ss.id === rail.selectedRaw) {
-          var key = ss.id + "@" + ss.cwd
-          if (rail._landedFor && rail._landedFor.indexOf(ss.id + "@") === 0 && rail._landedFor !== key)
-            rail.landNvim(ss.id)
+          var key = ss.id + "@" + ss.cwd + "#" + (ss.plan || "")
+          if (rail._planRebindPending && ss.id === rail._planRebindSid
+              && String(ss.plan || "") === rail._planRebindSlug) {
+            rail._landedFor = key
+            var slug = rail._planRebindSlug
+            rail._planRebindPending = false
+            rail._planRebindSid = ""; rail._planRebindSlug = ""
+            if (slug.length) rail.openPlanInNvim(slug)
+            return
+          }
+          if (rail._landed && rail._landedFor && rail._landedFor.indexOf(ss.id + "@") === 0
+              && rail._landedFor !== key) rail.landNvim(ss.id)
           return
         }
       }
     }
   }
+  function openPlanInNvim(slug) {
+    if (!slug || !nvimSock.length) return
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
+                             'v:lua.require("plan-nvim").open(' + JSON.stringify(slug) + ')'])
+  }
   function landNvim(sid) {
     if (!sid || !agentd) return
-    var cwd = "", st = ""
+    var cwd = "", st = "", plan = ""
     for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; st = agentd.sessions[i].status || ""; break }
+      if (agentd.sessions[i].id === sid) {
+        cwd = agentd.sessions[i].cwd; st = agentd.sessions[i].status || ""
+        plan = agentd.sessions[i].plan || ""; break
+      }
     if (!cwd) return
-    _landedFor = sid + "@" + cwd
+    _landedFor = sid + "@" + cwd + "#" + plan
     // Switching TO a session that is mid-turn lands on its LIVE EDGE — the file it
     // last edited — not the dashboard. The dashboard is for arriving at rest.
     if (st === "streaming" && agentd.lastEditFor(sid) && nvimSock.length) {
@@ -560,7 +583,7 @@ Item {
       var lp0 = rail._localPath(String(agentd.lastEditFor(sid)))
       if (lp0.charAt(0) !== "/") lp0 = lcwd0 + "/" + lp0
       Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-        'isdirectory("' + lcwd0 + '") ? (execute("cd ' + lcwd0 + '") . v:lua.require("heidr").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)) : ""'])
+        'isdirectory("' + lcwd0 + '") ? (execute("cd ' + lcwd0 + '") . v:lua.require("cockpit").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)) : ""'])
       _alignMirror(sid)
       return
     }
@@ -575,10 +598,10 @@ Item {
     // dashboard at the mirror renders an almost-empty buffer — the "giant whitespace".
     // Fall back to the local checkout for the dashboard while still cd'ing to the mirror.
     // The no-.git fallback repo is SCOPE-BOUND: the lovable checkout is only a
-    // sane dashboard home on the work instance — the private heidr was falling
+    // sane dashboard home on the work instance — the private Cockpit was falling
     // back to it and showing the lovable fleet dash for ~/personal sessions.
     var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
-    var dashAt = function (d) { return 'execute(\'lua require("heidr").dashboard("' + d + '")\')' }
+    var dashAt = function (d) { return 'execute(\'lua require("cockpit").dashboard("' + d + '")\')' }
     var dash = '((isdirectory("' + cwd + '/.git") || filereadable("' + cwd + '/.git")) ? '
              + dashAt(cwd) + ' : ' + dashAt(repo) + ')'
     // Always the DASHBOARD, never the plan. The dashboard is the session's home — it's
@@ -674,7 +697,7 @@ Item {
 
   // Manage focus imperatively — a `focus:` binding fights forceActiveFocus and
   // wedges the rail after the first composer round-trip.
-  // Coming back from nvim should land where you LEFT (nvim-heidr behaviour): the
+  // Coming back from nvim should land where you left (Cockpit behavior): the
   // cursor position survives on its own (it's just `cur`), but insert mode was
   // being force-cleared on every return, so leaving from the composer dumped you
   // back in the roster. Remember it across the blur instead.
@@ -729,9 +752,9 @@ Item {
     Math.max(0, Math.min(1, Theme.electric.hslLightness * summaryLight)),
     1.0)
 
-  // HEIDR_DEMO=1 forces the mock showcase (working session + orb, every feed
-  // kind, changed files) so all states are visible without a live session.
-  readonly property bool demo: Quickshell.env("HEIDR_DEMO") === "1"
+  // COCKPIT_DEMO=1 (or legacy HEIDR_DEMO) forces the mock showcase so every
+  // session and feed state is visible without a live daemon.
+  readonly property bool demo: cockpitEnv("DEMO") === "1"
 
   // --- Roster: real agentd sessions when available, else mock ---
   readonly property var liveSessions:
@@ -832,9 +855,24 @@ Item {
   // as long as the session exists. (A binding that read its own last value here is a
   // loop — hence the explicit recompute.)
   property string defaultRaw: ""
+  property string savedRaw: ""
+  readonly property string selectionStatePath: Quickshell.env("HOME") + "/.local/state/cockpit/selected-" + (cockpitEnv("SCOPE") || "personal")
+  FileView {
+    path: rail.selectionStatePath
+    onLoaded: { rail.savedRaw = String(text() || "").trim(); rail._recomputeDefault() }
+  }
+  Process { id: selectionWrite }
+  function rememberSelection(name) {
+    if (!name) return
+    selectionWrite.running = false
+    selectionWrite.command = ["sh", "-c", 'mkdir -p "$1"; printf %s "$2" > "$3"',
+                              "sh", Quickshell.env("HOME") + "/.local/state/cockpit", name, selectionStatePath]
+    selectionWrite.running = true
+  }
   function _recomputeDefault() {
     if (!live || !agentd || !agentd.settled) { defaultRaw = ""; return }
     if (defaultRaw && liveSessions.some(s => s.name === defaultRaw)) return
+    if (savedRaw && liveSessions.some(s => s.name === savedRaw)) { defaultRaw = savedRaw; return }
     var roots = liveSessions.filter(s => !s.parent)
     var pool = (roots.length ? roots : liveSessions).slice()
     pool.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
@@ -846,6 +884,11 @@ Item {
     function onSettledChanged() { rail._recomputeDefault() }
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
+  readonly property string selectedPlan: {
+    for (var i = 0; i < liveSessions.length; i++)
+      if (liveSessions[i].name === selectedRaw) return String(liveSessions[i].plan || "")
+    return ""
+  }
 
   // Pending ask_user question (extension_ui_request) for the selected session.
   // Reactive to agentd.askGen so it clears the instant we answer.
@@ -932,7 +975,7 @@ Item {
                  // shares the ticket session's cwd, but the slice belongs to the parent.
                  devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || "") && s.cwd !== parentCwd,
                  remote: rail._isRemote(s.cwd), scope: s.scope || "",
-                 profile: s.profile || "",   // agentd role (…-orchestrator/worker/…)
+                 profile: s.profile || "", plan: s.plan || "",
                  depth: Math.min(depth, 1) })  // one level deep only
       var kids = children[s.name] || []
       for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1, s.cwd || "")
@@ -949,7 +992,7 @@ Item {
   property string newMode: ""      // "" = choosing, then "local" | "remote"
   // Remote (VM worktree) sessions are a LOVABLE concept — the personal scope has no
   // VM, so its new-session flow skips the l/r chooser and goes straight to local.
-  readonly property bool remoteOffered: Quickshell.env("HEIDR_SCOPE") === "lovable"
+  readonly property bool remoteOffered: cockpitEnv("SCOPE") === "lovable"
   // Folder-first new-session flow (declarative-sessions plan): n opens a
   // FOLDER list; picking one shows resume-or-new for that folder.
   property var newFolders: []       // [{path, name}] recent-first
@@ -994,9 +1037,8 @@ Item {
     rows.push({ kind: "new" })
     return rows
   }
-  // Pane 3 — "do you have a plan?": bind a vault plan slug at spawn time (the
-  // only moment a plan CAN bind — there is no set_plan on a live session yet).
-  // newSpawnPending non-null = pane 3 is up, holding the pane-2 choice.
+  // Pane 3 binds a plan while spawning or rebinds the selected live session.
+  // Both paths share the same scan, rows, filter, and keyboard handling.
   property var newSpawnPending: null
   property var newPlans: []
   Process {
@@ -1013,24 +1055,63 @@ Item {
   function scanPlans() {
     newPlans = []
     planScan.command = ["sh", "-c",
-      "ls -t \"$HOME/personal/notes/storage/plans\"/*.md 2>/dev/null | head -30"]
+      "ls -t \"$HOME/personal/notes/storage/plans\"/*.md 2>/dev/null"]
     planScan.running = true
   }
   readonly property var newPlanRows: {
     var f = newFilter.toLowerCase()
-    var rows = [{ none: true }]
+    var rows = []
     for (var i = 0; i < newPlans.length; i++)
       if (!f.length || newPlans[i].toLowerCase().indexOf(f) >= 0) rows.push({ slug: newPlans[i] })
+    rows.push({ newPlan: true }, { none: true })
     return rows
   }
   readonly property int newPlanWinStart: Math.max(0, Math.min(newCur - 11, newPlanRows.length - 12))
   function activatePlan(row) {
     if (!row || !agentd || !newSpawnPending) return
+    if (row.newPlan) {
+      newMode = "plan-new"
+      newInput.text = ""
+      Qt.callLater(rail.enterInsert)
+      return
+    }
+    if (newSpawnPending.rebind) {
+      _planRebindPending = true
+      _planRebindSid = newSpawnPending.session
+      _planRebindSlug = row.none ? "" : row.slug
+      agentd.send({ type: "set_plan", session: _planRebindSid, plan: _planRebindSlug })
+      closeNew()
+      return
+    }
     var msg = { type: "spawn", session: newSessionName(newFolder), cwd: newFolder }
     if (newSpawnPending.adoptId) msg.adoptId = newSpawnPending.adoptId
     if (!row.none) msg.plan = row.slug
     agentd.send(msg)
     closeNew()
+  }
+  function submitPlanDescription(description) {
+    var text = String(description || "").trim()
+    if (!text.length || !agentd || !newSpawnPending) return
+    var sid = newSpawnPending.session || newSessionName(newFolder)
+    if (!newSpawnPending.rebind) {
+      var msg = { type: "spawn", session: sid, cwd: newFolder }
+      if (newSpawnPending.adoptId) msg.adoptId = newSpawnPending.adoptId
+      agentd.send(msg)
+    }
+    agentd.enqueue(sid, "/plan-ticket " + text)
+    closeNew()
+  }
+  function openPlanBinding() {
+    if (!agentd || !selectedRaw) return
+    var cwd = ""
+    for (var i = 0; i < agentd.sessions.length; i++)
+      if (agentd.sessions[i].id === selectedRaw || agentd.sessions[i].name === selectedRaw) {
+        cwd = agentd.sessions[i].cwd || ""; break
+      }
+    newOpen = true; newMode = ""; newFolder = cwd; newFilter = ""; newCur = 0
+    newSpawnPending = { rebind: true, session: selectedRaw }
+    scanPlans()
+    requestFocus()
   }
   readonly property var newFolderRows: {
     var f = newFilter.toLowerCase()
@@ -1115,7 +1196,7 @@ Item {
       // ~/personal in the private one — a hardcoded lovable path spawned private
       // sessions into the work checkout.
       agentd.send({ type: "spawn", session: n.toLowerCase(),
-                    cwd: Quickshell.env("HEIDR_NEW_CWD") || (Quickshell.env("HOME") + "/work/lovable") })
+                    cwd: cockpitEnv("NEW_CWD") || (Quickshell.env("HOME") + "/work/lovable") })
     }
     closeNew()
   }
@@ -1129,6 +1210,7 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
+    rememberSelection(selectedRaw)
     if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
     if (_prevSelected) {
       var m = _seenAt
@@ -1191,7 +1273,7 @@ Item {
       var p = rail._localPath(String(path))
       if (p.charAt(0) !== "/") p = lcwd + "/" + p
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("heidr").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'])
+        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'])
     }
     function onEditSeen(sid, path) {
       if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
@@ -1203,13 +1285,13 @@ Item {
       var p = rail._localPath(String(path))
       if (p.charAt(0) !== "/") p = lcwd + "/" + p     // pi may report worktree-relative
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("heidr").follow_remote("' + lcwd + '","' + p + '")'])
+        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '")'])
     }
   }
 
   // While the selected session is mid-turn, re-pull its transcript on a timer. Without
   // this the chat is frozen from whenever the rail last fetched — most visibly when you
-  // open heidr while an agent is already working, which reads as "nothing is happening".
+  // open Cockpit while an agent is already working, which reads as "nothing is happening".
   Timer {
     interval: 5000
     repeat: true
@@ -1369,6 +1451,7 @@ Item {
   // everything else is swallowed while choosing. Esc closes in any phase.
   function keyNew(e) {
     if (e.key === Qt.Key_Escape) {
+      if (newSpawnPending && newSpawnPending.rebind) { closeNew(); return true }
       if (newSpawnPending) { newSpawnPending = null; newFilter = ""; newCur = 0; return true }  // back to pane 2
       if (newFolder.length) { newFolder = ""; newCur = 0; return true }  // back to folders
       closeNew(); return true
@@ -1377,7 +1460,7 @@ Item {
     if (remoteOffered && newFolder === "" && e.key === Qt.Key_R && !newFilter.length) {
       newMode = "remote"; Qt.callLater(rail.enterInsert); return true
     }
-    if (newMode === "remote") return false   // name input owns the keys
+    if (newMode === "remote" || newMode === "plan-new") return false
     var rows = newSpawnPending ? newPlanRows : newFolder.length ? newWhichRows : newFolderRows
     if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { newCur = Math.min(rows.length - 1, newCur + 1); return true }
     if (e.key === Qt.Key_K || e.key === Qt.Key_Up)   { newCur = Math.max(0, newCur - 1); return true }
@@ -1451,6 +1534,9 @@ Item {
       }
       return true
     case Qt.Key_N:      rail.openNew(); return true             // new session
+    case Qt.Key_P:
+      if (shift) { rail.openPlanBinding(); return true }
+      break
     case Qt.Key_X:
       // x kills the session under the ROSTER cursor and does nothing anywhere
       // else: interrupting a turn is Esc, and a kill should require aiming.
@@ -1828,7 +1914,7 @@ Item {
       // transition manager, and these cards only reach their real height AFTER their prose
       // Loader realizes (57 -> 144px) — that growth never made it back into the layout, so
       // every agent card was positioned as a 57px row and painted over the one below it.
-      // (`ipc call heidr railGeom` shows it: y jumps by 75 between rows that are 144 tall.)
+      // (`ipc call cockpit railGeom` shows it: y jumps by 75 between rows that are 144 tall.)
       // The fade lives in the delegate instead, where it cannot touch layout.
       // Manual scrolling wins over follow-the-stream. NOTE: do NOT use
       // onMovementStarted/Ended here — Flickable emits those for PROGRAMMATIC
@@ -2089,6 +2175,15 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
               color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: rail.selectedPlan.length > 0
+              width: Math.min(implicitWidth, 240)
+              elide: Text.ElideMiddle
+              text: "plan · " + rail.selectedPlan
+              color: Theme.electric
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
             // The "thinking" signifier lives HERE now (the floating pill is gone):
             // same orb grammar as the expanded rows.
@@ -2550,14 +2645,16 @@ Item {
                     leftMargin: 18; rightMargin: 16; topMargin: 12 }
           spacing: 8
           Text {
-            text: rail.newSpawnPending ? ("new session · " + rail.newFolder.split("/").pop() + " — do you have a plan?")
+            text: rail.newMode === "plan-new" ? "new plan — describe the task"
+                : rail.newSpawnPending && rail.newSpawnPending.rebind ? ("bind plan · " + rail.shortName(rail.newSpawnPending.session))
+                : rail.newSpawnPending ? ("new session · " + rail.newFolder.split("/").pop() + " — do you have a plan?")
                 : rail.newFolder.length ? ("new session · " + rail.newFolder.split("/").pop()) : "new session — pick a folder"
             color: Theme.electric
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
           }
           // Pane 1 — folders (recent-first, fuzzy-filtered by typing).
           Text {
-            visible: rail.newMode !== "remote" && (!rail.newFolder.length || !!rail.newSpawnPending) && rail.newFilter.length > 0
+            visible: rail.newMode !== "remote" && rail.newMode !== "plan-new" && (!rail.newFolder.length || !!rail.newSpawnPending) && rail.newFilter.length > 0
             text: "filter: " + rail.newFilter
             color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
@@ -2617,7 +2714,7 @@ Item {
           // Pane 3 — bind a vault plan (or none) before the spawn goes out.
           Column {
             width: newCol.width
-            visible: !!rail.newSpawnPending
+            visible: !!rail.newSpawnPending && rail.newMode !== "plan-new"
             spacing: 2
             Repeater {
               model: rail.newPlanRows.slice(rail.newPlanWinStart, rail.newPlanWinStart + 12)
@@ -2628,8 +2725,10 @@ Item {
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   spacing: 8
                   Text {
-                    text: modelData.none ? "no plan — just a session" : modelData.slug
-                    color: modelData.none ? Theme.fg_muted : Theme.fg
+                    text: modelData.newPlan ? "new plan…"
+                        : modelData.none ? "no plan" : modelData.slug
+                    color: modelData.none ? Theme.fg_muted
+                         : modelData.newPlan ? Theme.electric : Theme.fg
                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
                   }
                 }
@@ -2639,7 +2738,7 @@ Item {
           }
           Rectangle {
             width: newCol.width
-            visible: rail.newMode === "remote"
+            visible: rail.newMode === "remote" || rail.newMode === "plan-new"
             implicitHeight: 44; height: implicitHeight
             radius: 10
             color: Theme.surface0
@@ -2662,7 +2761,11 @@ Item {
                 clip: true
                 verticalAlignment: TextInput.AlignVCenter
                 cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: newInput.cursorVisible ? 1 : 0 }
-                onAccepted: { rail.createSession(text); text = "" }
+                onAccepted: {
+                  if (rail.newMode === "plan-new") rail.submitPlanDescription(text)
+                  else rail.createSession(text)
+                  text = ""
+                }
                 Keys.onPressed: (e) => {
                   if (e.key === Qt.Key_Escape) { rail.closeNew(); e.accepted = true }
                 }
@@ -2671,6 +2774,7 @@ Item {
           }
           Text {
             text: rail.newMode === "remote" ? "ticket id, e.g. EVERY-2739 · esc cancels"
+                : rail.newMode === "plan-new" ? "enter dispatches /plan-ticket · esc cancels"
                 : rail.newSpawnPending      ? "type to filter plans · j/k + enter binds · esc back"
                 : rail.newFolder.length     ? "j/k + enter — resume or start new · esc back"
                 : "type to filter, or ~/path for any folder · j/k + enter picks" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"

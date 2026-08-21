@@ -31,10 +31,15 @@
 #include <cstdio>
 #include <cerrno>
 
+static QByteArray cockpitEnv(const char *name) {
+  const QByteArray current = qgetenv((QByteArray("COCKPIT_") + name).constData());
+  return current.isEmpty() ? qgetenv((QByteArray("HEIDR_") + name).constData()) : current;
+}
+
 // Kitty graphics needs a PNG decoder installed process-wide. Decode via QImage
 // into tight RGBA, allocated through the library's allocator (it takes ownership
 // and frees with the same allocator).
-static bool heidrDecodePng(void *, const GhosttyAllocator *alloc,
+static bool cockpitDecodePng(void *, const GhosttyAllocator *alloc,
                            const uint8_t *data, size_t len, GhosttySysImage *out) {
   QImage img;
   if (!img.loadFromData(data, (int)len, "PNG")) return false;
@@ -88,25 +93,16 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setAcceptedMouseButtons(Qt::AllButtons);
   setFocus(true);
 
-  // Decided before the pty is forked: the child exports it as NVIM_LISTEN_ADDRESS and the
-  // rail reads it back off this item, so both sides always agree on the path.
-  //
-  // Normally the STABLE name, so an nvim that outlives heidr (crash, kill -9 — teardown's
-  // killpg never ran) is still reachable from the next launch, and the path can be driven
-  // by hand with `nvim --server`. A dead socket file left there is not a problem: nvim
-  // unlinks a stale one itself and binds over it.
-  //
-  // If something LIVE answers, it is another cockpit's (or an orphan's) nvim. Taking that
-  // path anyway would point rail-follow at a window this instance does not own, and nvim
-  // would refuse to bind (0.12 exits on a live address), so fall back to a private name.
+  // The child and rail share a private pid + nonce socket path decided before the pty fork;
+  // a live collision advances the nonce rather than stealing another instance's nvim.
   {
     const QByteArray rt = qgetenv("XDG_RUNTIME_DIR");
     const QString base = rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt);
-    // NO shared/stable name — ever. The old walk preferred /heidr-nvim.sock, and two
+    // NO shared/stable name — ever. The old walk preferred a stable socket, and two
     // instances relaunching in any order raced onto it: the loser's nvim died at a
     // shell ("address already in use") and the winner's editor received the OTHER
-    // instance's landings and live-follows (work dashboards in the private heidr,
-    // personal follows in the work cockpit). Identity is pid + a per-item nonce
+    // instance's landings and live-follows (work dashboards in the private Cockpit,
+    // personal follows in the work Cockpit). Identity is pid + a per-item nonce
     // (hot-reload recreates this item inside the SAME process), probed for liveness
     // only to survive nonce collisions across reloads.
     const auto live = [](const QString &p) {
@@ -120,7 +116,7 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     ++itemSeq;
     QStringList cands;
     for (int i = 0; i <= 9; ++i)
-      cands << base + QStringLiteral("/heidr-nvim-%1-%2.sock")
+      cands << base + QStringLiteral("/cockpit-nvim-%1-%2.sock")
                  .arg(static_cast<qint64>(::getpid())).arg(itemSeq + i);
     nvimSocket_ = cands.last();
     for (const QString &c : cands)
@@ -135,17 +131,17 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   font_ = QFont("GeistMono Nerd Font");
   font_.setStyleHint(QFont::Monospace);
   // Tunable at runtime so rendering can be judged side by side without a rebuild:
-  //   HEIDR_HINTING = none | slight | full | default   (default: default = rail-like)
-  //   HEIDR_FONT_PX = <pixels>                          (default: 17 ≈ 13pt at 96dpi)
+  //   COCKPIT_HINTING = none | slight | full | default (default: rail-like)
+  //   COCKPIT_FONT_PX = <pixels>                        (default: 17 ≈ 13pt at 96dpi)
   {
-    const QByteArray h = qgetenv("HEIDR_HINTING");
+    const QByteArray h = cockpitEnv("HINTING");
     QFont::HintingPreference hp = QFont::PreferDefaultHinting;
     if (h == "none")   hp = QFont::PreferNoHinting;
     if (h == "slight") hp = QFont::PreferVerticalHinting;   // vertical stems only
     if (h == "full")   hp = QFont::PreferFullHinting;
     font_.setHintingPreference(hp);
     bool ok = false;
-    const int px = qgetenv("HEIDR_FONT_PX").toInt(&ok);
+    const int px = cockpitEnv("FONT_PX").toInt(&ok);
     font_.setPixelSize(ok && px >= 8 && px <= 48 ? px : 17);
   }
   // kitty's `symbol_map U+E000-U+E4FF QsIcons` has no Qt equivalent, and the range
@@ -177,7 +173,7 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     // void* straight to the fn type), unlike the scalar terminal options, which take a
     // pointer TO the value. Passing &localVariable stored the address of a stack slot
     // and libghostty later jumped into stack garbage — a segfault on the first PNG.
-    ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, reinterpret_cast<void *>(&heidrDecodePng));
+    ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, reinterpret_cast<void *>(&cockpitDecodePng));
     s_pngInstalled = true;
   }
   size_t kittyLimit = (size_t)320 * 1024 * 1024;
@@ -388,18 +384,16 @@ void TermView::spawnPty() {
     if (!sh || !*sh) sh = "/bin/bash";
     setenv("TERM", "xterm-256color", 1);
     setenv("COLORTERM", "truecolor", 1);  // let nvim enable termguicolors → full theme
-    setenv("HEIDR_COCKPIT", "1", 1);  // nvim uses this to enable rail-crossing keymaps
+    setenv("COCKPIT_COCKPIT", "1", 1);
+    setenv("HEIDR_COCKPIT", "1", 1);
     // nvim RPC socket so the rail can open files in the running nvim (nvim-follow).
     setenv("NVIM_LISTEN_ADDRESS", nvimSocket_.toUtf8().constData(), 1);
     // Auto-launch nvim in the pane; drop to a login shell when it exits.
-    // Override the command with HEIDR_COCKPIT_CMD.
-    // No unlink before binding. The `rm -f "$NVIM_LISTEN_ADDRESS"` that used to sit here
-    // was the whole bug: it deleted the socket a live nvim was listening on, that nvim kept
-    // running believing it was reachable, and every session-switch RPC then vanished into a
-    // path with no inode — silently, since execDetached reports nothing. It bought nothing
-    // either: nvim 0.12 unlinks a stale socket by itself, and the live case is already
-    // handled by picking a private path above.
-    const char *cmd = getenv("HEIDR_COCKPIT_CMD");
+    // Override with COCKPIT_COCKPIT_CMD; the legacy HEIDR_ name still works.
+    // Never unlink before binding: nvim handles stale sockets, while the private path above
+    // prevents a live instance from being stolen.
+    const QByteArray cmdEnv = cockpitEnv("COCKPIT_CMD");
+    const char *cmd = cmdEnv.constData();
     if (!cmd || !*cmd) cmd = "nvim --listen \"$NVIM_LISTEN_ADDRESS\" -c 'set shortmess+=I'; exec \"$SHELL\" -l";
     execl(sh, sh, "-l", "-c", cmd, (char *)nullptr);
     _exit(127);
@@ -982,7 +976,7 @@ QImage TermView::renderFrame() {
         ghostty_kitty_graphics_placement_iterator_free(it);
       }
 
-      static const bool kittyDbg = qEnvironmentVariableIsSet("HEIDR_KITTY_DEBUG");
+      static const bool kittyDbg = !cockpitEnv("KITTY_DEBUG").isEmpty();
       if (kittyDbg) {
         fprintf(stderr, "[kitty] virtualPl=%zu", virtualPl.size());
         for (auto &kv : virtualPl) fprintf(stderr, " id=%u(%ux%u)", kv.first, kv.second.cols, kv.second.rows);
