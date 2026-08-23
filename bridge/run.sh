@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # One-time exposure: tailscale serve --bg --https=443 http://127.0.0.1:8787
-# Tailscale supplies TLS and tailnet identity; this bridge remains loopback-only.
-# V1 deliberately depends on proart staying awake; do not relocate it to the VM.
+# This is Lovable's corporate tailnet, so membership is transport—not authorization.
+# The loopback bridge still requires ~/.config/cockpit/bridge-token on every API/WS request.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 web="$root/web"
 bridge="$root/bridge"

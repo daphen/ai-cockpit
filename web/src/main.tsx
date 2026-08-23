@@ -8,4 +8,6 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode><App /></StrictMode>,
 )
 
-if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register(swUrl, { type: "module" }))
+if ("serviceWorker" in navigator && window.isSecureContext) {
+  window.addEventListener("load", () => void navigator.serviceWorker.register(swUrl, { type: "module" }))
+}

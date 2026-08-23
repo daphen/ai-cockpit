@@ -168,6 +168,17 @@ button.primary { border-color: var(--ink); background: var(--ink); color: var(--
 .send-label { position: relative; }
 .composer-actions button:disabled { opacity: .4; }
 
+.token-shell { display: grid; place-items: center; min-height: 100dvh; padding: 24px; background: var(--bg-dim); }
+.token-card { display: grid; gap: 12px; width: min(100%, 430px); padding: 24px; border: 1px solid var(--hairline); border-radius: 20px; background: var(--bg); }
+.token-card > span { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.token-card h1, .token-card p { margin: 0; }
+.token-card p { color: var(--ink-2); }
+.token-card input { width: 100%; min-height: 48px; border: 1px solid var(--hairline); border-radius: 12px; outline: none; background: var(--surface); padding: 12px; }
+.token-card input:focus { border-color: var(--sky); }
+.token-card button { min-height: 44px; border: 0; border-radius: 11px; }
+.token-card button:disabled { opacity: .4; }
+.token-error { color: var(--red); font-size: 11px; }
+
 @media (prefers-reduced-motion: reduce) {
   .t-badge, .t-badge-dot { animation: none !important; transition: none !important; }
 }

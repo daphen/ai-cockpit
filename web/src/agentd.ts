@@ -80,6 +80,13 @@ export interface Snapshot {
 
 const EMPTY: Snapshot = { sessions: [], feeds: {}, asks: {}, connectedScopes: [], queues: {} }
 
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("Bridge token required")
+    this.name = "UnauthorizedError"
+  }
+}
+
 function sessionKey(scope: string, name: string) {
   return `${scope}/${name}`
 }
@@ -205,6 +212,7 @@ export class AgentdStore {
   private queues: Record<string, string[]> = {}
   private optimistic: Record<string, FeedItem[]> = {}
   private snapshot: Snapshot = EMPTY
+  private token = ""
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -213,8 +221,14 @@ export class AgentdStore {
 
   getSnapshot = () => this.snapshot
 
-  async connect() {
-    const response = await fetch("/scopes", { cache: "no-store" })
+  async connect(token: string) {
+    if (token !== this.token) this.resetConnections()
+    this.token = token
+    const response = await fetch("/scopes", {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (response.status === 401) throw new UnauthorizedError()
     if (!response.ok) throw new Error(`scope discovery failed: ${response.status}`)
     const scopes = await response.json() as string[]
     for (const scope of scopes) this.openScope(scope)
@@ -261,7 +275,8 @@ export class AgentdStore {
     const current = this.scopes.get(scope)
     if (current?.socket?.readyState === WebSocket.OPEN || current?.socket?.readyState === WebSocket.CONNECTING) return
     const protocol = location.protocol === "https:" ? "wss:" : "ws:"
-    const socket = new WebSocket(`${protocol}//${location.host}/ws?scope=${encodeURIComponent(scope)}`)
+    const query = new URLSearchParams({ scope, token: this.token })
+    const socket = new WebSocket(`${protocol}//${location.host}/ws?${query}`)
     const state: ScopeState = current ?? { scope, socket: null, connected: false, sessions: [] }
     state.socket = socket
     this.scopes.set(scope, state)
@@ -274,6 +289,23 @@ export class AgentdStore {
       window.clearTimeout(state.reconnectTimer)
       state.reconnectTimer = window.setTimeout(() => this.openScope(scope), 1500)
     }
+  }
+
+  private resetConnections() {
+    for (const state of this.scopes.values()) {
+      window.clearTimeout(state.reconnectTimer)
+      if (state.socket) {
+        state.socket.onclose = null
+        state.socket.close()
+      }
+    }
+    this.scopes.clear()
+    this.feeds = {}
+    this.asks = {}
+    this.queues = {}
+    this.optimistic = {}
+    this.snapshot = EMPTY
+    this.listeners.forEach(listener => listener())
   }
 
   private onMessage(scope: string, line: string) {

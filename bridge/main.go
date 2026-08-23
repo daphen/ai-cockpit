@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -22,17 +24,26 @@ import (
 var scopePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func main() {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
 	addr := flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 	runtimeDir := flag.String("runtime-dir", envOr("XDG_RUNTIME_DIR", filepath.Join(os.TempDir(), fmt.Sprintf("runtime-%d", os.Getuid()))), "directory containing agentd sockets")
 	staticDir := flag.String("static-dir", "../web/dist", "built web app directory")
+	tokenFile := flag.String("token-file", filepath.Join(home, ".config/cockpit/bridge-token"), "bearer token file")
 	flag.Parse()
-	if !isLoopbackAddress(*addr) {
-		log.Fatalf("refusing non-loopback listen address %q; expose the bridge through Tailscale Serve", *addr)
+	if !isAllowedAddress(*addr) {
+		log.Fatalf("refusing listen address %q; only loopback and routed 10.x addresses are allowed", *addr)
+	}
+	token, err := loadToken(*tokenFile)
+	if err != nil {
+		log.Fatalf("load bearer token: %v", err)
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /scopes", scopesHandler(*runtimeDir))
-	mux.HandleFunc("GET /ws", websocketHandler(*runtimeDir))
+	mux.Handle("/scopes", requireToken(token, scopesHandler(*runtimeDir)))
+	mux.Handle("/ws", requireToken(token, websocketHandler(*runtimeDir)))
 	mux.Handle("/", spaHandler(*staticDir))
 
 	server := &http.Server{Addr: *addr, Handler: logRequests(mux), ReadHeaderTimeout: 5 * time.Second}
@@ -42,7 +53,7 @@ func main() {
 	}
 }
 
-func isLoopbackAddress(addr string) bool {
+func isAllowedAddress(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
 		return false
@@ -51,7 +62,92 @@ func isLoopbackAddress(addr string) bool {
 		return true
 	}
 	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	v4 := ip.To4()
+	return v4 != nil && v4[0] == 10
+}
+
+func loadToken(path string) ([]byte, error) {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if err := os.Chmod(path, 0o600); err != nil {
+			return nil, err
+		}
+		return validateToken(data)
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, err
+	}
+	generated, err := generateToken()
+	if err != nil {
+		return nil, err
+	}
+	token, err := validateToken(generated)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if os.IsExist(err) {
+		return loadToken(path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err := file.Write(append(token, '\n')); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
+	if err := file.Close(); err != nil {
+		return nil, err
+	}
+	return token, nil
+}
+
+func generateToken() ([]byte, error) {
+	commands := [][]string{
+		{"openssl", "rand", "-hex", "32"},
+		{"nix", "shell", "nixpkgs#openssl", "-c", "openssl", "rand", "-hex", "32"},
+	}
+	var lastErr error
+	for _, command := range commands {
+		output, err := exec.Command(command[0], command[1:]...).Output()
+		if err == nil {
+			return output, nil
+		}
+		lastErr = err
+	}
+	return nil, fmt.Errorf("openssl rand: %w", lastErr)
+}
+
+func validateToken(data []byte) ([]byte, error) {
+	token := strings.TrimSpace(string(data))
+	if matched, _ := regexp.MatchString(`^[0-9a-f]{64}$`, token); !matched {
+		return nil, errors.New("token must be 64 lowercase hexadecimal characters")
+	}
+	return []byte(token), nil
+}
+
+func requireToken(token []byte, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		candidate := r.URL.Query().Get("token")
+		if header := r.Header.Get("Authorization"); strings.HasPrefix(header, "Bearer ") {
+			candidate = strings.TrimPrefix(header, "Bearer ")
+		}
+		if subtle.ConstantTimeCompare([]byte(candidate), token) != 1 {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func envOr(key, fallback string) string {
@@ -78,7 +174,11 @@ func sockets(runtimeDir string) ([]string, error) {
 }
 
 func scopesHandler(runtimeDir string) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
 		scopes, err := sockets(runtimeDir)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -92,9 +192,6 @@ func scopesHandler(runtimeDir string) http.HandlerFunc {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  64 * 1024,
 	WriteBufferSize: 64 * 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return r.Header.Get("Origin") == "" || strings.HasPrefix(r.Header.Get("Origin"), "https://") || strings.HasPrefix(r.Header.Get("Origin"), "http://127.0.0.1") || strings.HasPrefix(r.Header.Get("Origin"), "http://localhost")
-	},
 }
 
 func websocketHandler(runtimeDir string) http.HandlerFunc {
@@ -187,7 +284,7 @@ func spaHandler(root string) http.Handler {
 
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		log.Printf("%s %s", r.Method, r.URL.RequestURI())
+		log.Printf("%s %s", r.Method, r.URL.Path)
 		next.ServeHTTP(w, r)
 	})
 }

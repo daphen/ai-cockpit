@@ -1,17 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-time manual VM join (never automated here): install tailscale + tailscaled in
-# ~/.local/bin, then run:
-#   mkdir -p ~/.local/run ~/.local/state/tailscale
-#   nohup ~/.local/bin/tailscaled --tun=userspace-networking \
-#     --state="$HOME/.local/state/tailscale/tailscaled.state" \
-#     --socket="$HOME/.local/run/tailscaled.sock" \
-#     >"$HOME/.local/state/tailscale/tailscaled.log" 2>&1 </dev/null &
-#   ~/.local/bin/tailscale --socket="$HOME/.local/run/tailscaled.sock" up \
-#     --hostname=dev-heidr-2a39
-#   ~/.local/bin/tailscale --socket="$HOME/.local/run/tailscaled.sock" serve \
-#     --bg --https=443 http://127.0.0.1:8787
+# The VM is already reachable from David's iPhone through Lovable's corporate
+# Tailscale subnet router; do not install or run tailscaled on the VM.
+# This deploy binds the bridge to the VM's first routed 10.x address. Corporate
+# tailnet membership is not authorization: every API/WS request requires the
+# bearer token at ~/.config/cockpit/bridge-token; the token is never printed.
 # Orchestrator handover after deploy:
 #   agent spawn ~/src/lovable --profile lovable-orchestrator --scope work
 # Then send that new orchestrator the FULL handoff contents inline (not a proart-local
@@ -53,7 +47,13 @@ runtime=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 work_socket="$runtime/agentd-work.sock"
 bridge_runtime="$HOME/.local/run/cockpit-work"
 state="$HOME/.local/state/cockpit-mobile"
+token_file="$HOME/.config/cockpit/bridge-token"
+bind_addr=$(hostname -I | tr ' ' '\n' | awk '/^10\./ { print; exit }')
 
+if [[ -z "$bind_addr" ]]; then
+  echo "VM has no routed 10.x address" >&2
+  exit 1
+fi
 if [[ ! -S "$work_socket" ]]; then
   printf "agentd work socket is unavailable: %s\n" "$work_socket" >&2
   exit 1
@@ -72,29 +72,15 @@ if [[ -s "$state/bridge.pid" ]]; then
   fi
 fi
 nohup "$HOME/.local/bin/cockpit-bridge" \
-  -addr 127.0.0.1:8787 \
+  -addr "$bind_addr:8787" \
   -runtime-dir "$bridge_runtime" \
   -static-dir "$HOME/.local/share/cockpit-mobile/web" \
+  -token-file "$token_file" \
   >"$state/bridge.log" 2>&1 </dev/null &
 echo $! >"$state/bridge.pid"
 sleep 0.3
 kill -0 "$(cat "$state/bridge.pid")"
-
-tailscale_bin="$HOME/.local/bin/tailscale"
-tailscale_socket="$HOME/.local/run/tailscaled.sock"
-if [[ ! -x "$tailscale_bin" || ! -S "$tailscale_socket" ]]; then
-  echo "userspace tailscaled is not joined; follow the one-time header runbook" >&2
-  exit 1
-fi
-dns_name=$(
-  "$tailscale_bin" --socket="$tailscale_socket" status --json |
-    python3 -c 'import json,sys; print(json.load(sys.stdin).get("Self",{}).get("DNSName","").rstrip("."))'
-)
-if [[ -z "$dns_name" ]]; then
-  echo "tailscale did not report a tailnet DNS name" >&2
-  exit 1
-fi
-printf 'https://%s/' "$dns_name"
+printf 'http://%s:8787/' "$bind_addr"
 REMOTE
 )
 
