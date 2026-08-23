@@ -753,6 +753,12 @@ Item {
         send({ type: "prompt", session: sid, message: sp.text })
     }
 
+    if (t === "goal_set") {
+      var goal = String(m.goal || "")
+      _setTransient(sid, "goal-receipt", "info",
+                    goal.length ? "↳ goal pinned (watchdog on): " + goal : "↳ goal cleared", 60000)
+      return
+    }
     if (t === "plan_set") {
       var plan = String(m.plan || "")
       _setTransient(sid, "plan-receipt", "info",

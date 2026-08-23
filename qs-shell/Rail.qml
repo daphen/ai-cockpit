@@ -2959,6 +2959,17 @@ Item {
             // Shift+Enter falls through to the default handler = a newline.
             function sendNow() {
               var pa = rail.pendingAsk
+              // /goal — rail-intercepted (never reaches pi): pins a watchdog goal
+              // on the selected session; "/goal done" or bare "/goal" clears it.
+              var gm = text.match(/^\/goal\s*(.*)$/s)
+              if (gm) {
+                var g = gm[1].trim()
+                if (/^(done|clear)$/i.test(g)) g = ""
+                if (rail.agentd) rail.agentd.send({ type: "set_goal", session: rail.selectedRaw, goal: g })
+                text = ""
+                composerInput.forceActiveFocus()
+                return
+              }
               if (pa && (pa.method === "input" || pa.method === "editor")) {
                 if (text.trim().length) rail.answerAsk({ value: text })
               } else if (rail.agentd && !rail.attachRefs(text).trim().length && !rail.featuredStreaming
