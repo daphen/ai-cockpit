@@ -714,6 +714,19 @@ Item {
       if (String(m.health || "") !== String(hh[si] || "")) { hh[si] = String(m.health || ""); _health = hh; healthGen++ }
       _noteReported(si)
       _rebuildSessions()
+      // Rosters are authoritative for asks: clearing used to depend solely on
+      // catching the ask_answered event, so a rail that was relaunching or
+      // disconnected at that moment kept a ghost card forever — which hides
+      // the composer. Prune any ask no daemon still claims.
+      var claimed = {}
+      for (var rsi in _rosters) {
+        var lst = _rosters[rsi] || []
+        for (var rj = 0; rj < lst.length; rj++) if (lst[rj].ask) claimed[lst[rj].name] = true
+      }
+      var prunedAsk = false
+      var a2 = asks
+      for (var ak in a2) if (!claimed[ak]) { delete a2[ak]; prunedAsk = true }
+      if (prunedAsk) { asks = a2; askGen++ }
       return
     }
     if (t === "response" && m.command === "get_entries") { onEntries(m); return }
