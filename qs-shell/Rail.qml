@@ -1833,6 +1833,9 @@ Item {
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
+        // A user message whose visible text stripped to nothing (system-reminder
+        // only, or a bare sender stamp) rendered as a blank card — skip it.
+        if (!String(it.text || "").trim().length) continue
         out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, sender: it.sender || "", key: it.mid || _contentKey("user", it.text) })
       } else if (it.kind === "sys") {
         // Housekeeping (compaction) gets its OWN card so it never colors the
