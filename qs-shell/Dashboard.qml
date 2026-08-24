@@ -208,21 +208,36 @@ FocusScope {
                       : row.hasAdditions ? Theme.green : Theme.red)
                     : root.tone(row.modelData.iconTone || row.modelData.markerTone)
                 }
+                // Inline leading glyphs (nerd-font chars baked into row text — ▤, ◁,
+                // ticket marks) render as their own run so icons can outsize text.
+                readonly property string rawText: change ? "" : (modelData.label !== undefined
+                    ? String(modelData.label)
+                    : (splitMarker ? String(modelData.text || "").slice(1).trim() : String(modelData.text || "")))
+                readonly property int _lead: rawText.length ? rawText.charCodeAt(0) : 0
+                readonly property bool inlineGlyph: !hasIcon && !change
+                    && ((_lead >= 0x2190 && _lead <= 0x2BFF)
+                     || (_lead >= 0xE000 && _lead <= 0xF8FF)
+                     || (_lead >= 0xD800 && _lead <= 0xDBFF))
+                readonly property int glyphLen: (_lead >= 0xD800 && _lead <= 0xDBFF) ? 2 : 1
+                Text {
+                  id: leadGlyph
+                  visible: row.inlineGlyph
+                  anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                  text: visible ? row.rawText.slice(0, row.glyphLen) : ""
+                  color: root.tone(row.modelData.tone)
+                  font { family: Theme.fontFamily; pixelSize: 18 }
+                }
                 Text {
                   anchors {
-                    left: row.hasIcon ? marker.right : parent.left
-                    leftMargin: row.hasIcon ? 7 : 10
+                    left: row.hasIcon ? marker.right : (row.inlineGlyph ? leadGlyph.right : parent.left)
+                    leftMargin: row.hasIcon || row.inlineGlyph ? 7 : 10
                     right: stats.visible ? stats.left : parent.right
                     rightMargin: stats.visible ? 18 : 10
                     verticalCenter: parent.verticalCenter
                   }
-                  text: row.change
-                    ? row.change.label
-                    : (row.modelData.label !== undefined
-                      ? String(row.modelData.label)
-                      : (row.splitMarker
-                        ? String(row.modelData.text || "").slice(1).trim()
-                        : String(row.modelData.text || "")))
+                  text: row.inlineGlyph
+                    ? row.rawText.slice(row.glyphLen).replace(/^\s+/, "")
+                    : (row.change ? row.change.label : row.rawText)
                   color: root.tone(row.modelData.tone)
                   elide: Text.ElideMiddle
                   font { family: Theme.fontFamily; pixelSize: 15 }
