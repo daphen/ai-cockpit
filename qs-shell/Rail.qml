@@ -2345,28 +2345,35 @@ Item {
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 3
               }
             }
-            Icon {
+            // ONE slot for both states, overlaid and right-aligned: the two used
+            // to be separate Row items, so the visible-flip reflowed the row and
+            // the shield jumped while the crossfade was still running.
+            Item {
               anchors.verticalCenter: parent.verticalCenter
-              name: {
-                var arr = rail.liveSessions
-                for (var i = 0; i < arr.length; i++)
-                  if (arr[i].name === rail.selectedRaw)
-                    return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
-                return "laptop--outline--18"
+              height: 18
+              width: rail.rosterExpanded ? 15 : glanceDots.width
+              Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+              Icon {
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                name: {
+                  var arr = rail.liveSessions
+                  for (var i = 0; i < arr.length; i++)
+                    if (arr[i].name === rail.selectedRaw)
+                      return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
+                  return "laptop--outline--18"
+                }
+                width: 15; height: 15
+                color: Theme.fg
+                opacity: rail.rosterExpanded ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 220 } }
               }
-              width: 15; height: 15
-              color: Theme.fg
-              opacity: rail.rosterExpanded ? 1 : 0
-              visible: opacity > 0.01
+              Row {
+              id: glanceDots
+              anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+              spacing: 12
+              opacity: rail.rosterExpanded ? 0 : 1
               Behavior on opacity { NumberAnimation { duration: 220 } }
-            }
-            Row {
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
-            opacity: rail.rosterExpanded ? 0 : 1
-            visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 220 } }
-            Repeater {
+              Repeater {
               // rosterModel, NOT a filtered array: the array's identity changed on every
               // roster push, so every dot (and running spinner) was destroyed and rebuilt
               // several times a second while anything streamed — the "blinking dots".
@@ -2406,6 +2413,7 @@ Item {
                     NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
                   }
                 }
+              }
               }
             }
             }
