@@ -2332,12 +2332,18 @@ Item {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
             // Watchdog state as one shield: green = goal armed, orange = unguarded.
-            Text {
+            // Same 16px slot as each status dot, so every gap on the row is the
+            // uniform 12px slot-to-slot rhythm.
+            Item {
               anchors.verticalCenter: parent.verticalCenter
               visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
-              text: "⛨"
-              color: rail.selectedGoal.length > 0 ? Theme.green : Theme.orange
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 3
+              width: 16; height: 16
+              Text {
+                anchors.centerIn: parent
+                text: "⛨"
+                color: rail.selectedGoal.length > 0 ? Theme.green : Theme.orange
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 3
+              }
             }
             Icon {
               anchors.verticalCenter: parent.verticalCenter
