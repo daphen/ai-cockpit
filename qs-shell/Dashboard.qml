@@ -195,8 +195,8 @@ FocusScope {
                   id: marker
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   visible: row.hasIcon
-                  width: 15
-                  height: 15
+                  width: 18
+                  height: 18
                   name: row.modelData.icon !== undefined ? String(row.modelData.icon)
                     : row.change ? "file-content"
                     : row.modelData.markerTone === "success" ? "check"
