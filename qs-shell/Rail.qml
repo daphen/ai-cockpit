@@ -2961,7 +2961,7 @@ Item {
               var pa = rail.pendingAsk
               // /goal — rail-intercepted (never reaches pi): pins a watchdog goal
               // on the selected session; "/goal done" or bare "/goal" clears it.
-              var gm = text.match(/^\/goal\s*(.*)$/s)
+              var gm = text.match(/^\/goal\s*([\s\S]*)$/)
               if (gm) {
                 var g = gm[1].trim()
                 if (/^(done|clear)$/i.test(g)) g = ""
