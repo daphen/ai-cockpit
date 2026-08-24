@@ -92,6 +92,28 @@ Rectangle {
     }
   }
 
+  component DiffStat: Item {
+    id: stat
+    property string icon: ""
+    property int value: 0
+    property color tint: Theme.fg
+    visible: value > 0
+    implicitWidth: body.implicitWidth + 8
+    implicitHeight: 18
+    Row {
+      id: body
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: 4
+      Icon { name: stat.icon; width: 14; height: 14; color: stat.tint; anchors.verticalCenter: parent.verticalCenter }
+      Text {
+        text: String(stat.value)
+        color: stat.tint
+        font { family: Theme.fontFamily; pixelSize: 16; bold: true }
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+  }
+
   FileView {
     path: Quickshell.env("HOME") + "/.local/state/cockpit/chin-" + chin.scope + ".json"
     watchChanges: true
@@ -144,17 +166,26 @@ Rectangle {
     anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
-    // Language icon (nvim-web-devicons, same glyph+color lualine showed).
-    Swap { anchors.verticalCenter: parent.verticalCenter; gap: 6
-           value: String(chin.st.fticon || "")
-           tint: chin.st.fticolor ? Qt.color(chin.st.fticolor) : Theme.fg_muted }
+    // Wrapper reserves 6px of air after the glyph (Icon stretches to its
+    // width, so padding must live outside it).
+    Item {
+      anchors.verticalCenter: parent.verticalCenter
+      width: visible ? 22 : 0
+      height: 16
+      visible: String(chin.st.ft || "").length > 0
+      Icon {
+        anchors.left: parent.left
+        anchors.verticalCenter: parent.verticalCenter
+        name: "file-content"
+        color: Theme.fg_muted
+        width: 16
+        height: 16
+      }
+    }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: String(chin.st.ft || ""); tint: Theme.fg_muted }
-    // The old lualine fancy_diff nerd glyphs, not bare +/-.
-    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true; gap: 6
-           value: chin._n(chin.st.add) > 0 ? " " + chin.st.add : ""; tint: Theme.green }
-    Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
-           value: chin._n(chin.st.del) > 0 ? " " + chin.st.del : ""; tint: Theme.red }
+    DiffStat { anchors.verticalCenter: parent.verticalCenter; icon: "square-plus"; value: chin._n(chin.st.add); tint: Theme.green }
+    DiffStat { anchors.verticalCenter: parent.verticalCenter; icon: "square-minus"; value: chin._n(chin.st.del); tint: Theme.red }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: String(chin.st.plan || ""); tint: Theme.fg }
     Swap { anchors.verticalCenter: parent.verticalCenter
