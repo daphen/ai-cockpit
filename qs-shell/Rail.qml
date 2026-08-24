@@ -1321,7 +1321,7 @@ Item {
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
         'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'])
     }
-    function onEditSeen(sid, path) {
+    function onEditSeen(sid, path, needleB64) {
       if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
       var cwd = ""
       for (var i = 0; i < rail.agentd.sessions.length; i++)
@@ -1331,7 +1331,7 @@ Item {
       var p = rail._localPath(String(path))
       if (p.charAt(0) !== "/") p = lcwd + "/" + p     // pi may report worktree-relative
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '")'])
+        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, v:null, "' + String(needleB64 || "") + '")'])
     }
   }
 

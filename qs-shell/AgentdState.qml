@@ -22,11 +22,21 @@ Item {
   // orchestrator and a tunneled lovbox side by side; COCKPIT_AGENTD_SOCK (singular)
   // still selects a single daemon. Order matters: on a name collision the EARLIER
   // socket wins, so list the local scope first to keep it addressable.
-  readonly property var sockPaths: {
+  function envSockPaths() {
     var multi = String(cockpitEnv("AGENTD_SOCKS") || "").trim()
     if (multi) return multi.split(",").map(p => p.trim()).filter(p => p.length > 0)
     var one = cockpitEnv("AGENTD_SOCK")
     return [one || (Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-" + root.scope + ".sock")]
+  }
+  property var sockPaths: envSockPaths()
+  function attachSocket(path) {
+    var p = String(path || "").trim()
+    var prefix = Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-lovbox-"
+    if (!p.startsWith(prefix) || !p.endsWith(".sock") || p.indexOf(",") >= 0) return false
+    if (sockPaths.indexOf(p) >= 0) return true
+    sockPaths = sockPaths.concat([p])
+    settled = false
+    return true
   }
   property var _rosters: ({})
   property var _health: ({})      // socket index -> daemon health string ("" = ok)
@@ -116,7 +126,24 @@ Item {
   // Pending ask_user questions (extension_ui_request): sid -> request obj
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
-  signal editSeen(string sid, string path)
+  signal editSeen(string sid, string path, string needleB64)
+  // The edit's most distinctive inserted line (longest trimmed, >=3 chars),
+  // base64ed for safe transport through --remote-expr quoting.
+  function _editNeedle(tn, args) {
+    var txt = ""
+    if (args.edits && args.edits.length) {
+      var last = args.edits[args.edits.length - 1]
+      txt = String((last && (last.newText || last.new_text)) || "")
+    }
+    if (!txt) txt = String(args.newText || args.new_text || args.new_string || args.content || args.text || "")
+    if (!txt) return ""
+    var lines = txt.split("\n"), best = ""
+    for (var i = 0; i < lines.length; i++) {
+      var tl = lines[i].replace(/^\s+/, "").replace(/\s+$/, "")
+      if (tl.length >= 3 && tl.length > best.length) best = tl
+    }
+    return best.length >= 3 ? Qt.btoa(best) : ""
+  }
   // Fired when an edit's diff lands (tool_execution_end): the first hunk's
   // new-file line — cross-repo edits have no local diff data, so this is the
   // only line signal that always exists.
@@ -825,7 +852,7 @@ Item {
                      add: 0, del: 0, id: m.toolCallId })
         if (args.path) {
           var le = _lastEdit; le[sid] = String(args.path); _lastEdit = le
-          root.editSeen(sid, String(args.path))
+          root.editSeen(sid, String(args.path), _editNeedle(tn, args))
         }
       } else {
         // bash/mcp/grep/read/… → one-line hint; keep the raw payload so the row
@@ -881,8 +908,13 @@ Item {
         for (var i = arr.length - 1; i >= 0; i--) {
           if (arr[i].id === m.toolCallId) {
             arr[i].add = ad[0]; arr[i].del = ad[1]
-            var hm = String(det.diff).match(/@@ -\d+(?:,\d+)? \+(\d+)/)
-            if (hm && arr[i].path) root.editHunk(sid, String(arr[i].path), parseInt(hm[1]))
+            // LAST hunk header, not the first: a multi-hunk edit's newest change
+            // is the one the eye should land on.
+            var hms = String(det.diff).match(/@@ -\d+(?:,\d+)? \+(\d+)/g)
+            if (hms && hms.length && arr[i].path) {
+              var lastH = hms[hms.length - 1].match(/\+(\d+)/)
+              if (lastH) root.editHunk(sid, String(arr[i].path), parseInt(lastH[1]))
+            }
             break
           }
         }
