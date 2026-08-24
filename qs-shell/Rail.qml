@@ -2286,7 +2286,7 @@ Item {
           Row {
             id: glanceName
             anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
-            spacing: 9
+            spacing: 14
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
@@ -2308,10 +2308,13 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
               spacing: 6
-              Rectangle {
+              // The shield in its OWN Text, centered as an element — inline it rode
+              // the label's baseline and floated high.
+              Text {
                 anchors.verticalCenter: parent.verticalCenter
-                width: 7; height: 7; radius: 3.5
-                color: rail.selectedGoal.length > 0 ? Theme.green : Theme.orange
+                text: rail.selectedGoal.length > 0 ? "⛨" : "⚠"
+                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 2
               }
               Text {
                 anchors.verticalCenter: parent.verticalCenter
