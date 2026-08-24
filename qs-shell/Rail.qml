@@ -1905,6 +1905,9 @@ Item {
   ColumnLayout {
     anchors { top: parent.top; left: parent.left; right: parent.right; bottom: chin.top }
     anchors.margins: 0
+    // Breathing room at the window's top edge — cards used to start at y=0
+    // with their first line clipped against the bezel.
+    anchors.topMargin: 16
     // The feed ENDS at the sheet's top — no slide-under. Sliding beneath the rounded
     // corners forced the fade to a full-opacity band across the notch zone, and that
     // band smoked the text above the sheet; ending here leaves clean ground behind
