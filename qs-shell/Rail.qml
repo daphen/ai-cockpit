@@ -2666,6 +2666,17 @@ Item {
               : (askCard.ask ? (askCard.ask.message || "") : "")
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
+        // An ask with NO title and NO message is unanswerable as posed — say so
+        // instead of presenting a bare box (the payload is journaled by agentd).
+        Text {
+          visible: askCard.ask && !askCard.userBash
+                   && !String(askCard.ask.title || "").length
+                   && !String(askCard.ask.message || "").length
+          width: parent.width; wrapMode: Text.Wrap
+          text: "the agent asked for input without saying why — press t to make it explain, or esc to cancel the question"
+          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          font.italic: true
+        }
 
         // select → one keycap-numbered row per option
         Column {
