@@ -906,6 +906,17 @@ Item {
     function onSettledChanged() { rail._recomputeDefault() }
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
+  readonly property string selectedGoal: {
+    for (var gi = 0; gi < liveSessions.length; gi++)
+      if (liveSessions[gi].name === selectedRaw) return String(liveSessions[gi].goal || "")
+    return ""
+  }
+  readonly property bool selectedIsOrchestrator: {
+    for (var oi = 0; oi < liveSessions.length; oi++)
+      if (liveSessions[oi].name === selectedRaw)
+        return String(liveSessions[oi].profile || "").indexOf("orchestrator") >= 0
+    return false
+  }
   readonly property string selectedPlan: {
     for (var i = 0; i < liveSessions.length; i++)
       if (liveSessions[i].name === selectedRaw) return String(liveSessions[i].plan || "")
@@ -2288,6 +2299,15 @@ Item {
               elide: Text.ElideMiddle
               text: rail.selectedPlan
               color: Theme.fg_muted
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            }
+            // Watchdog visibility: a silently-vanished goal cost hours twice. Armed
+            // shows quietly; an orchestrator running WITHOUT a goal is loud.
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
+              text: rail.selectedGoal.length > 0 ? "⛨ goal armed" : "⚠ no goal — unguarded"
+              color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
               font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
             // The "thinking" signifier lives HERE now (the floating pill is gone):
