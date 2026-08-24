@@ -1314,10 +1314,26 @@ Item {
   // daemon than nvim's own client) and owns the remote→mirror path mapping. Policy
   // (don't yank the user off their own file, resolve the hunk line, debounce) stays in
   // lua where the editor state lives.
+  // Watching a session includes watching the workers it dispatched: follow
+  // accepts edits from the selected session OR any session whose parent chain
+  // reaches it (the parent-view was silently ignoring its child's edits).
+  function _followsSelected(sid) {
+    if (sid === selectedRaw) return true
+    var hops = 0, cur = sid
+    while (cur && hops < 4) {
+      var parent = ""
+      for (var i = 0; i < agentd.sessions.length; i++)
+        if (agentd.sessions[i].name === cur) { parent = String(agentd.sessions[i].parent || ""); break }
+      if (!parent) return false
+      if (parent === selectedRaw) return true
+      cur = parent; hops++
+    }
+    return false
+  }
   Connections {
     target: rail.agentd
     function onEditHunk(sid, path, line) {
-      if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
+      if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
       var cwd = ""
       for (var i = 0; i < rail.agentd.sessions.length; i++)
         if (rail.agentd.sessions[i].id === sid) { cwd = rail.agentd.sessions[i].cwd; break }
@@ -1329,7 +1345,7 @@ Item {
         'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'])
     }
     function onEditSeen(sid, path, needleB64) {
-      if (sid !== rail.selectedRaw || !rail.nvimSock.length) return
+      if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
       var cwd = ""
       for (var i = 0; i < rail.agentd.sessions.length; i++)
         if (rail.agentd.sessions[i].id === sid) { cwd = rail.agentd.sessions[i].cwd; break }
