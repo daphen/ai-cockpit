@@ -2303,12 +2303,22 @@ Item {
             }
             // Watchdog visibility: a silently-vanished goal cost hours twice. Armed
             // shows quietly; an orchestrator running WITHOUT a goal is loud.
-            Text {
+            // Dot + words, not a glyph — nerd glyphs sit off the text baseline.
+            Row {
               anchors.verticalCenter: parent.verticalCenter
               visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
-              text: rail.selectedGoal.length > 0 ? "⛨ goal armed" : "⚠ no goal — unguarded"
-              color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              spacing: 6
+              Rectangle {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 7; height: 7; radius: 3.5
+                color: rail.selectedGoal.length > 0 ? Theme.green : Theme.orange
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: rail.selectedGoal.length > 0 ? "goal armed" : "no goal — unguarded"
+                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              }
             }
             // The "thinking" signifier lives HERE now (the floating pill is gone):
             // same orb grammar as the expanded rows.
