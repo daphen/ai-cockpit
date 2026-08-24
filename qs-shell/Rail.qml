@@ -577,22 +577,30 @@ Item {
   }
   function landNvim(sid) {
     if (!sid || !agentd) return
-    var cwd = "", st = "", plan = ""
+    var cwd = "", plan = ""
     for (var i = 0; i < agentd.sessions.length; i++)
       if (agentd.sessions[i].id === sid) {
-        cwd = agentd.sessions[i].cwd; st = agentd.sessions[i].status || ""
+        cwd = agentd.sessions[i].cwd
         plan = agentd.sessions[i].plan || ""; break
       }
     if (!cwd) return
     _landedFor = sid + "@" + cwd + "#" + plan
-    // Switching TO a session that is mid-turn lands on its LIVE EDGE — the file it
-    // last edited — not the dashboard. The dashboard is for arriving at rest.
-    if (st === "streaming" && agentd.lastEditFor(sid) && nvimSock.length) {
+    var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
+    var dashAt = function (d) { return 'execute(\'lua require("cockpit").dashboard("' + d + '")\')' }
+    var fallback = plan.length
+      ? 'v:lua.require("plan-nvim").open(' + JSON.stringify(plan) + ')'
+      : dashAt(repo)
+    // A session with edit history resumes at its latest changed file regardless of
+    // whether the turn is still streaming or has just settled idle. A remote session
+    // without a local mirror/file lands on its bound plan instead of silently no-oping.
+    if (agentd.lastEditFor(sid) && nvimSock.length) {
       var lcwd0 = rail._localPath(cwd)
       var lp0 = rail._localPath(String(agentd.lastEditFor(sid)))
       if (lp0.charAt(0) !== "/") lp0 = lcwd0 + "/" + lp0
-      Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-        'isdirectory("' + lcwd0 + '") ? (execute("cd ' + lcwd0 + '") . v:lua.require("cockpit").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)) : ""'])
+      var follow = 'v:lua.require("cockpit").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)'
+      var land = 'isdirectory("' + lcwd0 + '") && filereadable("' + lp0 + '")'
+        + ' ? (execute("cd ' + lcwd0 + '") . ' + follow + ') : ' + fallback
+      Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", land])
       _alignMirror(sid)
       return
     }
@@ -609,10 +617,8 @@ Item {
     // The no-.git fallback repo is SCOPE-BOUND: the lovable checkout is only a
     // sane dashboard home on the work instance — the private Cockpit was falling
     // back to it and showing the lovable fleet dash for ~/personal sessions.
-    var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
-    var dashAt = function (d) { return 'execute(\'lua require("cockpit").dashboard("' + d + '")\')' }
     var dash = '((isdirectory("' + cwd + '/.git") || filereadable("' + cwd + '/.git")) ? '
-             + dashAt(cwd) + ' : ' + dashAt(repo) + ')'
+             + dashAt(cwd) + ' : ' + fallback + ')'
     // Always the DASHBOARD, never the plan. The dashboard is the session's home — it's
     // where the app, the tickets and the plan are all reachable from — so opening the plan
     // buffer instead dropped you somewhere you then had to navigate out of. Read the plan
@@ -621,7 +627,7 @@ Item {
     // Guard the cd: a session whose worktree isn't mirrored locally (the VM's main
     // checkout, an unsynced tree) maps to a path that does not exist here, and cd'ing
     // there left nvim on an empty buffer staring at nothing.
-    var expr = 'isdirectory("' + cwd + '") ? (execute("cd ' + cwd + '") . ' + open + ') : ""' 
+    var expr = 'isdirectory("' + cwd + '") ? (execute("cd ' + cwd + '") . ' + open + ') : ' + fallback
     if (!nvimSock.length) return
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", expr])
     _alignMirror(sid)

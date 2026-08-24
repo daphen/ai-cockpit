@@ -46,7 +46,7 @@ func main() {
 	mux.Handle("/ws", requireToken(token, websocketHandler(*runtimeDir)))
 	mux.Handle("/", spaHandler(*staticDir))
 
-	server := &http.Server{Addr: *addr, Handler: logRequests(mux), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: *addr, Handler: logRequests(allowCrossOrigin(mux)), ReadHeaderTimeout: 5 * time.Second}
 	log.Printf("cockpit bridge listening on http://%s", *addr)
 	if err := server.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
@@ -192,6 +192,9 @@ func scopesHandler(runtimeDir string) http.HandlerFunc {
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  64 * 1024,
 	WriteBufferSize: 64 * 1024,
+	CheckOrigin: func(*http.Request) bool {
+		return true
+	},
 }
 
 func websocketHandler(runtimeDir string) http.HandlerFunc {
@@ -262,6 +265,7 @@ func bytesWithoutTrailingNewlines(data []byte) []byte {
 func spaHandler(root string) http.Handler {
 	files := http.FileServer(http.Dir(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Service-Worker-Allowed", "/")
 		path := filepath.Join(root, filepath.Clean(r.URL.Path))
 		if info, err := os.Stat(path); err == nil && !info.IsDir() {
 			files.ServeHTTP(w, r)
@@ -279,6 +283,22 @@ func spaHandler(root string) http.Handler {
 		defer index.Close()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		http.ServeContent(w, r, "index.html", time.Time{}, index)
+	})
+}
+
+func allowCrossOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if origin := r.Header.Get("Origin"); origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Add("Vary", "Origin")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

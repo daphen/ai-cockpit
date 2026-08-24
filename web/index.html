@@ -3,12 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#101216" />
+    <meta name="theme-color" content="#101010" />
+    <style>html,body,#root{width:100%;height:100%;margin:0;background:#101010}</style>
     <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     <title>Cockpit</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><main class="boot-splash"><div class="loading-indicator"><img src="/icons/icon-192.png" alt="" /><div><strong>cockpit</strong><span>launching</span></div><span class="splash-progress" aria-hidden="true"><i></i></span></div></main></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

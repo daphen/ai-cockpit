@@ -4,6 +4,7 @@
 # own deps (libheidr_term, libghostty-vt) via RUNPATH, so no nix-shell needed.
 set -euo pipefail
 cd "$(dirname "$0")"
+export COCKPIT_ASSET_DIR="$PWD/assets"
 [ -f build/qml/Heidr/libheidr_termplugin.so ] || {
   echo "plugin missing — build first: nix-shell --run 'cmake --build build -j'"; exit 1; }
 

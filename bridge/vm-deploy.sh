@@ -1,22 +1,36 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The VM is already reachable from David's iPhone through Lovable's corporate
-# Tailscale subnet router; do not install or run tailscaled on the VM.
-# This deploy binds the bridge to the VM's first routed 10.x address. Corporate
-# tailnet membership is not authorization: every API/WS request requires the
-# bearer token at ~/.config/cockpit/bridge-token; the token is never printed.
+# One-time VM HTTPS setup (manual; never performed by this deploy):
+#   version=$(curl -fsSL 'https://pkgs.tailscale.com/stable/?mode=json' | python3 -c 'import json,sys; print(json.load(sys.stdin)["Version"])')
+#   curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${version}_amd64.tgz" | tar -xz
+#   mkdir -p ~/.local/bin && install -m 0755 "tailscale_${version}_amd64"/{tailscale,tailscaled} ~/.local/bin/
+# Then start userspace tailscaled and join Lovable's tailnet:
+#   mkdir -p ~/.local/run ~/.local/state/tailscale
+#   nohup ~/.local/bin/tailscaled --tun=userspace-networking \
+#     --state="$HOME/.local/state/tailscale/tailscaled.state" \
+#     --socket="$HOME/.local/run/tailscaled.sock" \
+#     >"$HOME/.local/state/tailscale/tailscaled.log" 2>&1 </dev/null &
+#   ~/.local/bin/tailscale --socket="$HOME/.local/run/tailscaled.sock" up \
+#     --hostname=cockpit-work-vm
+#   ~/.local/bin/tailscale --socket="$HOME/.local/run/tailscaled.sock" serve \
+#     --bg --https=443 http://127.0.0.1:8787
 # Orchestrator handover after deploy:
 #   agent spawn ~/src/lovable --profile lovable-orchestrator --scope work
-# Then send that new orchestrator the FULL handoff contents inline (not a proart-local
-# path): "Pick up this handoff exactly where it stopped: <paste handoff contents>".
-# This deploy copies only the generic bridge/app and exposes only agentd-work.sock;
-# it never copies private-cockpit state or starts, stops, or modifies the VM's agentd.
+# Then send the new orchestrator the FULL handoff contents inline, never a proart path.
+# This deploy copies only the generic bridge/app and shared bearer token, exposes only
+# agentd-work.sock, and never starts, stops, or modifies the VM's agentd.
 
 vm="david_karlsson_lovable_dev@dev-heidr-2a39.workstation.lovable.net"
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 build_dir=$(mktemp -d)
+token_file="$HOME/.config/cockpit/bridge-token"
 trap 'rm -rf "$build_dir"' EXIT
+
+if [[ ! -s "$token_file" ]] || ! grep -Eq '^[0-9a-f]{64}$' "$token_file"; then
+  echo "proart bridge token is missing or invalid; start bridge/run.sh once first" >&2
+  exit 1
+fi
 
 npm --prefix "$root/web" install --no-package-lock
 npm --prefix "$root/web" run build
@@ -25,10 +39,13 @@ npm --prefix "$root/web" run build
   CGO_ENABLED=0 GOOS=linux go build -trimpath -o "$build_dir/cockpit-bridge" .
 )
 
-ssh "$vm" 'mkdir -p ~/.local/bin ~/.local/share/cockpit-mobile ~/.local/state/cockpit-mobile'
+ssh "$vm" 'mkdir -p ~/.config/cockpit ~/.local/bin ~/.local/share/cockpit-mobile ~/.local/state/cockpit-mobile'
 scp "$build_dir/cockpit-bridge" "$vm:.local/bin/cockpit-bridge.new"
+scp "$token_file" "$vm:.config/cockpit/bridge-token.new"
 tar -C "$root/web/dist" -czf - . | ssh "$vm" '
   set -e
+  chmod 0600 ~/.config/cockpit/bridge-token.new
+  mv ~/.config/cockpit/bridge-token.new ~/.config/cockpit/bridge-token
   rm -rf ~/.local/share/cockpit-mobile/web.new
   mkdir -p ~/.local/share/cockpit-mobile/web.new
   tar -C ~/.local/share/cockpit-mobile/web.new -xzf -
@@ -48,14 +65,15 @@ work_socket="$runtime/agentd-work.sock"
 bridge_runtime="$HOME/.local/run/cockpit-work"
 state="$HOME/.local/state/cockpit-mobile"
 token_file="$HOME/.config/cockpit/bridge-token"
-bind_addr=$(hostname -I | tr ' ' '\n' | awk '/^10\./ { print; exit }')
+tailscale_bin="$HOME/.local/bin/tailscale"
+tailscale_socket="$HOME/.local/run/tailscaled.sock"
 
-if [[ -z "$bind_addr" ]]; then
-  echo "VM has no routed 10.x address" >&2
-  exit 1
-fi
 if [[ ! -S "$work_socket" ]]; then
   printf "agentd work socket is unavailable: %s\n" "$work_socket" >&2
+  exit 1
+fi
+if [[ ! -x "$tailscale_bin" || ! -S "$tailscale_socket" ]]; then
+  echo "userspace Tailscale HTTPS is not ready; follow the one-time header runbook" >&2
   exit 1
 fi
 mkdir -p "$bridge_runtime" "$state"
@@ -72,7 +90,7 @@ if [[ -s "$state/bridge.pid" ]]; then
   fi
 fi
 nohup "$HOME/.local/bin/cockpit-bridge" \
-  -addr "$bind_addr:8787" \
+  -addr 127.0.0.1:8787 \
   -runtime-dir "$bridge_runtime" \
   -static-dir "$HOME/.local/share/cockpit-mobile/web" \
   -token-file "$token_file" \
@@ -80,7 +98,17 @@ nohup "$HOME/.local/bin/cockpit-bridge" \
 echo $! >"$state/bridge.pid"
 sleep 0.3
 kill -0 "$(cat "$state/bridge.pid")"
-printf 'http://%s:8787/' "$bind_addr"
+"$tailscale_bin" --socket="$tailscale_socket" serve --bg --https=443 http://127.0.0.1:8787 >/dev/null
+
+dns_name=$(
+  "$tailscale_bin" --socket="$tailscale_socket" status --json |
+    python3 -c 'import json,sys; print(json.load(sys.stdin).get("Self",{}).get("DNSName","").rstrip("."))'
+)
+if [[ -z "$dns_name" ]]; then
+  echo "tailscale did not report the VM HTTPS hostname" >&2
+  exit 1
+fi
+printf 'https://%s/' "$dns_name"
 REMOTE
 )
 

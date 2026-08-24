@@ -49,6 +49,7 @@
           # swallows the compositor's keybinds.
           export QT_QPA_PLATFORM=wayland
           export QML2_IMPORT_PATH="$HOME/.local/share/qml:${plugin}/qml''${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
+          export COCKPIT_ASSET_DIR="${plugin}/share/cockpit/assets"
 
           for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE FORCE_NEW DEV; do
             cv="COCKPIT_$v"; hv="HEIDR_$v"

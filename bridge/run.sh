@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-time exposure: tailscale serve --bg --https=443 http://127.0.0.1:8787
+# One-time exposure: tailscale serve --bg --https=8443 http://127.0.0.1:8787
 # This is Lovable's corporate tailnet, so membership is transport—not authorization.
 # The loopback bridge still requires ~/.config/cockpit/bridge-token on every API/WS request.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -20,7 +20,7 @@ fi
 
 host=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("Self",{}).get("DNSName","").rstrip("."))' 2>/dev/null || true)
 if [[ -n "$host" ]]; then
-  printf 'Cockpit: https://%s/\n' "$host"
+  printf 'Cockpit: https://%s:8443/\n' "$host"
 else
   printf 'Cockpit bridge: http://127.0.0.1:8787/ (Tailscale DNS name unavailable)\n'
 fi

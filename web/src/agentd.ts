@@ -1,8 +1,11 @@
+import { bridgeHosts, hostRank, type BridgeHost } from "./hosts"
+
 export type SessionStatus = "idle" | "streaming" | "asleep" | "error" | "offline"
 
 export interface Session {
   id?: string
   name: string
+  displayName?: string
   cwd: string
   status: SessionStatus
   scope: string
@@ -12,6 +15,8 @@ export interface Session {
   idle?: string
   plan?: string
   lastActivity: number
+  hostId?: string
+  currentTool?: string
 }
 
 export interface Ask {
@@ -63,6 +68,8 @@ interface ContentBlock {
 }
 
 interface ScopeState {
+  key: string
+  host: BridgeHost
   scope: string
   socket: WebSocket | null
   connected: boolean
@@ -79,6 +86,7 @@ export interface Snapshot {
 }
 
 const EMPTY: Snapshot = { sessions: [], feeds: {}, asks: {}, connectedScopes: [], queues: {} }
+const chatLabelsKey = "cockpit.chatLabels"
 
 export class UnauthorizedError extends Error {
   constructor() {
@@ -94,6 +102,26 @@ function sessionKey(scope: string, name: string) {
 function clip(value: unknown, length = 82) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim()
   return text.length > length ? `${text.slice(0, length - 1)}…` : text
+}
+
+function storedChatLabels() {
+  try { return JSON.parse(localStorage.getItem(chatLabelsKey) ?? "{}") as Record<string, string> } catch { return {} }
+}
+
+function chatDisplayName(entries: Entry[]) {
+  for (const entry of entries) {
+    if (entry.message?.role !== "user") continue
+    let text = textContent(entry.message.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim()
+    if (text.startsWith("⇄ ")) text = text.slice(Math.max(0, text.indexOf("\n") + 1)).trim()
+    const original = text
+    text = text
+      .replace(/\s*(?:Context from another app:|Attached reference images?)[\s\S]*$/i, "")
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+    return clip(text || original, 46)
+  }
+  return ""
 }
 
 function base(path: unknown) {
@@ -130,7 +158,7 @@ function askAnswer(result: unknown): string {
   return ""
 }
 
-function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
+function entryChain(entries: Entry[], leafId?: string) {
   const byId = new Map(entries.filter(entry => entry.id).map(entry => [entry.id!, entry]))
   const chain: Entry[] = []
   const seen = new Set<string>()
@@ -141,8 +169,26 @@ function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
     chain.push(entry)
     cursor = entry.parentId
   }
-  chain.reverse()
+  return chain.reverse()
+}
 
+function runningTool(entries: Entry[], leafId?: string) {
+  const chain = entryChain(entries, leafId)
+  const completed = new Set(chain.flatMap(entry => entry.message?.role === "toolResult" && entry.message.toolCallId ? [entry.message.toolCallId] : []))
+  for (let entryIndex = chain.length - 1; entryIndex >= 0; entryIndex--) {
+    const blocks = chain[entryIndex].message?.content ?? []
+    for (let blockIndex = blocks.length - 1; blockIndex >= 0; blockIndex--) {
+      const block = blocks[blockIndex]
+      if (block.type !== "toolCall" && block.type !== "tool_use") continue
+      if (block.id && completed.has(block.id)) continue
+      return String(block.name ?? block.tool ?? "tool")
+    }
+  }
+  return ""
+}
+
+function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
+  const chain = entryChain(entries, leafId)
   const failures = new Set<string>()
   const results = new Map<string, string>()
   for (const entry of chain) {
@@ -199,20 +245,34 @@ function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
     }
     if (message.stopReason === "aborted") activity.push({ tool: "error", label: "⏹ turn interrupted", failed: true })
     if (message.stopReason === "error" || message.errorMessage) activity.push({ tool: "error", label: `✗ ${message.errorMessage ?? "turn failed"}`, failed: true })
-    feed.push({ kind: "turn", text: prose.join("\n\n"), thinking: thinking.filter(Boolean), activity, key })
+    const text = prose.join("\n\n")
+    const previous = feed.at(-1)
+    if (previous?.kind === "turn") {
+      previous.text = [previous.text, text].filter(Boolean).join("\n\n")
+      previous.thinking.push(...thinking.filter(Boolean))
+      previous.activity.push(...activity)
+    } else {
+      feed.push({ kind: "turn", text, thinking: thinking.filter(Boolean), activity, key })
+    }
   }
   return feed
 }
 
 export class AgentdStore {
+  private hosts = bridgeHosts()
   private scopes = new Map<string, ScopeState>()
   private listeners = new Set<() => void>()
   private feeds: Record<string, FeedItem[]> = {}
   private asks: Record<string, Ask> = {}
   private queues: Record<string, string[]> = {}
   private optimistic: Record<string, FeedItem[]> = {}
+  private currentTools: Record<string, string> = {}
+  private chatLabels = storedChatLabels()
+  private labelRequests = new Set<string>()
+  private owners: Record<string, string> = {}
   private snapshot: Snapshot = EMPTY
   private token = ""
+  private probeTimer = 0
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -224,25 +284,31 @@ export class AgentdStore {
   async connect(token: string) {
     if (token !== this.token) this.resetConnections()
     this.token = token
-    const response = await fetch("/scopes", {
-      cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (response.status === 401) throw new UnauthorizedError()
-    if (!response.ok) throw new Error(`scope discovery failed: ${response.status}`)
-    const scopes = await response.json() as string[]
-    for (const scope of scopes) this.openScope(scope)
-    this.publish()
+    const result = await this.probeHosts()
+    window.clearInterval(this.probeTimer)
+    this.probeTimer = window.setInterval(() => void this.probeHosts(), 10_000)
+    if (!result.connected && result.unauthorized) throw new UnauthorizedError()
+    if (!result.connected) throw new Error("No Cockpit bridge is reachable")
   }
 
   select(key: string) {
-    const { scope, name } = this.parts(key)
-    this.sendScope(scope, { type: "get_entries", session: name })
+    const { name } = this.parts(key)
+    this.sendSession(key, { type: "get_entries", session: name })
+  }
+
+  labelChats(sessions: Session[]) {
+    for (const session of sessions) {
+      if (session.scope !== "chat" || session.displayName) continue
+      const key = sessionKey(session.scope, session.name)
+      if (this.labelRequests.has(key)) continue
+      this.labelRequests.add(key)
+      try { this.sendSession(key, { type: "get_entries", session: session.name }) } catch { this.labelRequests.delete(key) }
+    }
   }
 
   submit(key: string, text: string) {
     const session = this.snapshot.sessions.find(item => sessionKey(item.scope, item.name) === key)
-    if (session?.status === "streaming") this.steer(key, text)
+    if (session?.status === "streaming") this.enqueue(key, text)
     else this.prompt(key, text)
   }
 
@@ -253,13 +319,25 @@ export class AgentdStore {
 
   steer(key: string, text: string) {
     this.command(key, { type: "steer", message: text })
-    this.echo(key, text, true)
   }
 
   enqueue(key: string, text: string) {
     const session = this.snapshot.sessions.find(item => sessionKey(item.scope, item.name) === key)
     if (session?.status !== "streaming") return this.prompt(key, text)
     this.queues[key] = [...(this.queues[key] ?? []), text]
+    this.publish()
+  }
+
+  steerQueued(key: string, index: number) {
+    const queue = this.queues[key] ?? []
+    const message = queue[index]
+    if (!message) return
+    const next = queue.filter((_, itemIndex) => itemIndex !== index)
+    if (next.length) this.queues[key] = next
+    else delete this.queues[key]
+    const session = this.snapshot.sessions.find(item => sessionKey(item.scope, item.name) === key)
+    if (session?.status === "streaming") this.steer(key, message)
+    else this.prompt(key, message)
     this.publish()
   }
 
@@ -271,66 +349,161 @@ export class AgentdStore {
     this.command(key, { type: "answer", response })
   }
 
-  private openScope(scope: string) {
-    const current = this.scopes.get(scope)
+  private async probeHosts() {
+    const results = await Promise.all(this.hosts.map(host => this.probeHost(host)))
+    this.publish()
+    return {
+      connected: results.some(result => result === "connected"),
+      unauthorized: results.some(result => result === "unauthorized"),
+    }
+  }
+
+  private async probeHost(host: BridgeHost): Promise<"connected" | "unauthorized" | "offline"> {
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 1_500)
+    try {
+      const response = await fetch(`${host.baseUrl}/scopes`, {
+        cache: "no-store",
+        mode: "cors",
+        headers: { Authorization: `Bearer ${this.token}` },
+        signal: controller.signal,
+      })
+      if (response.status === 401) {
+        this.markHostOffline(host)
+        return "unauthorized"
+      }
+      if (!response.ok) {
+        this.markHostOffline(host)
+        return "offline"
+      }
+      const scopes = await response.json() as string[]
+      this.reconcileHost(host, scopes)
+      return "connected"
+    } catch {
+      this.markHostOffline(host)
+      return "offline"
+    } finally {
+      window.clearTimeout(timeout)
+    }
+  }
+
+  private reconcileHost(host: BridgeHost, scopes: string[]) {
+    const wanted = new Set(scopes.map(scope => this.scopeStateKey(host.id, scope)))
+    for (const [key, state] of this.scopes) {
+      if (state.host.id === host.id && !wanted.has(key)) this.removeScope(key)
+    }
+    for (const scope of scopes) this.openScope(host, scope)
+  }
+
+  private markHostOffline(host: BridgeHost) {
+    for (const state of this.scopes.values()) {
+      if (state.host.id !== host.id) continue
+      window.clearTimeout(state.reconnectTimer)
+      state.connected = false
+      state.sessions = state.sessions.map(session => ({ ...session, status: "offline" }))
+      if (state.socket) {
+        state.socket.onclose = null
+        state.socket.close()
+        state.socket = null
+      }
+    }
+  }
+
+  private openScope(host: BridgeHost, scope: string) {
+    const key = this.scopeStateKey(host.id, scope)
+    const current = this.scopes.get(key)
     if (current?.socket?.readyState === WebSocket.OPEN || current?.socket?.readyState === WebSocket.CONNECTING) return
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:"
+    const base = new URL(host.baseUrl)
+    const protocol = base.protocol === "https:" ? "wss:" : "ws:"
     const query = new URLSearchParams({ scope, token: this.token })
-    const socket = new WebSocket(`${protocol}//${location.host}/ws?${query}`)
-    const state: ScopeState = current ?? { scope, socket: null, connected: false, sessions: [] }
+    const socket = new WebSocket(`${protocol}//${base.host}/ws?${query}`)
+    const state: ScopeState = current ?? { key, host, scope, socket: null, connected: false, sessions: [] }
     state.socket = socket
-    this.scopes.set(scope, state)
+    this.scopes.set(key, state)
     socket.onopen = () => { state.connected = true; this.publish() }
-    socket.onmessage = event => this.onMessage(scope, String(event.data))
+    socket.onmessage = event => this.onMessage(key, String(event.data))
     socket.onclose = () => {
       state.connected = false
       state.sessions = state.sessions.map(session => ({ ...session, status: "offline" }))
       this.publish()
       window.clearTimeout(state.reconnectTimer)
-      state.reconnectTimer = window.setTimeout(() => this.openScope(scope), 1500)
+      state.reconnectTimer = window.setTimeout(() => this.openScope(host, scope), 1_500)
     }
   }
 
-  private resetConnections() {
-    for (const state of this.scopes.values()) {
-      window.clearTimeout(state.reconnectTimer)
-      if (state.socket) {
-        state.socket.onclose = null
-        state.socket.close()
-      }
+  private removeScope(key: string) {
+    const state = this.scopes.get(key)
+    if (!state) return
+    window.clearTimeout(state.reconnectTimer)
+    if (state.socket) {
+      state.socket.onclose = null
+      state.socket.close()
     }
-    this.scopes.clear()
+    this.scopes.delete(key)
+  }
+
+  private resetConnections() {
+    window.clearInterval(this.probeTimer)
+    for (const key of [...this.scopes.keys()]) this.removeScope(key)
     this.feeds = {}
     this.asks = {}
     this.queues = {}
     this.optimistic = {}
+    this.currentTools = {}
+    this.labelRequests.clear()
+    this.owners = {}
     this.snapshot = EMPTY
     this.listeners.forEach(listener => listener())
   }
 
-  private onMessage(scope: string, line: string) {
+  private onMessage(stateKey: string, line: string) {
     let message: Record<string, any>
     try { message = JSON.parse(line) } catch { return }
-    const state = this.scopes.get(scope)
+    const state = this.scopes.get(stateKey)
     if (!state) return
+    const scope = state.scope
     if (message.type === "roster") {
       const now = Date.now()
-      state.sessions = (message.sessions ?? []).map((session: Session) => ({ ...session, scope, lastActivity: session.lastActivity ?? now }))
-      const claimed = new Set(this.allSessions().filter(session => session.ask).map(session => sessionKey(session.scope, session.name)))
-      for (const key of Object.keys(this.asks)) if (!claimed.has(key)) delete this.asks[key]
+      state.sessions = (message.sessions ?? []).map((session: Session) => ({
+        ...session,
+        scope,
+        hostId: state.host.id,
+        displayName: scope === "chat" ? this.chatLabels[session.name] : session.displayName,
+        currentTool: this.currentTools[sessionKey(scope, session.name)],
+        lastActivity: session.lastActivity ?? now,
+      }))
       this.publish()
+      const claimed = new Set(this.snapshot.sessions.filter(session => session.ask).map(session => sessionKey(session.scope, session.name)))
+      for (const key of Object.keys(this.asks)) if (!claimed.has(key)) delete this.asks[key]
       return
     }
     const name = String(message.session ?? "")
     if (!name) return
     const key = sessionKey(scope, name)
+    if (this.owners[key] !== stateKey) return
     const session = state.sessions.find(item => item.name === name)
-    if (session) session.lastActivity = Date.now()
+    const labelRequest = message.type === "response" && message.command === "get_entries" && this.labelRequests.delete(key)
+    if (session && !labelRequest) session.lastActivity = Date.now()
     if (message.type === "response" && message.command === "get_entries") {
-      const authoritative = entriesToFeed(message.data?.entries ?? [], message.data?.leafId)
-      const corpus = authoritative.filter(item => item.kind === "user").map(item => item.text).join("\n")
-      this.optimistic[key] = (this.optimistic[key] ?? []).filter(item => item.kind !== "user" || !corpus.includes(item.text))
-      this.feeds[key] = [...authoritative, ...(this.optimistic[key] ?? [])]
+      const entries = (message.data?.entries ?? []) as Entry[]
+      if (scope === "chat") {
+        const displayName = chatDisplayName(entries)
+        if (displayName) {
+          this.chatLabels[name] = displayName
+          if (session) session.displayName = displayName
+          try { localStorage.setItem(chatLabelsKey, JSON.stringify(this.chatLabels)) } catch {}
+        }
+      }
+      if (!labelRequest) {
+        const tool = session?.status === "streaming" ? runningTool(entries, message.data?.leafId) : ""
+        if (tool) this.currentTools[key] = tool
+        else delete this.currentTools[key]
+        if (session) session.currentTool = tool || undefined
+        const authoritative = entriesToFeed(entries, message.data?.leafId)
+        const corpus = authoritative.filter(item => item.kind === "user").map(item => item.text).join("\n")
+        this.optimistic[key] = (this.optimistic[key] ?? []).filter(item => item.kind !== "user" || (!item.steered && !corpus.includes(item.text)))
+        this.feeds[key] = [...authoritative, ...(this.optimistic[key] ?? [])]
+      }
     } else if (message.type === "extension_ui_request" && ["confirm", "select", "input", "editor"].includes(message.method)) {
       this.asks[key] = message as Ask
     } else if (message.type === "ask_answered") {
@@ -339,22 +512,30 @@ export class AgentdStore {
       this.push(key, { kind: "system", text: String(message.error ?? "agentd error"), tone: "error", key: `error-${Date.now()}` })
     } else if (message.type === "tool_execution_start") {
       const args = message.args ?? {}
-      this.push(key, { kind: "system", text: toolHint(String(message.toolName ?? "tool"), args), key: `tool-${message.toolCallId ?? Date.now()}` })
+      this.currentTools[key] = String(message.toolName ?? "tool")
+      if (session) session.currentTool = this.currentTools[key]
+      this.push(key, { kind: "system", text: toolHint(this.currentTools[key], args), key: `tool-${message.toolCallId ?? Date.now()}` })
+    } else if (message.type === "tool_execution_end") {
+      delete this.currentTools[key]
+      if (session) session.currentTool = undefined
     } else if (message.type === "turn_end" || message.type === "agent_end") {
-      this.sendScope(scope, { type: "get_entries", session: name })
+      delete this.currentTools[key]
+      if (session) session.currentTool = undefined
+      this.sendSession(key, { type: "get_entries", session: name })
       if (message.type === "agent_end") this.flushQueue(key)
     }
     this.publish()
   }
 
   private command(key: string, command: Record<string, unknown>) {
-    const { scope, name } = this.parts(key)
-    this.sendScope(scope, { ...command, session: name })
+    const { name } = this.parts(key)
+    this.sendSession(key, { ...command, session: name })
   }
 
-  private sendScope(scope: string, command: Record<string, unknown>) {
-    const socket = this.scopes.get(scope)?.socket
-    if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error(`${scope} is disconnected`)
+  private sendSession(key: string, command: Record<string, unknown>) {
+    const state = this.scopes.get(this.owners[key])
+    const socket = state?.socket
+    if (!state || !socket || socket.readyState !== WebSocket.OPEN) throw new Error(`${this.parts(key).scope} is disconnected`)
     socket.send(JSON.stringify(command))
   }
 
@@ -383,17 +564,39 @@ export class AgentdStore {
     return { scope: key.slice(0, split), name: key.slice(split + 1) }
   }
 
-  private allSessions() {
-    return [...this.scopes.values()].flatMap(state => state.sessions)
+  private scopeStateKey(hostId: string, scope: string) {
+    return `${hostId}|${scope}`
+  }
+
+  private selectedSessions() {
+    const candidates = new Map<string, Array<{ state: ScopeState; session: Session }>>()
+    for (const state of this.scopes.values()) {
+      for (const session of state.sessions) {
+        const key = sessionKey(session.scope, session.name)
+        const list = candidates.get(key) ?? []
+        list.push({ state, session })
+        candidates.set(key, list)
+      }
+    }
+    this.owners = {}
+    const selected: Session[] = []
+    for (const [key, list] of candidates) {
+      list.sort((a, b) => Number(!a.state.connected) - Number(!b.state.connected) || hostRank(a.state.host, a.session.scope) - hostRank(b.state.host, b.session.scope))
+      const winner = list[0]
+      this.owners[key] = winner.state.key
+      selected.push(winner.session)
+    }
+    return selected
   }
 
   private publish() {
+    const sessions = this.selectedSessions().sort((a, b) => Number(Boolean(b.ask)) - Number(Boolean(a.ask)) || b.lastActivity - a.lastActivity || a.name.localeCompare(b.name))
     this.snapshot = {
-      sessions: this.allSessions().sort((a, b) => Number(Boolean(b.ask)) - Number(Boolean(a.ask)) || b.lastActivity - a.lastActivity || a.name.localeCompare(b.name)),
+      sessions,
       feeds: { ...this.feeds },
       asks: { ...this.asks },
       queues: { ...this.queues },
-      connectedScopes: [...this.scopes.values()].filter(state => state.connected).map(state => state.scope),
+      connectedScopes: [...new Set([...this.scopes.values()].filter(scope => scope.connected).map(scope => scope.scope))],
     }
     this.listeners.forEach(listener => listener())
   }

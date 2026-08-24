@@ -21,8 +21,9 @@ ShellRoot {
     onClosed: Qt.quit()              // niri close-window quits (FloatingWindow ignores it otherwise)
 
     property string pane: "nvim"   // "nvim" | "rail"
+    readonly property bool dashboardActive: !!(chin.st.dashboard && chin.st.dashboard.active)
 
-    readonly property bool windowFocused: term.activeFocus || rail.activeFocus
+    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
       agentd.setPresence(windowFocused ? rail.selectedRaw : "")
     }
@@ -39,7 +40,7 @@ ShellRoot {
       // Heal a pane/focus desync first: a QML hot-reload rebuilds the window tree and
       // can leave `pane` claiming the rail while the keyboard truly sits in the
       // terminal — the cross then answers "passed" and Ctrl+l goes dead. Reality wins.
-      if (term.activeFocus && win.pane !== "nvim") win.pane = "nvim"
+      if ((term.activeFocus || dashboard.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
       else if (rail.activeFocus && win.pane !== "rail") win.pane = "rail"
       if (dir === "right") {
         if (win.pane === "nvim") { win.pane = "rail"; return "consumed" }
@@ -51,8 +52,16 @@ ShellRoot {
     }
 
     onPaneChanged: {
-      if (win.pane === "nvim") term.forceActiveFocus()
-      else rail.forceActiveFocus()
+      if (win.pane === "nvim") {
+        if (win.dashboardActive) dashboard.forceActiveFocus()
+        else term.forceActiveFocus()
+      } else rail.forceActiveFocus()
+    }
+    onDashboardActiveChanged: {
+      if (win.pane === "nvim") Qt.callLater(function() {
+        if (win.dashboardActive) dashboard.forceActiveFocus()
+        else term.forceActiveFocus()
+      })
     }
 
     IpcHandler {
@@ -63,7 +72,7 @@ ShellRoot {
         // Report reality, not the cached property: hot-reloads leave win.pane stale
         // ("rail" while the keyboard truly sits in the terminal), and Super+T's
         // "already on the rail?" check then hopped cockpits straight from the terminal.
-        if (term.activeFocus && win.pane !== "nvim") win.pane = "nvim"
+        if ((term.activeFocus || dashboard.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
         return win.pane
       }
       function title(): string      { return win.title }   // cockpit-ipc instance routing
@@ -123,6 +132,13 @@ ShellRoot {
       // after the badge/hint/colorize pipeline (test probe).
       function railProse(): string { return rail.probeProse() }
       function termGeom(): string { return term.gridInfo }
+      function dashboardState(): string {
+        return JSON.stringify({ active: win.dashboardActive, kind: String(dashboard.model.kind || ""),
+                                termMounted: !!term, dashboardMounted: !!dashboard,
+                                termEnabled: term.enabled, dashboardEnabled: dashboard.enabled,
+                                termOpacity: term.opacity, dashboardOpacity: dashboard.opacity,
+                                pane: win.pane })
+      }
       // Last N feed rows of the selected session, raw (test probe).
       function railTail(): string {
         var f = rail.agentd ? (rail.agentd.feeds[rail.selectedRaw] || []) : []
@@ -172,25 +188,39 @@ ShellRoot {
           id: termCol
           width: Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
           height: parent.height
-          TermView {
-            id: term
-            // Device-pixel EXACT size. The offscreen frame is ceil(w*dpr) wide and the
-            // paint texture is too, so unless w*dpr is a whole number the painter's scale
-            // is ceil(w*dpr)/w rather than dpr and every blit resamples the frame by ~1+ε.
-            // With smoothing off that is nearest-neighbour, which is what made glyph stems
-            // uneven — some crisp, some smeared. Snapping the item removes the mismatch.
-            // term.dpr comes from the widget itself (window()->effectiveDevicePixelRatio()),
-            // because QML's Screen.devicePixelRatio reported 1 while the window ran at 1.75.
+          Item {
+            id: renderStack
             width: parent.width
             height: Math.round((parent.height - chin.implicitHeight) * win.termDpr) / win.termDpr
-            // Focus is managed IMPERATIVELY (onPaneChanged + click). A `focus:`
-            // binding here fights forceActiveFocus and leaves the terminal unable
-            // to hold keyboard focus — same lesson the rail notes for itself.
-            active: activeFocus   // show the block cursor only while the terminal truly holds focus
-            Component.onCompleted: forceActiveFocus()
-            // Keep pane in sync when focus is grabbed by a click (not just Ctrl+h/l),
-            // else tryFocus() sees a stale pane and the C-l/C-h cross no-ops.
-            onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+
+            TermView {
+              id: term
+              anchors.fill: parent
+              active: activeFocus && !win.dashboardActive
+              enabled: !win.dashboardActive
+              opacity: win.dashboardActive ? 0 : 1
+              visible: enabled || opacity > 0.001
+              Component.onCompleted: forceActiveFocus()
+              onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+              Behavior on opacity { NumberAnimation { duration: win.dashboardActive ? 0 : 160; easing.type: Easing.OutCubic } }
+            }
+
+            Dashboard {
+              id: dashboard
+              anchors.fill: parent
+              model: (chin.st.dashboard && chin.st.dashboard.model) || ({})
+              enabled: win.dashboardActive
+              opacity: win.dashboardActive ? 1 : 0
+              visible: enabled || opacity > 0.001
+              onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+              onFocusRequested: direction => win.tryFocus(direction)
+              onActionRequested: actionId => {
+                if (!term.nvimSocket.length) return
+                Quickshell.execDetached(["nvim", "--server", term.nvimSocket, "--remote-expr",
+                  'v:lua.require("cockpit").dashboard_action(' + JSON.stringify(actionId) + ')'])
+              }
+              Behavior on opacity { NumberAnimation { duration: win.dashboardActive ? 0 : 160; easing.type: Easing.OutCubic } }
+            }
           }
           // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the
           // window's true bottom edge, so the terminal grid's row slack hides at this
@@ -198,7 +228,7 @@ ShellRoot {
           Chin {
             id: chin
             width: parent.width
-            height: parent.height - term.height
+            height: parent.height - renderStack.height
           }
         }
 

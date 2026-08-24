@@ -5,14 +5,23 @@ import { agentd, sessionKey, UnauthorizedError } from "./agentd"
 import { AskCard } from "./AskCard"
 import { Composer } from "./Composer"
 import { Feed } from "./Feed"
+import { LoadingIndicator } from "./LoadingIndicator"
 import { Roster } from "./Roster"
 
 const tokenKey = "cockpit.bridgeToken"
+type CockpitGroup = "work" | "private"
+const groupScopes: Record<CockpitGroup, Set<string>> = {
+  work: new Set(["lovable", "work"]),
+  private: new Set(["personal", "chat"]),
+}
 
 export default function App() {
   const state = useSyncExternalStore(agentd.subscribe, agentd.getSnapshot)
   const [selected, setSelected] = useState("")
+  const [group, setGroup] = useState<CockpitGroup>("work")
   const [scope, setScope] = useState("all")
+  const [rosterExpanded, setRosterExpanded] = useState(false)
+  const [updateReady, setUpdateReady] = useState(false)
   const [error, setError] = useState("")
   const [token, setToken] = useState(() => localStorage.getItem(tokenKey) ?? "")
   const [needsToken, setNeedsToken] = useState(!token)
@@ -43,13 +52,22 @@ export default function App() {
     return () => { current = false }
   }, [token])
   useEffect(() => {
-    if (selected && !state.sessions.some(session => sessionKey(session.scope, session.name) === selected)) setSelected("")
-  }, [selected, state.sessions])
+    const ready = () => setUpdateReady(true)
+    window.addEventListener("cockpit:update-ready", ready)
+    return () => window.removeEventListener("cockpit:update-ready", ready)
+  }, [])
+  const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])
+  const visibleSessions = useMemo(() => scope === "all" ? groupSessions : groupSessions.filter(session => session.scope === scope), [groupSessions, scope])
+  useEffect(() => {
+    if (selected && state.sessions.some(session => sessionKey(session.scope, session.name) === selected)) return
+    const first = visibleSessions[0]
+    setSelected(first ? sessionKey(first.scope, first.name) : "")
+  }, [selected, state.sessions, visibleSessions])
   useEffect(() => { if (selected) agentd.select(selected) }, [selected])
+  useEffect(() => { if (scope === "chat") agentd.labelChats(visibleSessions) }, [scope, visibleSessions])
 
   const active = state.sessions.find(session => sessionKey(session.scope, session.name) === selected)
-  const scopes = useMemo(() => [...new Set(state.sessions.map(session => session.scope))], [state.sessions])
-  const visibleSessions = scope === "all" ? state.sessions : state.sessions.filter(session => session.scope === scope)
+  const scopes = useMemo(() => [...new Set(groupSessions.map(session => session.scope))], [groupSessions])
   const ask = selected ? state.asks[selected] : undefined
   const run = (action: () => void) => { try { setError(""); action() } catch (cause) { setError(String(cause)) } }
   const saveToken = (next: string) => {
@@ -58,48 +76,81 @@ export default function App() {
     setNeedsToken(false)
     setToken(next)
   }
+  const chooseGroup = (next: CockpitGroup) => {
+    setGroup(next)
+    setScope(next === "private" ? "personal" : "all")
+  }
+  const chooseScope = (next: string) => setScope(next)
+  const loadingCockpit = !error && !state.connectedScopes.length && !state.sessions.length
 
   return (
     <MotionConfig reducedMotion="user">
       <LazyMotion features={domAnimation} strict>
-        {needsToken || checkingToken ? (
-          <TokenLogin checking={checkingToken} error={error} onSubmit={saveToken} />
+        {checkingToken || (!needsToken && loadingCockpit) ? (
+          <Splash label={checkingToken ? "connecting bridges" : "loading rosters"} />
+        ) : needsToken ? (
+          <TokenLogin checking={false} error={error} onSubmit={saveToken} />
         ) : (
           <main className={`app ${active ? "session-open" : ""}`}>
             <aside className="roster-pane">
-              <header className="app-header"><div><span>cockpit</span><strong>agents</strong></div><small>{state.connectedScopes.length} scopes online</small></header>
-              <nav className="scope-tabs" aria-label="Scope filter">
-                {["all", ...scopes].map(item => <button className={scope === item ? "active" : ""} key={item} onClick={() => setScope(item)}>{item}</button>)}
+              <header className="app-header"><div><span>cockpit</span><strong>{group}</strong></div><small>{groupSessions.length} agents</small></header>
+              <nav className="group-tabs" aria-label="Cockpit group">
+                {(["work", "private"] as CockpitGroup[]).map(item => (
+                  <button className={group === item ? "active" : ""} key={item} onClick={() => chooseGroup(item)}>{item}</button>
+                ))}
+              </nav>
+              <nav className="scope-tabs" aria-label={`${group} scope filter`}>
+                {["all", ...scopes].map(item => <button className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
               </nav>
               <Roster sessions={visibleSessions} selected={selected} onSelect={setSelected} />
             </aside>
 
-            <AnimatePresence mode="wait" initial={false}>
+            <div className="session-stage">
+            <AnimatePresence initial={false}>
               <m.section
                 className="session-pane"
                 key={selected || "empty"}
-                initial={{ opacity: 0, transform: "translateX(8px)", filter: "blur(3px)" }}
-                animate={{ opacity: 1, transform: "translateX(0px)", filter: "blur(0px)" }}
-                exit={{ opacity: 0, transform: "translateX(-8px)", filter: "blur(3px)" }}
+                initial={{ opacity: 0, transform: "translateX(8px)" }}
+                animate={{ opacity: 1, transform: "translateX(0px)" }}
+                exit={{ opacity: 0, transform: "translateX(-8px)" }}
                 transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
               >
                 {active ? (
                   <>
                     <header className="session-header">
-                      <button className="back" onClick={() => setSelected("")} aria-label="Back to sessions">←</button>
-                      <div><strong>{active.name}</strong><span>{active.scope} · {active.status}</span></div>
+                      <button className="back" onClick={() => setRosterExpanded(true)} aria-label="Open roster">←</button>
+                      <div><strong>{active.displayName ?? active.name}</strong><span>{active.scope} · {active.status}</span></div>
                       {active.plan && <span className="plan-chip">{active.plan}</span>}
                     </header>
                     {error && <div className="error-banner">{error}</div>}
-                    <Feed items={state.feeds[selected] ?? []} />
+                    <Feed items={state.feeds[selected]} />
                     {ask && <AskCard ask={ask} onAnswer={response => run(() => agentd.answer(selected, response))} />}
                     <Composer
+                      sessionName={active.displayName ?? active.name}
+                      currentTool={active.currentTool}
+                      fleet={visibleSessions.filter(session => session.scope !== "chat" && sessionKey(session.scope, session.name) !== selected)}
                       busy={active.status === "streaming"}
-                      queued={state.queues[selected]?.length ?? 0}
+                      queue={state.queues[selected] ?? []}
                       disabled={Boolean(ask)}
                       onSubmit={text => run(() => agentd.submit(selected, text))}
-                      onQueue={text => run(() => agentd.enqueue(selected, text))}
+                      onSteerQueued={index => run(() => agentd.steerQueued(selected, index))}
                       onInterrupt={() => run(() => agentd.interrupt(selected))}
+                      rosterExpanded={rosterExpanded}
+                      onRosterExpandedChange={setRosterExpanded}
+                      rosterKey={`${group}/${scope}`}
+                      rosterHeader={(
+                        <nav className="group-tabs" aria-label="Cockpit group">
+                          {(["work", "private"] as CockpitGroup[]).map(item => <button type="button" className={group === item ? "active" : ""} key={item} onClick={() => chooseGroup(item)}>{item}</button>)}
+                        </nav>
+                      )}
+                      roster={(
+                        <>
+                          <nav className="scope-tabs" aria-label={`${group} scope filter`}>
+                            {["all", ...scopes].map(item => <button type="button" className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
+                          </nav>
+                          <Roster sessions={visibleSessions.filter(session => sessionKey(session.scope, session.name) !== selected)} selected={selected} onSelect={key => { setSelected(key); setRosterExpanded(false) }} />
+                        </>
+                      )}
                     />
                   </>
                 ) : (
@@ -107,11 +158,26 @@ export default function App() {
                 )}
               </m.section>
             </AnimatePresence>
+            </div>
             {error && !active && <div className="error-banner global">{error}</div>}
           </main>
         )}
+        {updateReady && (
+          <div className="update-toast" role="status">
+            <span>new cockpit ready</span>
+            <button onClick={() => window.dispatchEvent(new Event("cockpit:apply-update"))}>update & reload</button>
+          </div>
+        )}
       </LazyMotion>
     </MotionConfig>
+  )
+}
+
+function Splash({ label }: { label: string }) {
+  return (
+    <m.main className="boot-splash" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+      <LoadingIndicator label={label} />
+    </m.main>
   )
 }
 
