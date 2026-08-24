@@ -247,7 +247,8 @@ Item {
       "ls ~/.pi/agent/prompts 2>/dev/null | sed 's/\\.md$//'; " +
       "for d in ~/.pi/agent/skills/*/; do [ -d \"$d\" ] && basename \"$d\" | sed 's|^|skill:|'; done"]
     stdout: StdioCollector {
-      onStreamFinished: rail.commands = String(this.text || "").split("\n").filter(s => s.length > 0)
+      onStreamFinished: rail.commands = ["goal", "handover"]
+        .concat(String(this.text || "").split("\n").filter(s => s.length > 0))
     }
   }
 
@@ -2961,6 +2962,21 @@ Item {
               var pa = rail.pendingAsk
               // /goal — rail-intercepted (never reaches pi): pins a watchdog goal
               // on the selected session; "/goal done" or bare "/goal" clears it.
+              // /handover — rail-intercepted: move the orchestrator role to the
+              // VM (default) or back ("local"/"back"/"home"). Runs the script
+              // detached; progress is visible in the orchestrator's own feed
+              // (it authors its handoff as a normal turn).
+              var hm2 = text.match(/^\/handover\s*(\S*)\s*$/)
+              if (hm2) {
+                var dir = /^(local|back|home)$/i.test(hm2[1]) ? "local" : "vm"
+                Quickshell.execDetached(["bash", "-c",
+                  "cockpit-handover " + dir + " >> \"$HOME/.local/state/cockpit/handover.log\" 2>&1"])
+                if (rail.agentd) rail.agentd._setTransient(rail.selectedRaw, "handover", "info",
+                  "↳ handover → " + dir + " started — the orchestrator writes its handoff first (~minutes); log: ~/.local/state/cockpit/handover.log", 120000)
+                text = ""
+                composerInput.forceActiveFocus()
+                return
+              }
               var gm = text.match(/^\/goal\s*([\s\S]*)$/)
               if (gm) {
                 var g = gm[1].trim()
