@@ -2331,22 +2331,13 @@ Item {
           Row {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
-            Row {
+            // Watchdog state as one shield: green = goal armed, orange = unguarded.
+            Text {
               anchors.verticalCenter: parent.verticalCenter
               visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
-              spacing: 6
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: rail.selectedGoal.length > 0 ? "⛨" : "⚠"
-                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 2
-              }
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: rail.selectedGoal.length > 0 ? "goal armed" : "no goal — unguarded"
-                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-              }
+              text: "⛨"
+              color: rail.selectedGoal.length > 0 ? Theme.green : Theme.orange
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 3
             }
             Icon {
               anchors.verticalCenter: parent.verticalCenter
