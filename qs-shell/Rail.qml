@@ -2304,25 +2304,6 @@ Item {
             // Watchdog visibility: a silently-vanished goal cost hours twice. Armed
             // shows quietly; an orchestrator running WITHOUT a goal is loud.
             // Dot + words, not a glyph — nerd glyphs sit off the text baseline.
-            Row {
-              anchors.verticalCenter: parent.verticalCenter
-              visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
-              spacing: 6
-              // The shield in its OWN Text, centered as an element — inline it rode
-              // the label's baseline and floated high.
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: rail.selectedGoal.length > 0 ? "⛨" : "⚠"
-                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 2
-              }
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: rail.selectedGoal.length > 0 ? "goal armed" : "no goal — unguarded"
-                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-              }
-            }
             // The "thinking" signifier lives HERE now (the floating pill is gone):
             // same orb grammar as the expanded rows.
             ThinkingOrb {
@@ -2345,25 +2326,45 @@ Item {
               font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
           }
-          // Expanded: the right slot shows where the ACTIVE session runs — the same
-          // cloud/laptop grammar as the list rows, which no longer carry its row.
-          Icon {
-            anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
-            name: {
-              var arr = rail.liveSessions
-              for (var i = 0; i < arr.length; i++)
-                if (arr[i].name === rail.selectedRaw)
-                  return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
-              return "laptop--outline--18"
-            }
-            width: 15; height: 15
-            color: Theme.fg
-            opacity: rail.rosterExpanded ? 1 : 0
-            visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 220 } }
-          }
+          // Right slot: watchdog status beside the location marker (expanded) or
+          // the sibling status dots (collapsed) — meta lives right, title left.
           Row {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+            spacing: 12
+            Row {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
+              spacing: 6
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: rail.selectedGoal.length > 0 ? "⛨" : "⚠"
+                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 2
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: rail.selectedGoal.length > 0 ? "goal armed" : "no goal — unguarded"
+                color: rail.selectedGoal.length > 0 ? Theme.fg_muted : Theme.orange
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              }
+            }
+            Icon {
+              anchors.verticalCenter: parent.verticalCenter
+              name: {
+                var arr = rail.liveSessions
+                for (var i = 0; i < arr.length; i++)
+                  if (arr[i].name === rail.selectedRaw)
+                    return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
+                return "laptop--outline--18"
+              }
+              width: 15; height: 15
+              color: Theme.fg
+              opacity: rail.rosterExpanded ? 1 : 0
+              visible: opacity > 0.01
+              Behavior on opacity { NumberAnimation { duration: 220 } }
+            }
+            Row {
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 12
             opacity: rail.rosterExpanded ? 0 : 1
             visible: opacity > 0.01
@@ -2409,6 +2410,7 @@ Item {
                   }
                 }
               }
+            }
             }
           }
         }
