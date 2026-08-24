@@ -70,6 +70,7 @@ ShellRoot {
       // Parent binding for the pane's nvim: its NVIM_LISTEN_ADDRESS is unique to THIS
       // instance, so cockpit-cross can target its own Cockpit without asking niri anything.
       function nvimSock(): string   { return term.nvimSocket }
+      function attachAgentd(path: string): string { return agentd.attachSocket(path) ? "ok" : "rejected" }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
       // Super+i ask-jump: land on the session that needs an answer.
       function selectSession(n: string): string { win.pane = "rail"; rail.jumpToSession(n); return "ok" }
@@ -84,6 +85,20 @@ ShellRoot {
         const onRoster = win.pane === "rail" && !term.activeFocus
                        && !rail.insert && rail.cur < rail.rSize
         if (onRoster) return "parked"
+        win.pane = "rail"
+        rail.focusRoster()
+        return "landed"
+      }
+      // Super+T semantics = the in-app Ctrl+T: open the roster and park; pressed
+      // again while parked, put it away. STRICTLY this window — no cockpit hop.
+      function rosterToggle(): string {
+        const onRoster = win.pane === "rail" && !term.activeFocus
+                       && !rail.insert && rail.cur < rail.rSize
+        if (rail.rosterExpanded && onRoster) {
+          rail.rosterOverride = false
+          Qt.callLater(rail.enterInsert)
+          return "collapsed"
+        }
         win.pane = "rail"
         rail.focusRoster()
         return "landed"
