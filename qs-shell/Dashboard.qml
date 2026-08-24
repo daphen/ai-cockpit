@@ -126,7 +126,7 @@ FocusScope {
               anchors.centerIn: parent
               text: modelData.toUpperCase()
               color: modelData === root.model.activeTab ? Theme.bg : Theme.fg_muted
-              font { family: Theme.fontFamily; pixelSize: 13; weight: 600 }
+              font { family: Theme.fontFamily; pixelSize: 15; weight: 600 }
             }
             TapHandler { onTapped: root.dispatch("tab:" + modelData) }
           }
@@ -153,7 +153,7 @@ FocusScope {
                 ? String(root.model.activeTab || modelData.title || "").toUpperCase()
                 : String(modelData.title || "")
               color: Theme.fg
-              font { family: Theme.fontFamily; pixelSize: 15; weight: 650 }
+              font { family: Theme.fontFamily; pixelSize: 16; weight: 650 }
               bottomPadding: 8
             }
 
@@ -195,8 +195,8 @@ FocusScope {
                   id: marker
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   visible: row.hasIcon
-                  width: 13
-                  height: 13
+                  width: 15
+                  height: 15
                   name: row.modelData.icon !== undefined ? String(row.modelData.icon)
                     : row.change ? "file-content"
                     : row.modelData.markerTone === "success" ? "check"
@@ -225,7 +225,7 @@ FocusScope {
                         : String(row.modelData.text || "")))
                   color: root.tone(row.modelData.tone)
                   elide: Text.ElideMiddle
-                  font { family: Theme.fontFamily; pixelSize: 14 }
+                  font { family: Theme.fontFamily; pixelSize: 15 }
                 }
                 Row {
                   id: stats
@@ -236,19 +236,19 @@ FocusScope {
                     visible: !!row.change
                     text: row.change ? row.change.additions : ""
                     color: row.hasAdditions ? Theme.green : Theme.fg_muted
-                    font { family: Theme.fontFamily; pixelSize: 14; weight: 650 }
+                    font { family: Theme.fontFamily; pixelSize: 15; weight: 650 }
                   }
                   Text {
                     visible: !!row.change
                     text: row.change ? row.change.removals : ""
                     color: row.hasRemovals ? Theme.red : Theme.fg_muted
-                    font { family: Theme.fontFamily; pixelSize: 14; weight: 650 }
+                    font { family: Theme.fontFamily; pixelSize: 15; weight: 650 }
                   }
                   Text {
                     visible: row.modelData.detail !== undefined
                     text: visible ? String(row.modelData.detail) : ""
                     color: Theme.fg_muted
-                    font { family: Theme.fontFamily; pixelSize: 14; weight: 600 }
+                    font { family: Theme.fontFamily; pixelSize: 15; weight: 600 }
                   }
                 }
                 TapHandler {
@@ -300,7 +300,7 @@ FocusScope {
             anchors.verticalCenter: parent.verticalCenter
             text: modelData.label
             color: Theme.fg_muted
-            font { family: Theme.fontFamily; pixelSize: 13 }
+            font { family: Theme.fontFamily; pixelSize: 14 }
           }
           TapHandler { onTapped: root.dispatch(modelData.id) }
         }
