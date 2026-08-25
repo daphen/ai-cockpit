@@ -46,9 +46,21 @@ Rectangle {
       var inc = _front ? tb : ta
       var out = _front ? ta : tb
       _front = !_front
+      // Each Text is the target of BOTH its in- and its out-animation, so two chin
+      // updates inside one animation window left aIn and aOut fighting over the same
+      // opacity — both Texts stuck part-visible, which is the mashed-together label
+      // David hit (2026-08-25). Stop the conflicting pair first, and reset the
+      // incoming item's transform so an interrupted out-animation can't leak into it.
+      inAnimFor(out).stop()
+      outAnimFor(inc).stop()
+      inc.anchors.verticalCenterOffset = 0
+      inc.scale = 1
       if (value.length) {
         inc.text = value
         inAnimFor(inc).restart()
+      } else {
+        inc.text = ""
+        inc.opacity = 0
       }
       outAnimFor(out).restart()
     }
@@ -76,6 +88,7 @@ Rectangle {
     }
     ParallelAnimation {
       id: aOut
+      onStopped: { ta.opacity = 0; ta.text = "" }
       NumberAnimation { target: ta; property: "opacity"; to: 0; duration: 140; easing.type: Easing.InCubic }
       NumberAnimation { target: ta; property: "anchors.verticalCenterOffset"; to: -7; duration: 140; easing.type: Easing.InCubic }
     }
@@ -87,6 +100,7 @@ Rectangle {
     }
     ParallelAnimation {
       id: bOut
+      onStopped: { tb.opacity = 0; tb.text = "" }
       NumberAnimation { target: tb; property: "opacity"; to: 0; duration: 140; easing.type: Easing.InCubic }
       NumberAnimation { target: tb; property: "anchors.verticalCenterOffset"; to: -7; duration: 140; easing.type: Easing.InCubic }
     }

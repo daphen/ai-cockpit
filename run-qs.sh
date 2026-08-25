@@ -20,7 +20,18 @@ for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DE
   fi
 done
 if [ -z "${COCKPIT_AGENTD_SOCKS:-}" ] && [ -z "${COCKPIT_AGENTD_SOCK:-}" ]; then
-  ws=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true)
+  # Mode from the cockpit ALREADY on this workspace, when there is one: the key
+  # means "refresh the cockpit I'm looking at". Inferring from the workspace NAME
+  # alone made one keybind mean two things depending on where you stood, and a
+  # relaunch could replace the lovable cockpit with a private one (David, 2026-08-25).
+  focused_ws_id=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .id' 2>/dev/null || true)
+  here=$(niri msg --json windows 2>/dev/null | jq -r --arg w "${focused_ws_id:-}" \
+    '.[] | select((.workspace_id|tostring) == $w) | .title // empty' 2>/dev/null | grep -m1 '^cockpit-qs' || true)
+  case "${here:-}" in
+    *lovable*) ws="lovable" ;;
+    *private*) ws="private" ;;
+    *) ws=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true) ;;
+  esac
   case "${ws:-}" in
     lovable*)
       scopes="lovable work"
@@ -93,4 +104,8 @@ export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 _user=$(id -un)
 export PATH="/etc/profiles/per-user/$_user/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
 echo "QML_IMPORT_PATH=$QML_IMPORT_PATH"
+# NO workspace placement here: a relaunch must come back on the workspace that was
+# hosting it. Pinning it to the named `lovable` workspace yanked the cockpit off the
+# workspace David had it on and stranded it above his stack (2026-08-25). Boot-time
+# placement is cockpit-boot's job; a refresh happens in place.
 exec qs -p "$shellDir"

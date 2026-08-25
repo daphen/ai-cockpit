@@ -80,7 +80,26 @@ export default function App() {
     }
   }, [checkingToken, needsToken])
   const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])
-  const visibleSessions = useMemo(() => scope === "all" ? groupSessions : groupSessions.filter(session => session.scope === scope), [groupSessions, scope])
+  // Which scope currently holds the ORCHESTRATOR role: the armed one wins (handover pins
+  // the goal on exactly one side), else the live one.
+  const orchScope = useMemo(() => {
+    let armed = "", live = ""
+    for (const session of state.sessions) {
+      if (!(session.profile ?? "").includes("orchestrator")) continue
+      if (session.scope !== "lovable" && session.scope !== "work") continue
+      if (session.goal) armed = session.scope
+      else if (!live) live = session.scope
+    }
+    return armed || live
+  }, [state.sessions])
+
+  const visibleSessions = useMemo(() => {
+    const inScope = scope === "all" ? groupSessions : groupSessions.filter(session => session.scope === scope)
+    // Hide the stood-down orchestrator on the other host — one conductor, one row.
+    return inScope.filter(session => !(
+      (session.profile ?? "").includes("orchestrator") && orchScope && session.scope !== orchScope
+    ))
+  }, [groupSessions, scope, orchScope])
   const selectedAvailable = state.sessions.some(session => sessionKey(session.scope, session.name) === selected)
   useEffect(() => {
     if (restoringSession && selectedAvailable) setRestoringSession(false)
@@ -139,7 +158,7 @@ export default function App() {
                   <button className={group === item ? "active" : ""} key={item} onClick={() => chooseGroup(item)}>{item}</button>
                 ))}
               </nav>
-              <nav className="scope-tabs" aria-label={`${group} scope filter`}>
+              <nav className="scope-tabs" aria-label={`${group} scope filter`} hidden>
                 {["all", ...scopes].map(item => <button className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
               </nav>
               <Roster sessions={visibleSessions} selected={selected} onSelect={selectSession} />
@@ -185,7 +204,7 @@ export default function App() {
                       )}
                       roster={(
                         <>
-                          <nav className="scope-tabs" aria-label={`${group} scope filter`}>
+                          <nav className="scope-tabs" aria-label={`${group} scope filter`} hidden>
                             {["all", ...scopes].map(item => <button type="button" className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
                           </nav>
                           <Roster sessions={visibleSessions.filter(session => sessionKey(session.scope, session.name) !== selected)} selected={selected} onSelect={key => { selectSession(key); setRosterExpanded(false) }} />

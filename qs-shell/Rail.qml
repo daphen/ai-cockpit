@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
@@ -232,6 +233,15 @@ Item {
   }
   property int slashCur: 0
   onCommandMatchesChanged: slashCur = 0
+  // Prefill the composer and take the keyboard: used by the header controls so a click
+  // lands you in the same command you would have typed.
+  function prefillComposer(text) {
+    composerInput.text = text
+    composerInput.forceActiveFocus()
+    composerInput.cursorPosition = composerInput.text.length
+    rail.insert = true
+  }
+
   function acceptSlash() {
     var c = commandMatches[Math.max(0, Math.min(slashCur, commandMatches.length - 1))]
     if (c) composerInput.text = "/" + c + " "
@@ -252,66 +262,92 @@ Item {
     }
   }
 
-  // ── vimium-style link hints (mlqs `f` mode) ─────────────────────────────────
-  // `f` labels every link in the FOCUSED message with a code-styled badge;
-  // typing the label opens it. Labels are injected into the markdown (same
-  // approach as mlqs) rather than positioned overlays — Text gives no per-link
-  // geometry, and a single regex drives BOTH collection and injection so the
-  // label order can't drift from the target order.
   property bool hinting: false
   property var hintLabels: []
   property var hintTargets: []
-  property int hintIdx: -1          // feed row the hints belong to
+  property int hintIdx: -1
   readonly property string hintChars: "asdfghjklqwertyuiopzxcvbnm"
-  function _linkRe() { return /\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g }
-  function startHints() {
-    if (view !== "chat" || cur < rSize) return
-    var idx = cur - rSize
-    var txt = feedCopyTarget(groupedFeed[idx])
-    var re = _linkRe(), m, urls = []
-    while ((m = re.exec(String(txt || ""))) !== null) urls.push(m[1] || m[2])
-    if (!urls.length) return
-    var labels = []
-    for (var i = 0; i < urls.length; i++) labels.push(hintChars.charAt(i % hintChars.length))
-    hintTargets = urls; hintLabels = labels; hintIdx = idx; hinting = true
-  }
-  // Yank-hints (mlqs's y, on the f-hint chassis): label the COPYABLE units of the
-  // focused message — fenced code blocks, inline code, links — and a letter copies
-  // that unit; `yy` copies the whole message. ONE regex is shared by the extractor
-  // and the badge pass (hintify), so labels and targets can never drift apart.
   property bool yankMode: false
   onViewChanged: if (hinting) cancelHints("view")
-  function _yankRe() {
-    return /```[a-zA-Z]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
+
+  function _unitRe() {
+    return /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
   }
-  function startYank() {
+  function _shellLanguage(lang) {
+    return /^(bash|sh|zsh|shell|console)$/.test(String(lang || "").toLowerCase())
+  }
+  function _scanUnits(text, entryIndex, mode, baseOffset) {
+    var re = _unitRe(), m, units = [], source = String(text || ""), base = baseOffset || 0
+    while ((m = re.exec(source)) !== null) {
+      var kind = m[2] !== undefined ? "fence" : m[3] !== undefined ? "inline" : "url"
+      var runnable = kind === "fence" && _shellLanguage(m[1])
+      if ((mode === "hint" && !(kind === "url" || runnable)) ||
+          (mode === "yank" && !(kind === "url" || kind === "inline" || kind === "fence"))) continue
+      units.push({
+        key: "e" + entryIndex + ":p" + (base + m.index),
+        kind: runnable ? "shell" : kind,
+        value: kind === "fence" ? m[2] : kind === "inline" ? m[3] : (m[4] || m[5]),
+        start: base + m.index,
+        end: base + m.index + m[0].length
+      })
+    }
+    return units
+  }
+  function _rowUnits(item, mode) {
+    var out = []
+    if (!item) return out
+    if (item.kind === "turn") {
+      var prose = turnProse(item.items)
+      for (var i = 0; i < prose.length; i++) out = out.concat(_scanUnits(prose[i].text, i, mode, 0))
+    } else {
+      out = _scanUnits(item.text || "", 0, mode, 0)
+      if (mode === "hint") out = out.filter(x => x.kind === "url")
+    }
+    return out
+  }
+  function _startHintMode(mode) {
     if (view !== "chat" || cur < rSize) return
-    var idx = cur - rSize
-    var txt = String(feedCopyTarget(groupedFeed[idx]) || "")
-    var re = _yankRe(), m, targets = []
-    while ((m = re.exec(txt)) !== null) targets.push(m[1] || m[2] || m[3] || m[4] || m[0])
-    // No units still enters the mode: yy (whole message) is always on the table.
-    var labels = [], chars = hintChars.replace("y", "")   // y is reserved for yy
-    for (var i = 0; i < targets.length; i++) labels.push(chars.charAt(i % chars.length))
-    hintTargets = targets; hintLabels = labels; hintIdx = idx; hinting = true; yankMode = true
-    // A MODE banner, not a confirmation — "label copies" read as "copied".
-    feedbackPill.show(targets.length ? "YANK MODE — press a yellow [letter] · yy = all · esc"
-                                     : "YANK MODE — no code/links here · yy = all · esc")
+    var idx = cur - rSize, chars = mode === "yank" ? hintChars.replace("y", "") : hintChars
+    var targets = _rowUnits(groupedFeed[idx], mode).slice(0, chars.length), labels = []
+    if (mode === "hint" && !targets.length) return
+    for (var i = 0; i < targets.length; i++) {
+      labels.push(chars.charAt(i))
+      targets[i].label = chars.charAt(i)
+    }
+    hintTargets = targets; hintLabels = labels; hintIdx = idx; hinting = true; yankMode = mode === "yank"
+    if (yankMode) feedbackPill.show(targets.length ? "YANK MODE — pick a cap · yy = all · esc"
+                                                   : "YANK MODE — no code/links here · yy = all · esc")
   }
+  function startHints() { _startHintMode("hint") }
+  function startYank() { _startHintMode("yank") }
   property string lastCancel: ""
   function cancelHints(why) {
     if (hinting) lastCancel = (why || "unknown") + " @cur=" + cur
     hinting = false; yankMode = false; hintLabels = []; hintTargets = []; hintIdx = -1
   }
+  function requestSnippet(command) {
+    var cmd = String(command || "")
+    if (!cmd.length || !agentd || !selectedRaw) return
+    cancelHints("snippet")
+    agentd.submit(selectedRaw,
+      "You MUST invoke request_user_bash for this exact command; do not execute it directly. " +
+      "The command is JSON-encoded below—decode it without changing any character:\n\n" + JSON.stringify(cmd))
+    feedbackPill.show("approval requested — sent to " + shortName(selectedRaw))
+  }
   function hintKey(ch) {
-    var i = hintLabels.indexOf(ch)
-    var t = i >= 0 ? hintTargets[i] : ""
+    var i = hintLabels.indexOf(ch), t = i >= 0 ? hintTargets[i] : null
     var wasYank = yankMode, idx = hintIdx
     cancelHints("picked:" + ch)
     if (wasYank) {
-      if (t) copyText(t)
+      if (t) copyText(t.value)
       else if (ch === "y") copyText(String(feedCopyTarget(groupedFeed[idx]) || ""))
-    } else if (t) Quickshell.execDetached(["xdg-open", t])
+    } else if (t && t.kind === "shell") requestSnippet(t.value)
+    else if (t) Quickshell.execDetached(["xdg-open", t.value])
+  }
+  function hintForKey(key, rowIdx) {
+    if (!hinting || hintIdx !== rowIdx) return null
+    for (var i = 0; i < hintTargets.length; i++) if (hintTargets[i].key === key) return hintTargets[i]
+    return null
   }
   // Qt IGNORES Text.linkColor for MarkdownText (links stay the default dark blue,
   // invisible on the dark card), so colour the link's visible text inline instead.
@@ -333,18 +369,65 @@ Item {
       return pre + "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(url) + "</u></font>](" + url + ")"
     })
   }
-  // Inline hint badge. Qt's MARKDOWN path passes <font color> through but STRIPS
-  // `style` attributes, so an inline background (a real cap) is impossible here —
-  // a bracketed accent letter is the strongest marker that survives. mlqs gets
-  // true KeyCaps by reserving a transparent gap and mirroring the document in a
-  // hidden TextEdit for per-gap pixel rects; that port is the upgrade path.
-  // Hints only ever land on the FOCUSED message, whose card is filled with
-  // Theme.surface2 — so the badge is measured against THAT, not the normal card.
-  // yellow is 5.78:1 on surface2 (orange only 4.28, under AA for small text) and
-  // stays distinct from the link hue.
-  function _hintBadge(label) {
-    return "<font color=\"" + rail._hex(Theme.yellow) + "\"><b>["
-         + label + "]</b></font>&#8201;"
+  function proseParts(text) {
+    var source = String(text || ""), out = [], start = 0, pos = 0, summary = false, chunk = ""
+    var lines = source.match(/[^\n]*(?:\n|$)/g) || []
+    for (var i = 0; i < lines.length; i++) {
+      if (!lines[i].length) continue
+      var isSummary = isSummaryLine(lines[i].replace(/\n$/, ""))
+      if (chunk.length && isSummary !== summary) {
+        var lead = chunk.match(/^\s*/)[0].length, trimmed = chunk.trim()
+        if (trimmed.length) out.push({ text: trimmed, offset: start + lead, summary: summary })
+        start = pos
+        chunk = ""
+      }
+      if (!chunk.length) { start = pos; summary = isSummary }
+      chunk += lines[i]
+      pos += lines[i].length
+    }
+    if (chunk.length) {
+      var lastLead = chunk.match(/^\s*/)[0].length, last = chunk.trim()
+      if (last.length) out.push({ text: last, offset: start + lastLead, summary: summary })
+    }
+    return out
+  }
+  function markdownBlocks(text, entryIndex, baseOffset) {
+    var source = String(text || ""), re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```/g
+    var out = [], m, pos = 0, base = baseOffset || 0
+    while ((m = re.exec(source)) !== null) {
+      if (m.index > pos) {
+        var prose = source.slice(pos, m.index)
+        out.push({ kind: "markdown", text: prose, start: base + pos,
+                   units: _scanUnits(prose, entryIndex, "yank", base + pos) })
+      }
+      out.push({ kind: "fence", lang: m[1], code: m[2], start: base + m.index,
+                 key: "e" + entryIndex + ":p" + (base + m.index), runnable: _shellLanguage(m[1]) })
+      pos = re.lastIndex
+    }
+    if (pos < source.length) {
+      var tail = source.slice(pos)
+      out.push({ kind: "markdown", text: tail, start: base + pos,
+                 units: _scanUnits(tail, entryIndex, "yank", base + pos) })
+    }
+    return out
+  }
+  function blockHints(block, rowIdx) {
+    var out = [], units = block.units || []
+    for (var i = 0; i < units.length; i++) {
+      var target = hintForKey(units[i].key, rowIdx)
+      if (target) out.push(target)
+    }
+    return out
+  }
+  function decorateMarkdown(block, rowIdx) {
+    var source = String(block.text || ""), hints = blockHints(block, rowIdx)
+    for (var i = hints.length - 1; i >= 0; i--) {
+      var at = hints[i].start - block.start
+      var marker = "\u200B[" + hints[i].label + "]\u200B"
+      source = source.slice(0, at) + "<font color=\"" + _hex(Theme.surface2) + "\">" + marker
+        + "</font>\u00a0" + source.slice(at)
+    }
+    return source
   }
   // Pasted-image references ride the prompt as @.heidr-pastes/<file> but should
   // read as attachments, not paths. Markdown strips style attrs (see _hintBadge),
@@ -362,18 +445,6 @@ Item {
   function _hex(c) {
     function h(v) { var s = Math.round(v * 255).toString(16); return s.length < 2 ? "0" + s : s }
     return "#" + h(c.r) + h(c.g) + h(c.b)
-  }
-  // Prefix each link with a `label` badge when this row is the hinted one.
-  function hintify(t, rowIdx) {
-    if (!hinting || rowIdx !== hintIdx) return t
-    var n = 0, labels = hintLabels
-    return String(t || "").replace(yankMode ? _yankRe() : _linkRe(), function (all) {
-      var l = labels[n]; n++
-      if (!l) return all
-      // A fence must stay at line start — its badge sits on its own line above.
-      if (rail.yankMode && all.slice(0, 3) === "```") return rail._hintBadge(l) + "\n\n" + all
-      return rail._hintBadge(l) + all
-    })
   }
   // On open, land nvim in the active session's worktree + its plan (if any),
   // replacing the default splash. Runs once (first session known).
@@ -834,12 +905,15 @@ Item {
   readonly property color activeRing: Theme.mode === "light"
     ? Theme.ink
     : Qt.hsla(0.583, 0.29, 0.90, 1)
+  // One colour vocabulary for BOTH roster states: the collapsed dots and the expanded
+  // rows now read identically, so "what is this session doing" is the same glance either
+  // way. Working is the orb, never a dot.
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
-    // Everything else is a session doing nothing. Electric read as "look here" on
-    // every idle row, which is exactly the wrong signal — reserve colour for state
-    // that wants attention.
+    // Idle is the normal resting state — muted ink, no colour, so it does not compete
+    // for attention. Asleep is the one that means "this will not answer until woken".
+    if (st === "asleep")    return Theme.yellow
     return Theme.fg_muted
   }
   function toolIcon(tool) {
@@ -911,12 +985,40 @@ Item {
       if (liveSessions[gi].name === selectedRaw) return String(liveSessions[gi].goal || "")
     return ""
   }
+  readonly property string selectedCwd: {
+    for (var ci = 0; ci < liveSessions.length; ci++)
+      if (liveSessions[ci].name === selectedRaw) return String(liveSessions[ci].cwd || "")
+    return ""
+  }
+
+  readonly property string selectedStatus: {
+    for (var si = 0; si < liveSessions.length; si++)
+      if (liveSessions[si].name === selectedRaw) return String(liveSessions[si].status || "")
+    return ""
+  }
+
   readonly property bool selectedIsOrchestrator: {
     for (var oi = 0; oi < liveSessions.length; oi++)
       if (liveSessions[oi].name === selectedRaw)
         return String(liveSessions[oi].profile || "").indexOf("orchestrator") >= 0
     return false
   }
+  // Where the ORCHESTRATOR ROLE lives right now: "lovable" = this laptop, "work" = the
+  // dev VM. The armed one wins (handover pins the goal on exactly one side); otherwise
+  // the live one. Empty when neither is up, which the toggle renders as unknown.
+  readonly property string orchScope: {
+    var armed = "", live = ""
+    for (var i = 0; i < liveSessions.length; i++) {
+      var x = liveSessions[i]
+      if (String(x.profile || "").indexOf("orchestrator") < 0) continue
+      var sc = String(x.scope || "")
+      if (sc !== "lovable" && sc !== "work") continue
+      if (String(x.goal || "").length) armed = sc
+      else if (!live) live = sc
+    }
+    return armed || live
+  }
+
   readonly property string selectedPlan: {
     for (var i = 0; i < liveSessions.length; i++)
       if (liveSessions[i].name === selectedRaw) return String(liveSessions[i].plan || "")
@@ -990,27 +1092,28 @@ Item {
       // The ACTIVE session lives in the header glance, not the list — its
       // children lead the list, ↳-nested as if under the header.
       if (s.name === rail.selectedRaw) { activeCwd = s.cwd || ""; continue }
+      // Only the orchestrator that HOLDS the role belongs in the roster. Handover stands
+      // the other host's one down but leaves it registered, and showing both reads as two
+      // conductors (David, 2026-08-25).
+      if (String(s.profile || "").indexOf("orchestrator") >= 0
+          && rail.orchScope.length && String(s.scope || "") !== rail.orchScope) continue
       if (s.parent === rail.selectedRaw) activeKids.push(s)
       else if (s.parent && all.some(x => x.name === s.parent))
         (children[s.parent] = children[s.parent] || []).push(s)
       else roots.push(s)
     }
-    // Recency-first (last session event), name as the stable tiebreak. Order
-    // only actually shifts on roster pushes (status boundaries), so rows don't
-    // dance mid-stream.
-    var act = (x) => rail.agentd ? rail.agentd.lastActFor(x.rawName || x.name) : 0
-    var byRecency = (a, b) => {
-      var d = act(b) - act(a)
-      if (d !== 0) return d
-      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-    }
-    roots.sort(byRecency)
-    activeKids.sort(byRecency)
-    for (var key in children) children[key].sort(byRecency)
+    // STABLE order: name only. Recency-first meant the list reshuffled every time a
+    // session emitted an event — dots jumped in the collapsed row and rows swapped places
+    // under the cursor while reading (David, 2026-08-25). The only thing that changes
+    // position now is you activating a session, which lifts it into the header glance.
+    var byName = (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    roots.sort(byName)
+    activeKids.sort(byName)
+    for (var key in children) children[key].sort(byName)
     var out = []
     function walk(s, depth, parentCwd) {
       out.push({ name: shortName(s.name), rawName: s.name, idle: stateLabel(s.status),
-                 status: s.status, linked: !!s.parent, cwd: s.cwd || "",
+                 status: s.status, offline: !!s.offline, linked: !!s.parent, cwd: s.cwd || "",
                  hasWorktree: /\.daphen-|\/work\//.test(s.cwd || ""),
                  // A devenv slice belongs to a WORKTREE, not to the main checkout. Local
                  // worktrees are <repo>.daphen-<t>, VM ones <repo>-<t>; the plain repo
@@ -1709,6 +1812,7 @@ Item {
         if (row && agentd) agentd.stop(row.rawName || row.name)
       }
     }
+    else if (k === "hint") startHints()
     else if (k === "yank") startYank()
     else if (k.indexOf("hintkey:") === 0) hintKey(k.slice(8))
     else if (k === "esc") {
@@ -1876,8 +1980,16 @@ Item {
         // neighboring turn's errors.
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
+        if (!String(it.text || "").trim().length) continue
         out.push({ kind: "turn", sys: true, items: [it], key: it.mid || _contentKey(it.kind, it.text) })
       } else {
+        // An empty assistant text (a turn that produced no prose — aborted mid-turn,
+        // or whose only content was a tool call already shown above) rendered as a
+        // blank card. Close any open card, but never open one for nothing.
+        if (it.kind === "text" && !String(it.text || "").trim().length) {
+          if (cur) { out.push(cur); cur = null; acts = 0; chunked = false }
+          continue
+        }
         if (!cur) { cur = { kind: "turn", items: [], key: it.mid || _contentKey(it.kind, it.text || it.command), contFrom: chunked }; acts = 0 }
         cur.items.push(it)
         if (it.kind === "text") { out.push(cur); cur = null; acts = 0; chunked = false }   // prose ends the card
@@ -2126,15 +2238,17 @@ Item {
               }
             }
 
-            // User message body.
-            Text {
-              visible: turnDel.isUser
+            Loader {
+              active: turnDel.isUser
+              visible: active
               width: cardCol.width
-              text: turnDel.isUser ? rail.colorizeLinks(rail.hintify(rail.badgeAttachments(turnDel.turn.text), turnDel.rowIndex)) : ""
-              color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-              linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
-              wrapMode: Text.WordWrap; textFormat: Text.MarkdownText
-              onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
+              sourceComponent: markdownContent
+              property string sourceText: turnDel.isUser ? String(turnDel.turn.text || "") : ""
+              property int sourceEntry: 0
+              property int sourceOffset: 0
+              property int rowIndex: turnDel.rowIndex
+              property color bodyColor: Theme.fg
+              property bool agentAuthored: false
             }
 
             // Status markers (compaction, retries) — inline, muted. They carry no
@@ -2171,7 +2285,8 @@ Item {
               Loader {
                 width: cardCol.width
                 property var entry: modelData
-                property int rowIndex: turnDel.rowIndex   // so `f` hints can target this row
+                property int entryIndex: index
+                property int rowIndex: turnDel.rowIndex
                 sourceComponent: proseRow
               }
             }
@@ -2288,8 +2403,94 @@ Item {
           }
           Row {
             id: glanceName
-            anchors { left: parent.left; leftMargin: 14; verticalCenter: parent.verticalCenter }
-            spacing: 14
+            // Row geometry, with the pill's own 9px inset subtracted so the MARKER —
+            // not the pill's border box — lands on the rows' 14px column.
+            anchors { left: parent.left; leftMargin: 5; verticalCenter: parent.verticalCenter }
+            spacing: 12
+            // On the ORCHESTRATOR this icon is also the handover switch — it already
+            // says which host runs the role, so a second pill was a duplicate. Hover
+            // expands it into a labelled control; elsewhere it stays a plain marker.
+            Rectangle {
+              id: locSlot
+              anchors.verticalCenter: parent.verticalCenter
+              readonly property bool isSwitch: rail.selectedIsOrchestrator
+              readonly property bool onVm: rail.orchScope === "work"
+              readonly property color tint: isSwitch
+                ? (Theme.mode === "dark" ? Theme.sky : Theme.electric) : Theme.fg
+              readonly property bool expanded: isSwitch && (locHover.hovered || busy)
+              property bool busy: false
+              onOnVmChanged: busy = false
+              height: 22
+              // Same padding as the goal pill: 9px inset either side, 22 at rest.
+              width: expanded ? locRow.implicitWidth + 18 : 33   // 9 + 15 + 9
+              radius: 11
+              color: expanded ? Qt.alpha(locSlot.tint, 0.14) : "transparent"
+              border.width: 1
+              border.color: Qt.alpha(locSlot.tint, expanded ? 0.9 : 0.0)
+              // Always present: the header keeps ONE layout in both roster states, so the
+              // marker never leaves and the title never has to slide to fill its place.
+              // (It used to fade out on collapse, and Row drops invisible children — which
+              // is exactly what made the title lag into position.)
+              Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+              Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+              Behavior on color { ColorAnimation { duration: 140 } }
+              Behavior on border.color { ColorAnimation { duration: 140 } }
+              clip: true
+              Row {
+                id: locRow
+                // Same reason as the goal pill: left-anchored so the glyph is a fixed
+                // pivot and the label is revealed, never shoved.
+                anchors { left: parent.left; leftMargin: 9
+                          verticalCenter: parent.verticalCenter }
+                spacing: 5
+                Spinner {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: locSlot.busy
+                  running: locSlot.busy
+                  color: locSlot.tint
+                }
+                Icon {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: !locSlot.busy
+                  width: 15; height: 15
+                  name: {
+                    if (locSlot.isSwitch) return locSlot.onVm ? "cloud--outline--18" : "laptop--outline--18"
+                    var arr = rail.liveSessions
+                    for (var i = 0; i < arr.length; i++)
+                      if (arr[i].name === rail.selectedRaw)
+                        return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
+                    return "laptop--outline--18"
+                  }
+                  color: locSlot.tint
+                }
+                Icon {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: locSlot.expanded && !locSlot.busy
+                  width: 13; height: 13
+                  name: "toggle-3"
+                  color: locSlot.tint
+                  transform: Scale { origin.x: 6.5; xScale: locSlot.onVm ? -1 : 1 }
+                }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: locSlot.expanded
+                  text: locSlot.busy ? "MOVING" : (locSlot.onVm ? "HERE" : "VM")
+                  color: locSlot.tint
+                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+                }
+              }
+              HoverHandler { id: locHover; enabled: locSlot.isSwitch }
+              TapHandler {
+                enabled: locSlot.isSwitch && !locSlot.busy
+                onTapped: {
+                  locSlot.busy = true
+                  Quickshell.execDetached(["sh", "-c",
+                    "notify-send -t 3000 'Orchestrator' 'handover starting…'; " +
+                    "out=$($HOME/.local/bin/cockpit-handover 2>&1 | tail -3); " +
+                    "notify-send -t 8000 'Orchestrator' \"$out\""])
+                }
+              }
+            }
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
@@ -2297,7 +2498,11 @@ Item {
             }
             Text {
               anchors.verticalCenter: parent.verticalCenter
+              // A ticket session's plan key IS its name — showing both reads as
+              // a stutter (EVERY-3064 EVERY-3064), so the chip only earns its
+              // slot when it adds information.
               visible: rail.selectedPlan.length > 0
+                && rail.selectedPlan.toUpperCase() !== (rail.shortName(rail.selectedRaw) || "").toUpperCase()
               width: Math.min(implicitWidth, 240)
               elide: Text.ElideMiddle
               text: rail.selectedPlan
@@ -2309,16 +2514,6 @@ Item {
             // Dot + words, not a glyph — nerd glyphs sit off the text baseline.
             // The "thinking" signifier lives HERE now (the floating pill is gone):
             // same orb grammar as the expanded rows.
-            ThinkingOrb {
-              anchors.verticalCenter: parent.verticalCenter
-              // The one "thinking" signifier since the floating pill left — big
-              // enough to read from the corner of the eye.
-              width: 44; height: 44
-              running: rail.featuredStreaming
-              nodes: 16
-              glow: rail.actionGlow(rail.selectedRaw)
-              seedKey: rail.selectedRaw
-            }
             // What it's doing and for how long — the judgment input for
             // Shift+Esc ("this should NOT take 4 minutes").
             Text {
@@ -2334,45 +2529,48 @@ Item {
           Row {
             anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
             spacing: 12
-            // Watchdog state as one shield: green = goal armed, orange = unguarded.
-            // Same 16px slot as each status dot, so every gap on the row is the
-            // uniform 12px slot-to-slot rhythm.
-            Item {
-              anchors.verticalCenter: parent.verticalCenter
-              visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
-              width: 16; height: 16
-              Text {
-                anchors.centerIn: parent
-                text: "⛨"
-                color: rail.selectedGoal.length > 0 ? Theme.green : Theme.orange
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta + 3
-              }
-            }
-            // ONE slot for both states, overlaid and right-aligned: the two used
-            // to be separate Row items, so the visible-flip reflowed the row and
-            // the shield jumped while the crossfade was still running.
+            // HANDOVER SWITCH — only while the selected session IS the orchestrator, so
+            // the control lives with the role rather than floating over a worker's row.
+            // The glyph is the state: cloud = the role runs on the dev VM, laptop = here.
+            // Click to move it; the direction is derived, so one control works both ways.
+            // Sibling dots, then the active session's STATE as the final column. The
+            // state column is the rightmost thing in BOTH roster states, so the big orb
+            // never moves — collapsing just folds the sibling dots away beside it.
             Item {
               anchors.verticalCenter: parent.verticalCenter
               height: 18
-              width: rail.rosterExpanded ? 15 : glanceDots.width
+              // dots + gap + the 20px column. The gap carries the orb's 12px overhang
+              // ONLY while the orb is drawn; idle it closes to the dots' own 12px rhythm.
+              width: (rail.rosterExpanded ? 0
+                     : glanceDots.width + (rail.featuredStreaming ? 24 : 12)) + 20
               Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              Icon {
+              Item {
+                // The 20px state column: same geometry as the rows' state slot.
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                name: {
-                  var arr = rail.liveSessions
-                  for (var i = 0; i < arr.length; i++)
-                    if (arr[i].name === rail.selectedRaw)
-                      return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
-                  return "laptop--outline--18"
+                width: 20; height: 20
+                ThinkingOrb {
+                  anchors.centerIn: parent
+                  width: 44; height: 44
+                  visible: rail.featuredStreaming
+                  running: rail.featuredStreaming
+                  nodes: 16
+                  glow: rail.actionGlow(rail.selectedRaw)
+                  seedKey: rail.selectedRaw
                 }
-                width: 15; height: 15
-                color: Theme.fg
-                opacity: rail.rosterExpanded ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 220 } }
+                Rectangle {
+                  anchors.centerIn: parent
+                  visible: !rail.featuredStreaming
+                  width: 7; height: 7; radius: 3.5
+                  color: rail.dotColor(rail.selectedStatus)
+                }
               }
               Row {
               id: glanceDots
               anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+              anchors.rightMargin: rail.featuredStreaming ? 44 : 32
+              Behavior on anchors.rightMargin {
+                NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+              }
               spacing: 12
               opacity: rail.rosterExpanded ? 0 : 1
               Behavior on opacity { NumberAnimation { duration: 220 } }
@@ -2522,23 +2720,7 @@ Item {
                 // row is a fixed 40px tall) and 20 is what it takes to LOOK bigger: the box
                 // draws a sphere ~0.83 of its size, so a 16px box was only ~13px of visible
                 // mesh next to 14px icons.
-                Item {
-                  Layout.preferredWidth: 20; Layout.preferredHeight: 20
-                  Layout.alignment: Qt.AlignVCenter
-                  ThinkingOrb {
-                    anchors.fill: parent
-                    running: sessRow.streaming
-                    // Pinned to 13 rather than letting the size rule pick 15 for 16px — 13 is
-                    // the density that was judged right, and this keeps it while growing.
-                    nodes: 13
-                    // Same action hue whether or not the cursor is on the row — the
-                    // pill fill already marks the cursor; a recolored orb read as a bug.
-                    glow: rail.actionGlow(modelData.rawName || modelData.name)
-                    seedKey: modelData.rawName || modelData.name
-                    invertRing: false
-                  }
-                }
-                Item { Layout.fillWidth: true }   // pushes status + devenv to the right edge
+                Item { Layout.fillWidth: true }   // state lives on the right edge
                 // needs-input beacon: the one roster state that outranks everything.
                 Rectangle {
                   visible: sessRow.hasAsk
@@ -2552,42 +2734,80 @@ Item {
                     color: Theme.bg; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 2; font.bold: true
                   }
                 }
+                // Tool + elapsed while streaming: the only status WORDS left, and only
+                // when there is something to say. idle/asleep are the dot's job now.
                 Text {
                   text: {
                     rail.nowTick
                     rail.agentd ? rail.agentd.curToolGen : 0
-                    if (sessRow.hasAsk) return ""
+                    if (sessRow.hasAsk || !sessRow.streaming) return ""
                     var sid2 = modelData.rawName || modelData.name
-                    if (sessRow.streaming && rail.agentd && rail.agentd.curToolLiveFor(sid2)) {
+                    if (rail.agentd && rail.agentd.curToolLiveFor(sid2)) {
                       var secs = Math.max(0, Math.round((Date.now() - rail.agentd.curToolAtFor(sid2)) / 1000))
                       var el = secs >= 60 ? Math.floor(secs / 60) + "m" + String(secs % 60).padStart(2, "0") : secs + "s"
                       return (rail.agentd.curToolFor(sid2) || "tool") + " · " + el
                     }
-                    return modelData.state || modelData.idle || ""
+                    return ""
                   }
-                  // Sub-agents (linked rows) carry no status word at all — the orb says
-                  // "working", and an idle watcher needs no label to say it's waiting.
-                  visible: !modelData.linked
-                  Layout.preferredWidth: visible ? 74 : 0; horizontalAlignment: Text.AlignRight
+                  // Fade, never blink: the label appears the moment a tool starts and goes
+                  // the moment it ends, and toggling `visible` made every tool boundary a
+                  // flash. Opacity crossfades instead, and the item keeps its slot so the
+                  // row never reflows as the text comes and goes.
+                  opacity: text.length > 0 ? 1 : 0
+                  Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                  horizontalAlignment: Text.AlignRight
                   Layout.alignment: Qt.AlignVCenter
-                  // One muted colour for every state: the orb by the name already says
-                  // "working", so colouring the word too was saying it twice.
+                  // Breathing room before the state slot: "bash-write · 2s" sat flush
+                  // against the orb and read as one glued token. 18 clears the orb's 12px
+                  // overhang past its column with a real gap left over.
+                  Layout.rightMargin: 18
                   color: Theme.fg_muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 }
+                // Connection trouble is the only thing that earns an icon here: a worker
+                // whose daemon went away. Red, left of the state slot, absent otherwise —
+                // the green devenv plug that used to live on the right was decoration and
+                // pushed the dots off the edge.
                 Icon {
-                  // Only MARKED when the session actually has a devenv slice (it used to go
-                  // green for every top-level session, so a main-checkout session looked
-                  // like it owned a slice it never had) — but the slot is always reserved,
-                  // via opacity rather than visible, so the status text stays on one
-                  // vertical line down the roster instead of shifting per row.
-                  opacity: modelData.devenv === true ? 1 : 0
-                  name: "plug-2"; width: 15; height: 15
-                  Layout.preferredWidth: 15; Layout.preferredHeight: 15   // equal dims → no squish
+                  visible: modelData.offline === true || modelData.status === "offline"
+                  name: "bolt-slash"
+                  width: 14; height: 14
+                  Layout.preferredWidth: visible ? 14 : 0
+                  Layout.preferredHeight: 14
                   Layout.alignment: Qt.AlignVCenter
-                  // No cursor inversion: the fill is Theme.selection now (a surface,
-                  // not near-inverse fg), so green stays legible on it.
-                  color: Theme.green
+                  color: Theme.red
+                }
+                // ONE state slot at the right edge, same vocabulary as the collapsed dots:
+                // orb = working, yellow dot = idle, red dot = asleep, pulsing orange =
+                // needs input. The slot is always reserved so nothing shifts on a change.
+                Item {
+                  Layout.preferredWidth: 20; Layout.preferredHeight: 20
+                  Layout.alignment: Qt.AlignVCenter
+                  ThinkingOrb {
+                    anchors.fill: parent
+                    visible: sessRow.streaming && !sessRow.hasAsk
+                    running: sessRow.streaming && !sessRow.hasAsk
+                    nodes: 13
+                    glow: rail.actionGlow(modelData.rawName || modelData.name)
+                    seedKey: modelData.rawName || modelData.name
+                    invertRing: false
+                  }
+                  Rectangle {
+                    anchors.centerIn: parent
+                    visible: !sessRow.streaming && !sessRow.hasAsk
+                    width: 7; height: 7; radius: 3.5
+                    color: rail.dotColor(modelData.status || modelData.state || "")
+                  }
+                  Rectangle {
+                    anchors.centerIn: parent
+                    visible: sessRow.hasAsk
+                    width: 9; height: 9; radius: 4.5; color: Theme.orange
+                    SequentialAnimation on opacity {
+                      running: visible; loops: Animation.Infinite
+                      NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                      NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
+                    }
+                  }
                 }
               }
             }
@@ -3175,6 +3395,52 @@ Item {
       RowLayout {
         Layout.fillWidth: true
         spacing: 6
+
+        // Watchdog state lives here rather than in the header cluster: it is status you
+        // glance at, not something you act on mid-stream, and the header had three
+        // controls competing in one 60px run. Same grammar as the role switch — glyph at
+        // rest (green armed / orange unguarded), expanding on hover to name its action.
+        Rectangle {
+          id: goalPill
+          Layout.alignment: Qt.AlignVCenter
+          visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
+          readonly property bool armed: rail.selectedGoal.length > 0
+          readonly property color tint: armed ? Theme.green : Theme.orange
+          readonly property bool expanded: goalHover.hovered
+          implicitWidth: expanded ? goalRow.implicitWidth + 18 : 32   // 9 + 14 + 9
+          implicitHeight: 22
+          radius: 11
+          color: expanded ? Qt.alpha(goalPill.tint, 0.14) : "transparent"
+          border.width: 1
+          border.color: Qt.alpha(goalPill.tint, expanded ? 0.9 : 0.0)
+          Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+          Behavior on color { ColorAnimation { duration: 140 } }
+          Behavior on border.color { ColorAnimation { duration: 140 } }
+          clip: true
+          Row {
+            id: goalRow
+            anchors { left: parent.left; leftMargin: 9; verticalCenter: parent.verticalCenter }
+            spacing: 5
+            Icon {
+              anchors.verticalCenter: parent.verticalCenter
+              width: 14; height: 14
+              name: "target"
+              color: goalPill.tint
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: goalPill.expanded
+              text: goalPill.armed ? "RE-ARM" : "SET GOAL"
+              color: goalPill.tint
+              font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+            }
+          }
+          HoverHandler { id: goalHover }
+          TapHandler {
+            onTapped: rail.prefillComposer(goalPill.armed ? "/goal " + rail.selectedGoal : "/goal ")
+          }
+        }
+
         Item { Layout.fillWidth: true }   // push hint chips to the right
         Repeater {
           model: {
@@ -3193,17 +3459,13 @@ Item {
                 .concat([{ k: "C-v", l: "paste" }])
             }
             if (rail.curSection() === "roster") {
-              return [{ k: "j/k", l: "move" }, { k: "⏎", l: "open" }, { k: "n", l: "new" },
-                      { k: "x", l: "kill" }, { k: "C-t", l: "collapse" }, { k: "i", l: "type" },
-                      { k: "h", l: "nvim" }]
+              return [{ k: "⏎", l: "open" }, { k: "n", l: "new" },
+                      { k: "x", l: "kill" }, { k: "C-t", l: "collapse" }]
             }
             return [
-              { k: "j/k", l: "move" },
               { k: "⇥",   l: rail.view === "files" ? "chat" : "files" },
               { k: "⏎",   l: rail.view === "files" ? "open" : "copy" },
-              { k: "f",   l: rail.hinting ? "pick" : "links" },
-              { k: "i",   l: "type" },
-              { k: "h",   l: "nvim" }
+              { k: "f",   l: rail.hinting ? "pick" : "links/run" }
             ].concat(rail.featuredStreaming ? [{ k: "esc", l: "interrupt" }, { k: "S-esc", l: "kill tool" }] : [])
           }
           RowLayout {
@@ -3495,36 +3757,133 @@ Item {
     }
   }
   Component {
+    id: markdownContent
+    Column {
+      id: markdownRoot
+      width: parent ? parent.width : 400
+      spacing: 10
+      readonly property var blocks: rail.markdownBlocks(sourceText, sourceEntry, sourceOffset)
+      Repeater {
+        model: markdownRoot.blocks
+        Loader {
+          width: markdownRoot.width
+          property var block: modelData
+          property int rowIndex: markdownRoot.parent.rowIndex
+          property color bodyColor: markdownRoot.parent.bodyColor
+          property bool agentAuthored: markdownRoot.parent.agentAuthored
+          sourceComponent: block.kind === "fence" ? fencedCodeBlock : markdownTextBlock
+        }
+      }
+    }
+  }
+  Component {
+    id: markdownTextBlock
+    Item {
+      id: markdownBlock
+      width: parent ? parent.width : 400
+      implicitHeight: markdownText.implicitHeight
+      TextEdit {
+        id: markdownText
+        width: parent.width
+        height: implicitHeight
+        readOnly: true
+        selectByMouse: true
+        activeFocusOnPress: false
+        text: rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
+        color: bodyColor
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        wrapMode: TextEdit.WordWrap
+        textFormat: TextEdit.MarkdownText
+        onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
+      }
+      Repeater {
+        model: rail.blockHints(block, rowIndex)
+        KeyCap {
+          readonly property string marker: "\u200B[" + modelData.label + "]\u200B"
+          readonly property int markerPos: markdownText.getText(0, markdownText.length).indexOf(marker)
+          readonly property rect markerRect: markerPos >= 0 ? markdownText.positionToRectangle(markerPos) : Qt.rect(-100, -100, 0, 0)
+          x: markerRect.x
+          y: markerRect.y + (markerRect.height - height) / 2
+          z: 2
+          small: true
+          px: 10
+          text: modelData.label
+          textColor: Theme.yellow
+          TapHandler { onTapped: rail.hintKey(modelData.label) }
+        }
+      }
+    }
+  }
+  Component {
+    id: fencedCodeBlock
+    Rectangle {
+      id: fence
+      width: parent ? parent.width : 400
+      implicitHeight: fenceCol.implicitHeight + 20
+      radius: 9
+      color: Theme.bgDim
+      border.width: 1
+      border.color: block.runnable && agentAuthored ? rail.summaryColor : Theme.hairline
+      readonly property var activeHint: rail.hintForKey(block.key, rowIndex)
+      readonly property bool requestsApproval: block.runnable && agentAuthored
+      Column {
+        id: fenceCol
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 }
+        spacing: 8
+        RowLayout {
+          width: parent.width
+          spacing: 7
+          Icon {
+            name: fence.requestsApproval ? "chevron-right" : "keyboard"
+            width: 13; height: 13
+            color: fence.requestsApproval ? rail.summaryColor : Theme.fg_muted
+          }
+          Text {
+            text: fence.requestsApproval ? (block.lang + " · request approval to run") : (block.lang || "code")
+            color: fence.requestsApproval ? rail.summaryColor : Theme.fg_muted
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            font.underline: fence.requestsApproval
+          }
+          Item { Layout.fillWidth: true }
+          KeyCap {
+            visible: fence.activeHint !== null
+            small: true; px: 10
+            text: fence.activeHint ? fence.activeHint.label : ""
+            textColor: Theme.yellow
+            TapHandler { onTapped: if (fence.activeHint) rail.hintKey(fence.activeHint.label) }
+          }
+        }
+        Text {
+          width: parent.width
+          text: String(block.code || "").replace(/\n$/, "")
+          color: fence.requestsApproval ? rail.summaryColor : Theme.fg_secondary
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          wrapMode: Text.WrapAnywhere; lineHeight: 1.35
+        }
+      }
+      HoverHandler { id: fenceHover; enabled: fence.requestsApproval }
+      TapHandler { enabled: fence.requestsApproval; onTapped: rail.requestSnippet(block.code) }
+    }
+  }
+  Component {
     id: proseRow
-    // Agent prose inside the turn card — borderless markdown, the card provides
-    // the surface. The trailing ✧ recap line(s) split out into sky so the
-    // "what I did / next question" summary reads apart from the body.
     Column {
       id: proseCol
       width: parent ? parent.width : 400
-      spacing: 14   // clear gap between the body and the ✧ recap line
-      readonly property var _lines: String(entry.text || "").split("\n")
-      readonly property string _body: _lines.filter(l => !rail.isSummaryLine(l)).join("\n").trim()
-      readonly property string _summary: _lines.filter(l => rail.isSummaryLine(l)).join("\n").trim()
-      Text {
-        visible: proseCol._body.length > 0
-        width: parent.width
-        text: rail.colorizeLinks(rail.hintify(rail.badgeAttachments(proseCol._body), rowIndex)); color: Theme.fg
-        linkColor: rail.summaryColor   // links match the summary hue; underline keeps them scannable
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-        wrapMode: Text.WordWrap; lineHeight: 1.35
-        textFormat: Text.MarkdownText   // **bold**, `code`, lists — like the old rail
-        onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
-      }
-      Text {
-        visible: proseCol._summary.length > 0
-        width: parent.width
-        text: rail.colorizeLinks(rail.badgeAttachments(proseCol._summary)); color: rail.summaryColor
-        linkColor: rail.summaryColor   // links match the summary hue (sky is too harsh); underline keeps them scannable
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-        wrapMode: Text.WordWrap; lineHeight: 1.35
-        textFormat: Text.MarkdownText
-        onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
+      spacing: 14
+      readonly property var parts: rail.proseParts(entry.text)
+      Repeater {
+        model: proseCol.parts
+        Loader {
+          width: proseCol.width
+          sourceComponent: markdownContent
+          property string sourceText: modelData.text
+          property int sourceEntry: proseCol.parent.entryIndex
+          property int sourceOffset: modelData.offset
+          property int rowIndex: proseCol.parent.rowIndex
+          property color bodyColor: modelData.summary ? rail.summaryColor : Theme.fg
+          property bool agentAuthored: true
+        }
       }
     }
   }

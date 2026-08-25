@@ -28,6 +28,7 @@
   --green: #97b5a6;
   --red: #ff7b72;
   --orange: #ff570d;
+  --yellow: #ff8a31;
   --sky: #7dd3fc;
   --electric: #5566ff;
   --cursor: #ff570d;
@@ -66,6 +67,7 @@
     --green: #587969;
     --red: #7c3438;
     --orange: #e16511;
+    --yellow: #df9001;
     --sky: #0284c7;
     --electric: #0000f2;
     --cursor: #ff570d;
@@ -102,14 +104,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .role-badge { flex: none; border: 1px solid var(--hairline-soft); border-radius: 999px; padding: 1px 6px; color: var(--muted); font-size: 10px; line-height: 16px; }
 .linked-mark { flex: none; color: var(--muted); }
 .row-spacer { flex: 1; }
-.status-word { flex: none; color: var(--muted); font-size: 11px; }
+/* Status WORDS are gone — the dot carries idle/asleep, matching the desktop rail. What
+   remains is the running tool, and it fades instead of blinking at every tool boundary. */
+.tool-word { flex: none; color: var(--muted); font-size: 11px; opacity: 0; transition: opacity 180ms ease-out; }
+.tool-word.on { opacity: 1; }
+/* The marker leads the row: cloud = the session runs on the dev VM, ▭ = this machine. */
+.host-mark { flex: none; width: 14px; height: 14px; color: var(--muted); }
+/* A worker whose daemon went away — the only icon in the row, red, left of the state. */
+.disconnect-mark { flex: none; width: 14px; height: 14px; color: var(--red); }
 .aurora-orb { display: block; flex: none; border-radius: 50%; }
 .orb-fallback, .status-dot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
 .orb-fallback { background: var(--sky); }
 .status-dot.streaming { background: var(--green); box-shadow: 0 0 9px color-mix(in srgb, var(--green) 55%, transparent); }
-.status-dot.error { background: var(--red); }
-.status-dot.offline, .status-dot.asleep { opacity: .45; }
-.roster-orb-slot { display: grid; flex: none; place-items: center; width: 20px; height: 20px; }
+.status-dot.error, .status-dot.offline { background: var(--red); }
+.status-dot.asleep { background: var(--yellow); }
+.status-dot.idle { background: var(--muted); }
+.status-dot.ask { background: var(--orange); width: 9px; height: 9px; animation: ask-pulse 1200ms ease-in-out infinite; }
+@keyframes ask-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+.roster-orb-slot { display: grid; flex: none; place-items: center; width: 20px; height: 20px; margin-left: 8px; }
 @keyframes needs-input-in { from { transform: translate(-8px, 12px) scale(0); opacity: 0; filter: blur(2px); } }
 .needs-input-pill { flex: none; border-radius: 999px; padding: 3px 8px; background: var(--orange); color: var(--bg); font-size: 10px; font-weight: 700; animation: needs-input-in 500ms var(--badge-pop-ease); }
 

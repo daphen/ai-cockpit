@@ -14,6 +14,9 @@ export interface Session {
   parent?: string
   idle?: string
   plan?: string
+  // The watchdog goal. Handover pins it on exactly ONE orchestrator, which is how the UI
+  // knows which host holds the role.
+  goal?: string
   lastActivity: number
   hostId?: string
   currentTool?: string
@@ -626,7 +629,10 @@ export class AgentdStore {
   }
 
   private publish() {
-    const sessions = this.selectedSessions().sort((a, b) => Number(Boolean(b.ask)) - Number(Boolean(a.ask)) || b.lastActivity - a.lastActivity || a.name.localeCompare(b.name))
+    // STABLE order: name only. Sorting by recency reshuffled the list every time a
+    // session emitted an event, so rows swapped places under your thumb mid-read and the
+    // status dots jumped (David, 2026-08-25). Matches the desktop rail.
+    const sessions = this.selectedSessions().sort((a, b) => a.name.localeCompare(b.name))
     this.snapshot = {
       sessions,
       feeds: { ...this.feeds },
