@@ -273,6 +273,9 @@ export class AgentdStore {
   private snapshot: Snapshot = EMPTY
   private token = ""
   private probeTimer = 0
+  private resumeTimer = 0
+  private selectedKey = ""
+  private refreshSelected = false
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener)
@@ -292,8 +295,27 @@ export class AgentdStore {
   }
 
   select(key: string) {
+    this.selectedKey = key
+    this.refreshSelected = false
     const { name } = this.parts(key)
     this.sendSession(key, { type: "get_entries", session: name })
+  }
+
+  resume() {
+    if (!this.token) return
+    window.clearTimeout(this.resumeTimer)
+    this.resumeTimer = window.setTimeout(() => {
+      this.refreshSelected = Boolean(this.selectedKey)
+      for (const state of this.scopes.values()) {
+        window.clearTimeout(state.reconnectTimer)
+        state.connected = false
+        if (!state.socket) continue
+        state.socket.onclose = null
+        state.socket.close()
+        state.socket = null
+      }
+      void this.probeHosts()
+    }, 120)
   }
 
   labelChats(sessions: Session[]) {
@@ -444,6 +466,9 @@ export class AgentdStore {
 
   private resetConnections() {
     window.clearInterval(this.probeTimer)
+    window.clearTimeout(this.resumeTimer)
+    this.selectedKey = ""
+    this.refreshSelected = false
     for (const key of [...this.scopes.keys()]) this.removeScope(key)
     this.feeds = {}
     this.asks = {}
@@ -473,6 +498,13 @@ export class AgentdStore {
         lastActivity: session.lastActivity ?? now,
       }))
       this.publish()
+      if (this.refreshSelected && this.owners[this.selectedKey] === stateKey) {
+        const { name: selectedName } = this.parts(this.selectedKey)
+        try {
+          this.sendSession(this.selectedKey, { type: "get_entries", session: selectedName })
+          this.refreshSelected = false
+        } catch {}
+      }
       const claimed = new Set(this.snapshot.sessions.filter(session => session.ask).map(session => sessionKey(session.scope, session.name)))
       for (const key of Object.keys(this.asks)) if (!claimed.has(key)) delete this.asks[key]
       return

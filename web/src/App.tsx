@@ -56,6 +56,22 @@ export default function App() {
     window.addEventListener("cockpit:update-ready", ready)
     return () => window.removeEventListener("cockpit:update-ready", ready)
   }, [])
+  useEffect(() => {
+    if (needsToken || checkingToken) return
+    const resume = () => {
+      if (document.visibilityState === "visible") agentd.resume()
+    }
+    document.addEventListener("visibilitychange", resume)
+    window.addEventListener("pageshow", resume)
+    window.addEventListener("online", resume)
+    window.addEventListener("focus", resume)
+    return () => {
+      document.removeEventListener("visibilitychange", resume)
+      window.removeEventListener("pageshow", resume)
+      window.removeEventListener("online", resume)
+      window.removeEventListener("focus", resume)
+    }
+  }, [checkingToken, needsToken])
   const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])
   const visibleSessions = useMemo(() => scope === "all" ? groupSessions : groupSessions.filter(session => session.scope === scope), [groupSessions, scope])
   useEffect(() => {

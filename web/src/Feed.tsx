@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react"
 import type { Activity, FeedItem } from "./agentd"
 import { LoadingIndicator } from "./LoadingIndicator"
+import { MessageIcon } from "./MessageIcon"
 
 export function Feed({ items }: { items?: FeedItem[] }) {
   const feed = useRef<HTMLDivElement>(null)
@@ -31,7 +32,7 @@ export function Feed({ items }: { items?: FeedItem[] }) {
         if (item.kind === "user") return (
           <article className="turn-card user-turn" key={item.key}>
             <header className="turn-header">
-              <span className="turn-glyph user-glyph">➤</span>
+              <MessageIcon sender="user" />
               <strong>{item.sender ? `⇄ ${item.sender}` : "you"}</strong>
               {item.steered && <span className="steer-cap">steer</span>}
             </header>
@@ -50,7 +51,7 @@ export function Feed({ items }: { items?: FeedItem[] }) {
           : ""
         return (
           <article className="turn-card agent-turn" key={item.key}>
-            <header className="turn-header"><span className="turn-glyph agent-glyph">✦</span><strong>agent</strong></header>
+            <header className="turn-header"><MessageIcon sender="agent" /><strong>agent</strong></header>
             {item.thinking.map((thought, index) => (
               <details className="thinking-row" key={index}>
                 <summary><span className="thinking-dot" />{firstLine(thought)}</summary>
