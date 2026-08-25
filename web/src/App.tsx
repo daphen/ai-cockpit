@@ -9,17 +9,26 @@ import { LoadingIndicator } from "./LoadingIndicator"
 import { Roster } from "./Roster"
 
 const tokenKey = "cockpit.bridgeToken"
+const lastSessionKey = "cockpit.lastSession"
 type CockpitGroup = "work" | "private"
 const groupScopes: Record<CockpitGroup, Set<string>> = {
   work: new Set(["lovable", "work"]),
   private: new Set(["personal", "chat"]),
 }
 
+function groupForSession(key: string): CockpitGroup {
+  const sessionScope = key.slice(0, key.indexOf("/"))
+  return sessionScope === "personal" || sessionScope === "chat" ? "private" : "work"
+}
+
 export default function App() {
   const state = useSyncExternalStore(agentd.subscribe, agentd.getSnapshot)
-  const [selected, setSelected] = useState("")
-  const [group, setGroup] = useState<CockpitGroup>("work")
-  const [scope, setScope] = useState("all")
+  const rememberedSession = localStorage.getItem(lastSessionKey) ?? ""
+  const rememberedGroup = groupForSession(rememberedSession)
+  const [selected, setSelected] = useState(rememberedSession)
+  const [restoringSession, setRestoringSession] = useState(Boolean(rememberedSession))
+  const [group, setGroup] = useState<CockpitGroup>(rememberedGroup)
+  const [scope, setScope] = useState(rememberedSession.startsWith("chat/") ? "chat" : rememberedGroup === "private" ? "personal" : "all")
   const [rosterExpanded, setRosterExpanded] = useState(false)
   const [updateReady, setUpdateReady] = useState(false)
   const [error, setError] = useState("")
@@ -74,12 +83,29 @@ export default function App() {
   }, [checkingToken, needsToken])
   const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])
   const visibleSessions = useMemo(() => scope === "all" ? groupSessions : groupSessions.filter(session => session.scope === scope), [groupSessions, scope])
+  const selectedAvailable = state.sessions.some(session => sessionKey(session.scope, session.name) === selected)
   useEffect(() => {
-    if (selected && state.sessions.some(session => sessionKey(session.scope, session.name) === selected)) return
+    if (restoringSession && selectedAvailable) setRestoringSession(false)
+  }, [restoringSession, selectedAvailable])
+  useEffect(() => {
+    if (!restoringSession || checkingToken || !state.sessions.length) return
+    const timer = window.setTimeout(() => setRestoringSession(false), 2500)
+    return () => window.clearTimeout(timer)
+  }, [checkingToken, restoringSession, state.sessions.length])
+  useEffect(() => {
+    if (restoringSession || selectedAvailable) return
     const first = visibleSessions[0]
     setSelected(first ? sessionKey(first.scope, first.name) : "")
-  }, [selected, state.sessions, visibleSessions])
-  useEffect(() => { if (selected) agentd.select(selected) }, [selected])
+  }, [restoringSession, selectedAvailable, visibleSessions])
+  useEffect(() => {
+    if (!selectedAvailable) return
+    localStorage.setItem(lastSessionKey, selected)
+    agentd.select(selected)
+  }, [selected, selectedAvailable])
+  const selectSession = (key: string) => {
+    setRestoringSession(false)
+    setSelected(key)
+  }
   useEffect(() => { if (scope === "chat") agentd.labelChats(visibleSessions) }, [scope, visibleSessions])
 
   const active = state.sessions.find(session => sessionKey(session.scope, session.name) === selected)
@@ -118,7 +144,7 @@ export default function App() {
               <nav className="scope-tabs" aria-label={`${group} scope filter`}>
                 {["all", ...scopes].map(item => <button className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
               </nav>
-              <Roster sessions={visibleSessions} selected={selected} onSelect={setSelected} />
+              <Roster sessions={visibleSessions} selected={selected} onSelect={selectSession} />
             </aside>
 
             <div className="session-stage">
@@ -164,7 +190,7 @@ export default function App() {
                           <nav className="scope-tabs" aria-label={`${group} scope filter`}>
                             {["all", ...scopes].map(item => <button type="button" className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
                           </nav>
-                          <Roster sessions={visibleSessions.filter(session => sessionKey(session.scope, session.name) !== selected)} selected={selected} onSelect={key => { setSelected(key); setRosterExpanded(false) }} />
+                          <Roster sessions={visibleSessions.filter(session => sessionKey(session.scope, session.name) !== selected)} selected={selected} onSelect={key => { selectSession(key); setRosterExpanded(false) }} />
                         </>
                       )}
                     />
