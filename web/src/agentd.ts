@@ -78,6 +78,7 @@ interface ScopeState {
   connected: boolean
   sessions: Session[]
   reconnectTimer?: number
+  offlineTimer?: number
 }
 
 export interface Snapshot {
@@ -315,11 +316,14 @@ export class AgentdStore {
       this.refreshSelected = Boolean(this.selectedKey)
       for (const state of this.scopes.values()) {
         window.clearTimeout(state.reconnectTimer)
+        window.clearTimeout(state.offlineTimer)
         state.connected = false
-        if (!state.socket) continue
-        state.socket.onclose = null
-        state.socket.close()
-        state.socket = null
+        if (state.socket) {
+          state.socket.onclose = null
+          state.socket.close()
+          state.socket = null
+        }
+        this.openScope(state.host, state.scope)
       }
       void this.probeHosts()
     }, 120)
@@ -380,7 +384,6 @@ export class AgentdStore {
 
   private async probeHosts() {
     const results = await Promise.all(this.hosts.map(host => this.probeHost(host)))
-    this.publish()
     return {
       connected: results.some(result => result === "connected"),
       unauthorized: results.some(result => result === "unauthorized"),
@@ -389,7 +392,7 @@ export class AgentdStore {
 
   private async probeHost(host: BridgeHost): Promise<"connected" | "unauthorized" | "offline"> {
     const controller = new AbortController()
-    const timeout = window.setTimeout(() => controller.abort(), 1_500)
+    const timeout = window.setTimeout(() => controller.abort(), 5_000)
     try {
       const response = await fetch(`${host.baseUrl}/scopes`, {
         cache: "no-store",
@@ -397,19 +400,12 @@ export class AgentdStore {
         headers: { Authorization: `Bearer ${this.token}` },
         signal: controller.signal,
       })
-      if (response.status === 401) {
-        this.markHostOffline(host)
-        return "unauthorized"
-      }
-      if (!response.ok) {
-        this.markHostOffline(host)
-        return "offline"
-      }
+      if (response.status === 401) return "unauthorized"
+      if (!response.ok) return "offline"
       const scopes = await response.json() as string[]
       this.reconcileHost(host, scopes)
       return "connected"
     } catch {
-      this.markHostOffline(host)
       return "offline"
     } finally {
       window.clearTimeout(timeout)
@@ -418,24 +414,14 @@ export class AgentdStore {
 
   private reconcileHost(host: BridgeHost, scopes: string[]) {
     const wanted = new Set(scopes.map(scope => this.scopeStateKey(host.id, scope)))
+    let removed = false
     for (const [key, state] of this.scopes) {
-      if (state.host.id === host.id && !wanted.has(key)) this.removeScope(key)
+      if (state.host.id !== host.id || wanted.has(key)) continue
+      this.removeScope(key)
+      removed = true
     }
     for (const scope of scopes) this.openScope(host, scope)
-  }
-
-  private markHostOffline(host: BridgeHost) {
-    for (const state of this.scopes.values()) {
-      if (state.host.id !== host.id) continue
-      window.clearTimeout(state.reconnectTimer)
-      state.connected = false
-      state.sessions = state.sessions.map(session => ({ ...session, status: "offline" }))
-      if (state.socket) {
-        state.socket.onclose = null
-        state.socket.close()
-        state.socket = null
-      }
-    }
+    if (removed) this.publish()
   }
 
   private openScope(host: BridgeHost, scope: string) {
@@ -447,16 +433,31 @@ export class AgentdStore {
     const query = new URLSearchParams({ scope, token: this.token })
     const socket = new WebSocket(`${protocol}//${base.host}/ws?${query}`)
     const state: ScopeState = current ?? { key, host, scope, socket: null, connected: false, sessions: [] }
+    window.clearTimeout(state.reconnectTimer)
     state.socket = socket
     this.scopes.set(key, state)
-    socket.onopen = () => { state.connected = true; this.publish() }
-    socket.onmessage = event => this.onMessage(key, String(event.data))
-    socket.onclose = () => {
-      state.connected = false
-      state.sessions = state.sessions.map(session => ({ ...session, status: "offline" }))
+    socket.onopen = () => {
+      if (state.socket !== socket) return
+      window.clearTimeout(state.offlineTimer)
+      state.connected = true
       this.publish()
+    }
+    socket.onmessage = event => {
+      if (state.socket === socket) this.onMessage(key, String(event.data))
+    }
+    socket.onclose = () => {
+      if (state.socket !== socket) return
+      state.socket = null
+      state.connected = false
+      if (this.owners[this.selectedKey] === key) this.refreshSelected = true
       window.clearTimeout(state.reconnectTimer)
-      state.reconnectTimer = window.setTimeout(() => this.openScope(host, scope), 1_500)
+      state.reconnectTimer = window.setTimeout(() => this.openScope(host, scope), 250)
+      window.clearTimeout(state.offlineTimer)
+      state.offlineTimer = window.setTimeout(() => {
+        if (state.connected) return
+        state.sessions = state.sessions.map(session => ({ ...session, status: "offline" }))
+        this.publish()
+      }, 8_000)
     }
   }
 
@@ -464,6 +465,7 @@ export class AgentdStore {
     const state = this.scopes.get(key)
     if (!state) return
     window.clearTimeout(state.reconnectTimer)
+    window.clearTimeout(state.offlineTimer)
     if (state.socket) {
       state.socket.onclose = null
       state.socket.close()
