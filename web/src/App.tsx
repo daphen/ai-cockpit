@@ -73,12 +73,10 @@ export default function App() {
     document.addEventListener("visibilitychange", resume)
     window.addEventListener("pageshow", resume)
     window.addEventListener("online", resume)
-    window.addEventListener("focus", resume)
     return () => {
       document.removeEventListener("visibilitychange", resume)
       window.removeEventListener("pageshow", resume)
       window.removeEventListener("online", resume)
-      window.removeEventListener("focus", resume)
     }
   }, [checkingToken, needsToken])
   const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])

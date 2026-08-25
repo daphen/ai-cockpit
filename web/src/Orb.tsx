@@ -86,7 +86,7 @@ class SharedOrbRenderer {
     const surface = document.createElement("canvas")
     surface.width = 88
     surface.height = 88
-    const gl = surface.getContext("webgl2", { alpha: true, antialias: true, preserveDrawingBuffer: true })
+    const gl = surface.getContext("webgl2", { alpha: true, antialias: true })
     if (!gl) return null
     const program = makeProgram(gl)
     if (!program) return null
@@ -121,6 +121,7 @@ class SharedOrbRenderer {
     })
     this.light.addEventListener("change", this.redraw)
     this.reduced.addEventListener("change", this.redraw)
+    document.addEventListener("visibilitychange", this.visibilityChanged)
   }
 
   add(node: HTMLCanvasElement, size: 16 | 20 | 44, seed: number, tone: OrbTone, fail: () => void) {
@@ -140,6 +141,15 @@ class SharedOrbRenderer {
     }
   }
 
+  private visibilityChanged = () => {
+    if (document.hidden) {
+      cancelAnimationFrame(this.frame)
+      this.frame = 0
+    } else {
+      this.redraw()
+    }
+  }
+
   private redraw = () => {
     cancelAnimationFrame(this.frame)
     this.draw()
@@ -147,7 +157,7 @@ class SharedOrbRenderer {
 
   private draw = () => {
     this.frame = 0
-    if (this.lost || !this.entries.size) return
+    if (document.hidden || this.lost || !this.entries.size) return
     const palettes = new Map<OrbTone, ReturnType<typeof orbPalette>>()
     for (const entry of this.entries.values()) {
       let palette = palettes.get(entry.tone)

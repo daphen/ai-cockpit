@@ -188,17 +188,20 @@ function runningTool(entries: Entry[], leafId?: string) {
 }
 
 function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
-  const chain = entryChain(entries, leafId)
+  const recent = entryChain(entries, leafId).slice(-80)
   const failures = new Set<string>()
+  const answerIds = new Set(recent.flatMap(entry => (entry.message?.content ?? []).flatMap(block =>
+    (block.type === "toolCall" || block.type === "tool_use") && (block.name ?? block.tool) === "ask_user" && block.id ? [block.id] : []
+  )))
   const results = new Map<string, string>()
-  for (const entry of chain) {
+  for (const entry of recent) {
     if (entry.message?.role !== "toolResult" || !entry.message.toolCallId) continue
     if (entry.message.isError) failures.add(entry.message.toolCallId)
-    results.set(entry.message.toolCallId, textContent(entry.message.content))
+    if (answerIds.has(entry.message.toolCallId)) results.set(entry.message.toolCallId, textContent(entry.message.content))
   }
 
   const feed: FeedItem[] = []
-  for (const [index, entry] of chain.slice(-80).entries()) {
+  for (const [index, entry] of recent.entries()) {
     const key = entry.id ?? `entry-${index}`
     if (entry.type === "compaction") {
       feed.push({ kind: "system", text: "context compacted", key })
@@ -297,6 +300,7 @@ export class AgentdStore {
   select(key: string) {
     this.selectedKey = key
     this.refreshSelected = false
+    for (const feedKey of Object.keys(this.feeds)) if (feedKey !== key) delete this.feeds[feedKey]
     const { name } = this.parts(key)
     this.sendSession(key, { type: "get_entries", session: name })
   }
@@ -526,7 +530,7 @@ export class AgentdStore {
           try { localStorage.setItem(chatLabelsKey, JSON.stringify(this.chatLabels)) } catch {}
         }
       }
-      if (!labelRequest) {
+      if (!labelRequest && key === this.selectedKey) {
         const tool = session?.status === "streaming" ? runningTool(entries, message.data?.leafId) : ""
         if (tool) this.currentTools[key] = tool
         else delete this.currentTools[key]
@@ -541,19 +545,19 @@ export class AgentdStore {
     } else if (message.type === "ask_answered") {
       delete this.asks[key]
     } else if (message.type === "error") {
-      this.push(key, { kind: "system", text: String(message.error ?? "agentd error"), tone: "error", key: `error-${Date.now()}` })
+      if (key === this.selectedKey) this.push(key, { kind: "system", text: String(message.error ?? "agentd error"), tone: "error", key: `error-${Date.now()}` })
     } else if (message.type === "tool_execution_start") {
       const args = message.args ?? {}
       this.currentTools[key] = String(message.toolName ?? "tool")
       if (session) session.currentTool = this.currentTools[key]
-      this.push(key, { kind: "system", text: toolHint(this.currentTools[key], args), key: `tool-${message.toolCallId ?? Date.now()}` })
+      if (key === this.selectedKey) this.push(key, { kind: "system", text: toolHint(this.currentTools[key], args), key: `tool-${message.toolCallId ?? Date.now()}` })
     } else if (message.type === "tool_execution_end") {
       delete this.currentTools[key]
       if (session) session.currentTool = undefined
     } else if (message.type === "turn_end" || message.type === "agent_end") {
       delete this.currentTools[key]
       if (session) session.currentTool = undefined
-      this.sendSession(key, { type: "get_entries", session: name })
+      if (key === this.selectedKey) this.sendSession(key, { type: "get_entries", session: name })
       if (message.type === "agent_end") this.flushQueue(key)
     }
     this.publish()
