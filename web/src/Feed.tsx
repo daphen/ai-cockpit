@@ -64,7 +64,7 @@ export function Feed({ items }: { items?: FeedItem[] }) {
           </article>
         )
       })}
-        <div ref={end} />
+        <div className="feed-end-spacer" ref={end} aria-hidden="true" />
       </div>
     </div>
   )
