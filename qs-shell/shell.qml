@@ -193,33 +193,33 @@ ShellRoot {
             width: parent.width
             height: Math.round((parent.height - chin.implicitHeight) * win.termDpr) / win.termDpr
 
-            TermView {
-              id: term
+            Crossfade {
               anchors.fill: parent
-              active: activeFocus && !win.dashboardActive
-              enabled: !win.dashboardActive
-              opacity: win.dashboardActive ? 0 : 1
-              visible: enabled || opacity > 0.001
-              Component.onCompleted: forceActiveFocus()
-              onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
-              Behavior on opacity { NumberAnimation { duration: win.dashboardActive ? 0 : 160; easing.type: Easing.OutCubic } }
-            }
-
-            Dashboard {
-              id: dashboard
-              anchors.fill: parent
-              model: (chin.st.dashboard && chin.st.dashboard.model) || ({})
-              enabled: win.dashboardActive
-              opacity: win.dashboardActive ? 1 : 0
-              visible: enabled || opacity > 0.001
-              onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
-              onFocusRequested: direction => win.tryFocus(direction)
-              onActionRequested: actionId => {
-                if (!term.nvimSocket.length) return
-                Quickshell.execDetached(["nvim", "--server", term.nvimSocket, "--remote-expr",
-                  'v:lua.require("cockpit").dashboard_action(' + JSON.stringify(actionId) + ')'])
+              showSecond: win.dashboardActive
+              enterDuration: 400
+              exitDuration: 350
+              shift: 8
+              first: TermView {
+                id: term
+                anchors.fill: parent
+                active: activeFocus && !win.dashboardActive
+                enabled: !win.dashboardActive
+                Component.onCompleted: forceActiveFocus()
+                onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
               }
-              Behavior on opacity { NumberAnimation { duration: win.dashboardActive ? 0 : 160; easing.type: Easing.OutCubic } }
+              second: Dashboard {
+                id: dashboard
+                anchors.fill: parent
+                model: (chin.st.dashboard && chin.st.dashboard.model) || ({})
+                enabled: win.dashboardActive
+                onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+                onFocusRequested: direction => win.tryFocus(direction)
+                onActionRequested: actionId => {
+                  if (!term.nvimSocket.length) return
+                  Quickshell.execDetached(["nvim", "--server", term.nvimSocket, "--remote-expr",
+                    'v:lua.require("cockpit").dashboard_action(' + JSON.stringify(actionId) + ')'])
+                }
+              }
             }
           }
           // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the

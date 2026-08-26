@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react"
+import { AnimatePresence } from "motion/react"
+import * as m from "motion/react-m"
 import type { Activity, FeedItem } from "./agentd"
 import { LoadingIndicator } from "./LoadingIndicator"
 import { MessageIcon } from "./MessageIcon"
+import { iconSwap, textSwap } from "./motion"
 
 export function Feed({ items }: { items?: FeedItem[] }) {
   const feed = useRef<HTMLDivElement>(null)
@@ -27,22 +30,24 @@ export function Feed({ items }: { items?: FeedItem[] }) {
         if (node) following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80
       }}
     >
-      {!rows.length && <div className="empty feed-empty">No messages yet. Start the conversation below.</div>}
+      <AnimatePresence initial={false}>
+        {!rows.length && <m.div className="empty feed-empty" key="empty" variants={textSwap} initial="initial" animate="animate" exit="exit">No messages yet. Start the conversation below.</m.div>}
+      </AnimatePresence>
       {rows.map(item => {
         if (item.kind === "user") return (
-          <article className="turn-card user-turn" key={item.key}>
+          <m.article className="turn-card user-turn" key={item.key} variants={iconSwap} initial="initial" animate="animate">
             <header className="turn-header">
               <MessageIcon sender="user" />
               <strong>{item.sender ? `⇄ ${item.sender}` : "you"}</strong>
-              {item.steered && <span className="steer-cap">steer</span>}
+              {item.steered && <m.span className="steer-cap" variants={textSwap} initial="initial" animate="animate">steer</m.span>}
             </header>
             <p className="turn-copy">{item.text}</p>
-          </article>
+          </m.article>
         )
         if (item.kind === "system") return (
-          <article className={`turn-card system-turn ${item.tone ?? ""}`} key={item.key}>
+          <m.article className={`turn-card system-turn ${item.tone ?? ""}`} key={item.key} variants={textSwap} initial="initial" animate="animate">
             <p>· {item.text.replace(/^·\s*/, "")}</p>
-          </article>
+          </m.article>
         )
         const outcome = !item.text
           ? item.activity.length
@@ -50,7 +55,7 @@ export function Feed({ items }: { items?: FeedItem[] }) {
             : "· turn ended without visible output"
           : ""
         return (
-          <article className="turn-card agent-turn" key={item.key}>
+          <m.article className="turn-card agent-turn" key={item.key} variants={iconSwap} initial="initial" animate="animate">
             <header className="turn-header"><MessageIcon sender="agent" /><strong>agent</strong></header>
             {item.thinking.map((thought, index) => (
               <details className="thinking-row" key={index}>
@@ -59,9 +64,11 @@ export function Feed({ items }: { items?: FeedItem[] }) {
               </details>
             ))}
             {item.text && <div className="turn-copy agent-copy">{item.text}</div>}
-            {outcome && <p className="outcome-note">{outcome}</p>}
+            <AnimatePresence initial={false}>
+              {outcome && <m.p className="outcome-note" key={outcome} variants={textSwap} initial="initial" animate="animate" exit="exit">{outcome}</m.p>}
+            </AnimatePresence>
             {!!item.activity.length && <ActivityDisclosure items={item.activity} />}
-          </article>
+          </m.article>
         )
       })}
         <div className="feed-end-spacer" ref={end} aria-hidden="true" />

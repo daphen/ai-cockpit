@@ -7,6 +7,7 @@ import { Composer } from "./Composer"
 import { Feed } from "./Feed"
 import { LoadingIndicator } from "./LoadingIndicator"
 import { Roster } from "./Roster"
+import { fadeSwap, pageSwap, panelSwap, textSwap } from "./motion"
 
 const tokenKey = "cockpit.bridgeToken"
 const lastSessionKey = "cockpit.lastSession"
@@ -145,12 +146,13 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <LazyMotion features={domAnimation} strict>
+        <AnimatePresence initial={false} mode="wait">
         {checkingToken || (!needsToken && loadingCockpit) ? (
-          <Splash label={checkingToken ? "connecting bridges" : "loading rosters"} />
+          <Splash key="splash" label={checkingToken ? "connecting bridges" : "loading rosters"} />
         ) : needsToken ? (
-          <TokenLogin checking={false} error={error} onSubmit={saveToken} />
+          <TokenLogin key="login" checking={false} error={error} onSubmit={saveToken} />
         ) : (
-          <main className={`app ${active ? "session-open" : ""}`}>
+          <m.main className={`app ${active ? "session-open" : ""}`} key="app" variants={pageSwap} initial="initial" animate="animate" exit="exit">
             <aside className="roster-pane">
               <header className="app-header"><div><span>cockpit</span><strong>{group}</strong></div><small>{groupSessions.length} agents</small></header>
               <nav className="group-tabs" aria-label="Cockpit group">
@@ -169,21 +171,27 @@ export default function App() {
               <m.section
                 className="session-pane"
                 key={selected || "empty"}
-                initial={{ opacity: 0, transform: "translateX(8px)" }}
-                animate={{ opacity: 1, transform: "translateX(0px)" }}
-                exit={{ opacity: 0, transform: "translateX(-8px)" }}
-                transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                variants={pageSwap}
+                initial="initial"
+                animate="animate"
+                exit="exit"
               >
                 {active ? (
                   <>
                     <header className="session-header">
                       <button className="back" onClick={() => setRosterExpanded(true)} aria-label="Open roster">←</button>
                       <div><strong>{active.displayName ?? active.name}</strong><span>{active.scope} · {active.status}</span></div>
-                      {active.plan && <span className="plan-chip">{active.plan}</span>}
+                      <AnimatePresence initial={false}>
+                        {active.plan && <m.span className="plan-chip" key={active.plan} variants={textSwap} initial="initial" animate="animate" exit="exit">{active.plan}</m.span>}
+                      </AnimatePresence>
                     </header>
-                    {error && <div className="error-banner">{error}</div>}
+                    <AnimatePresence initial={false}>
+                      {error && <m.div className="error-banner" key={error} variants={textSwap} initial="initial" animate="animate" exit="exit">{error}</m.div>}
+                    </AnimatePresence>
                     <Feed items={state.feeds[selected]} />
-                    {ask && <AskCard ask={ask} onAnswer={response => run(() => agentd.answer(selected, response))} />}
+                    <AnimatePresence initial={false}>
+                      {ask && <AskCard key={`${ask.title}-${ask.method}`} ask={ask} onAnswer={response => run(() => agentd.answer(selected, response))} />}
+                    </AnimatePresence>
                     <Composer
                       sessionName={active.displayName ?? active.name}
                       currentTool={active.currentTool}
@@ -218,15 +226,20 @@ export default function App() {
               </m.section>
             </AnimatePresence>
             </div>
-            {error && !active && <div className="error-banner global">{error}</div>}
-          </main>
+            <AnimatePresence initial={false}>
+              {error && !active && <m.div className="error-banner global" key={error} variants={panelSwap} initial="initial" animate="animate" exit="exit">{error}</m.div>}
+            </AnimatePresence>
+          </m.main>
         )}
-        {updateReady && (
-          <div className="update-toast" role="status">
-            <span>new cockpit ready</span>
-            <button onClick={() => window.dispatchEvent(new Event("cockpit:apply-update"))}>update & reload</button>
-          </div>
-        )}
+        </AnimatePresence>
+        <AnimatePresence initial={false}>
+          {updateReady && (
+            <m.div className="update-toast" role="status" variants={panelSwap} initial="initial" animate="animate" exit="exit">
+              <span>new cockpit ready</span>
+              <button onClick={() => window.dispatchEvent(new Event("cockpit:apply-update"))}>update & reload</button>
+            </m.div>
+          )}
+        </AnimatePresence>
       </LazyMotion>
     </MotionConfig>
   )
@@ -234,7 +247,7 @@ export default function App() {
 
 function Splash({ label }: { label: string }) {
   return (
-    <m.main className="boot-splash" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.15 }}>
+    <m.main className="boot-splash" variants={fadeSwap} initial="initial" animate="animate" exit="exit">
       <LoadingIndicator label={label} />
     </m.main>
   )
@@ -244,11 +257,9 @@ function TokenLogin({ checking, error, onSubmit }: { checking: boolean; error: s
   const [value, setValue] = useState("")
   const valid = /^[0-9a-f]{64}$/.test(value)
   return (
-    <main className="token-shell">
+    <m.main className="token-shell" variants={pageSwap} initial="initial" animate="animate" exit="exit">
       <m.form
         className="token-card"
-        initial={{ opacity: 0, transform: "translateY(8px)" }}
-        animate={{ opacity: 1, transform: "translateY(0px)" }}
         onSubmit={event => { event.preventDefault(); if (valid) onSubmit(value) }}
       >
         <span>cockpit</span>
@@ -266,11 +277,13 @@ function TokenLogin({ checking, error, onSubmit }: { checking: boolean; error: s
               onChange={event => setValue(event.target.value.trim())}
               autoFocus
             />
-            {error && <div className="token-error">{error}</div>}
+            <AnimatePresence initial={false}>
+              {error && <m.div className="token-error" key={error} variants={textSwap} initial="initial" animate="animate" exit="exit">{error}</m.div>}
+            </AnimatePresence>
             <button className="primary" disabled={!valid}>Connect</button>
           </>
         )}
       </m.form>
-    </main>
+    </m.main>
   )
 }

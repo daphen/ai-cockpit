@@ -1,5 +1,7 @@
 import { useState } from "react"
+import * as m from "motion/react-m"
 import type { Ask } from "./agentd"
+import { panelSwap } from "./motion"
 
 interface Props {
   ask: Ask
@@ -13,7 +15,7 @@ export function AskCard({ ask, onAnswer }: Props) {
   const options = (ask.options ?? []).map(option => typeof option === "string" ? { label: option, value: option } : { label: option.label ?? option.value ?? "option", value: option.value ?? option.label ?? "" })
 
   return (
-    <section className="ask-card" aria-label="Agent needs input">
+    <m.section className="ask-card" aria-label="Agent needs input" variants={panelSwap} initial="initial" animate="animate" exit="exit">
       <span className="ask-kicker">needs your input</span>
       <h2>{userBash ? "Run this command?" : ask.title || "Question"}</h2>
       {payload ? (
@@ -33,7 +35,7 @@ export function AskCard({ ask, onAnswer }: Props) {
           <button className="primary" disabled={!value.trim()}>Answer</button>
         </form>
       )}
-    </section>
+    </m.section>
   )
 }
 

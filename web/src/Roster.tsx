@@ -1,6 +1,9 @@
+import { AnimatePresence } from "motion/react"
+import * as m from "motion/react-m"
 import type { Session } from "./agentd"
 import { sessionKey } from "./agentd"
 import { Orb, orbTone } from "./Orb"
+import { iconSwap, textSwap } from "./motion"
 
 interface Props {
   sessions: Session[]
@@ -56,26 +59,36 @@ export function Roster({ sessions, selected, onSelect }: Props) {
               <span className="row-spacer" />
               {/* Tool + elapsed is the only status TEXT left — idle/asleep are the dot's
                   job. It fades rather than toggling, so a tool boundary is not a flash. */}
-              <span className={`tool-word ${working && session.currentTool ? "on" : ""}`}>
-                {working && session.currentTool ? session.currentTool : ""}
+              <span className="tool-word-slot">
+                <AnimatePresence initial={false}>
+                  {working && session.currentTool && (
+                    <m.span className="tool-word on" key={session.currentTool} variants={textSwap} initial="initial" animate="animate" exit="exit">{session.currentTool}</m.span>
+                  )}
+                </AnimatePresence>
               </span>
               {/* Connection trouble is the only thing that earns an icon, and it sits to
                   the LEFT of the state slot. */}
-              {offline && (
-                <svg className="disconnect-mark" viewBox="0 0 18 18" aria-hidden="true">
-                  <path d="M10.5 1.5 4 10h4l-.5 6.5L14 8h-4l.5-6.5ZM2 2l14 14"
-                        fill="none" stroke="currentColor" strokeWidth="1.4"
-                        strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              )}
+              <AnimatePresence initial={false}>
+                {offline && (
+                  <m.svg className="disconnect-mark" key="offline" viewBox="0 0 18 18" aria-hidden="true" variants={iconSwap} initial="initial" animate="animate" exit="exit">
+                    <path d="M10.5 1.5 4 10h4l-.5 6.5L14 8h-4l.5-6.5ZM2 2l14 14"
+                          fill="none" stroke="currentColor" strokeWidth="1.4"
+                          strokeLinecap="round" strokeLinejoin="round" />
+                  </m.svg>
+                )}
+              </AnimatePresence>
               {/* ONE state slot, last in the row: orb = working, pulsing orange = needs
                   input, otherwise a dot in the shared colour vocabulary. */}
               <span className="roster-orb-slot" aria-hidden="true">
-                {session.ask
-                  ? <span className="status-dot ask" />
-                  : working
-                    ? <Orb seedKey={session.name} size={20} tone={orbTone(session.currentTool)} />
-                    : <span className={`status-dot ${session.status}`} />}
+                <AnimatePresence initial={false}>
+                  <m.span className="roster-state" key={session.ask ? "ask" : working ? `working-${session.currentTool ?? ""}` : session.status} variants={iconSwap} initial="initial" animate="animate" exit="exit">
+                    {session.ask
+                      ? <span className="status-dot ask" />
+                      : working
+                        ? <Orb seedKey={session.name} size={20} tone={orbTone(session.currentTool)} />
+                        : <span className={`status-dot ${session.status}`} />}
+                  </m.span>
+                </AnimatePresence>
               </span>
             </button>
           </li>

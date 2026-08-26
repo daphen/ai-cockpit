@@ -1006,7 +1006,30 @@ Item {
   // Where the ORCHESTRATOR ROLE lives right now: "lovable" = this laptop, "work" = the
   // dev VM. The armed one wins (handover pins the goal on exactly one side); otherwise
   // the live one. Empty when neither is up, which the toggle renders as unknown.
+  // Which host holds the orchestrator role. RECORDED by cockpit-handover, never guessed:
+  // deriving it from "whoever has a goal armed" moved the role on its own the moment a
+  // goal cleared, so the rail showed the local session as orchestrator with the VM's
+  // workers under it (David, 2026-08-26). The role now changes only when he toggles.
+  property string recordedOrchScope: ""
+  FileView {
+    path: Quickshell.env("HOME") + "/.local/state/cockpit/orchestrator-holder"
+    watchChanges: true
+    onFileChanged: reload()
+    onLoaded: {
+      var v = String(text() || "").trim()
+      rail.recordedOrchScope = (v === "lovable" || v === "work") ? v : ""
+    }
+  }
   readonly property string orchScope: {
+    // Honour the record whenever that side actually has an orchestrator session.
+    if (recordedOrchScope.length) {
+      for (var j = 0; j < liveSessions.length; j++) {
+        var r = liveSessions[j]
+        if (String(r.profile || "").indexOf("orchestrator") >= 0
+            && String(r.scope || "") === recordedOrchScope) return recordedOrchScope
+      }
+    }
+    // No record yet (first run): fall back to inference so the rail still resolves.
     var armed = "", live = ""
     for (var i = 0; i < liveSessions.length; i++) {
       var x = liveSessions[i]
@@ -2027,13 +2050,20 @@ Item {
     anchors.bottomMargin: 0
     spacing: 0
 
-    // Files view — full changed-files list for the selected session.
-    ListView {
-      id: changesView
+    Crossfade {
       Layout.fillWidth: true
+      Layout.fillHeight: true
       Layout.leftMargin: 20; Layout.rightMargin: 20
-      Layout.fillHeight: rail.view === "files"
-      visible: rail.view === "files"
+      showSecond: rail.view === "chat"
+      enterDuration: 400
+      exitDuration: 350
+      shift: 8
+
+    // Files view — full changed-files list for the selected session.
+    first: ListView {
+      id: changesView
+      anchors.fill: parent
+      enabled: rail.view === "files"
       clip: true
       activeFocusOnTab: false
       model: rail.changesList
@@ -2066,12 +2096,10 @@ Item {
     }
 
     // Chat view — the activity feed.
-    ListView {
+    second: ListView {
       id: feedView
-      Layout.fillWidth: true
-      Layout.leftMargin: 20; Layout.rightMargin: 20
-      Layout.fillHeight: rail.view === "chat"
-      visible: rail.view === "chat"
+      anchors.fill: parent
+      enabled: rail.view === "chat"
       clip: true
       spacing: 18
       model: feedModel
@@ -2142,8 +2170,18 @@ Item {
         // Streaming content arrived as a hard pop; fade each row in on its own (see the
         // note above on why this is not a ListView `add` transition).
         opacity: 0
-        Component.onCompleted: { opacity = 1; rail.probeCardCreates++ }
-        Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
+        property real introBlur: 0.125
+        property real introY: 4
+        transform: Translate { y: turnDel.introY }
+        layer.enabled: turnIntro.running
+        layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: turnDel.introBlur }
+        Component.onCompleted: { turnIntro.start(); rail.probeCardCreates++ }
+        ParallelAnimation {
+          id: turnIntro
+          NumberAnimation { target: turnDel; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.InOutQuad }
+          NumberAnimation { target: turnDel; property: "introY"; from: 4; to: 0; duration: 150; easing.type: Easing.OutCubic }
+          NumberAnimation { target: turnDel; property: "introBlur"; from: 0.125; to: 0; duration: 150; easing.type: Easing.InOutQuad }
+        }
         property int rowIndex: index
         readonly property real cardHeight: card.height   // for the feedGeom probe
         // Capture the row's turn once: nested Repeaters shadow `model` with their
@@ -2268,11 +2306,22 @@ Item {
             Repeater {
               model: turnDel.isUser ? [] : rail.turnThinks(turnDel.turn.items)
               Loader {
+                id: thoughtLoader
                 width: cardCol.width
                 sourceComponent: thinkRow
                 opacity: 0
-                Component.onCompleted: opacity = 1
-                Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
+                property real introBlur: 0.125
+                property real introY: 4
+                transform: Translate { y: thoughtLoader.introY }
+                layer.enabled: thoughtIntro.running
+                layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: thoughtLoader.introBlur }
+                Component.onCompleted: thoughtIntro.start()
+                ParallelAnimation {
+                  id: thoughtIntro
+                  NumberAnimation { target: thoughtLoader; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.InOutQuad }
+                  NumberAnimation { target: thoughtLoader; property: "introY"; from: 4; to: 0; duration: 150; easing.type: Easing.OutCubic }
+                  NumberAnimation { target: thoughtLoader; property: "introBlur"; from: 0.125; to: 0; duration: 150; easing.type: Easing.InOutQuad }
+                }
                 property var entry: modelData
                 property string gkey: "think-" + turnDel.rowIndex + "-" + index
                 property bool expanded: rail.expandedGroups[gkey] === true
@@ -2331,6 +2380,7 @@ Item {
           }
         }
       }
+    }
     }
 
   }
@@ -2545,23 +2595,29 @@ Item {
                      : glanceDots.width + (rail.featuredStreaming ? 24 : 12)) + 20
               Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
               Item {
-                // The 20px state column: same geometry as the rows' state slot.
+                // One mounted slot crossfades working↔idle without restarting the orb on roster toggles.
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                 width: 20; height: 20
-                ThinkingOrb {
+                Crossfade {
                   anchors.centerIn: parent
                   width: 44; height: 44
-                  visible: rail.featuredStreaming
-                  running: rail.featuredStreaming
-                  nodes: 16
-                  glow: rail.actionGlow(rail.selectedRaw)
-                  seedKey: rail.selectedRaw
-                }
-                Rectangle {
-                  anchors.centerIn: parent
-                  visible: !rail.featuredStreaming
-                  width: 7; height: 7; radius: 3.5
-                  color: rail.dotColor(rail.selectedStatus)
+                  showSecond: !rail.featuredStreaming
+                  enterDuration: 250
+                  exitDuration: 250
+                  shift: 0
+                  inactiveScale: 0.25
+                  first: ThinkingOrb {
+                    anchors.fill: parent
+                    running: rail.featuredStreaming
+                    nodes: 16
+                    glow: rail.actionGlow(rail.selectedRaw)
+                    seedKey: rail.selectedRaw
+                  }
+                  second: Rectangle {
+                    anchors.centerIn: parent
+                    width: 7; height: 7; radius: 3.5
+                    color: rail.dotColor(rail.selectedStatus)
+                  }
                 }
               }
               Row {
@@ -2625,7 +2681,14 @@ Item {
           id: rosterInner
           opacity: rail.rosterExpanded ? 1 : 0
           visible: opacity > 0.01
-          Behavior on opacity { NumberAnimation { duration: 220 } }
+          property real motionBlur: rail.rosterExpanded ? 0 : 0.125
+          property real motionY: rail.rosterExpanded ? 0 : -4
+          transform: Translate { y: rosterInner.motionY }
+          layer.enabled: rosterFade.running || rosterBlur.running || rosterShift.running
+          layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: rosterInner.motionBlur }
+          Behavior on opacity { NumberAnimation { id: rosterFade; duration: Motion.slow; easing.type: Easing.InOutQuad } }
+          Behavior on motionBlur { NumberAnimation { id: rosterBlur; duration: Motion.slow; easing.type: Easing.InOutQuad } }
+          Behavior on motionY { NumberAnimation { id: rosterShift; duration: Motion.slow; easing.type: Easing.OutCubic } }
           anchors { left: parent.left; right: parent.right; top: glanceCol.bottom; topMargin: 4 }
           spacing: 3
           Repeater {

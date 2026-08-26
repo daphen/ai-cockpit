@@ -44,65 +44,23 @@ Rectangle {
     property bool _front: true
     onValueChanged: {
       var inc = _front ? tb : ta
-      var out = _front ? ta : tb
+      inc.text = value
       _front = !_front
-      // Each Text is the target of BOTH its in- and its out-animation, so two chin
-      // updates inside one animation window left aIn and aOut fighting over the same
-      // opacity — both Texts stuck part-visible, which is the mashed-together label
-      // David hit (2026-08-25). Stop the conflicting pair first, and reset the
-      // incoming item's transform so an interrupted out-animation can't leak into it.
-      inAnimFor(out).stop()
-      outAnimFor(inc).stop()
-      inc.anchors.verticalCenterOffset = 0
-      inc.scale = 1
-      if (value.length) {
-        inc.text = value
-        inAnimFor(inc).restart()
-      } else {
-        inc.text = ""
-        inc.opacity = 0
+    }
+    Crossfade {
+      anchors.fill: parent
+      showSecond: !sw._front
+      inactiveScale: sw.pop ? 1.25 : 1
+      first: Text {
+        id: ta
+        color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
+        anchors.verticalCenter: parent.verticalCenter
       }
-      outAnimFor(out).restart()
-    }
-    function inAnimFor(t)  { return t === ta ? aIn  : bIn }
-    function outAnimFor(t) { return t === ta ? aOut : bOut }
-    Text {
-      id: ta
-      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
-      anchors.verticalCenter: parent.verticalCenter
-      opacity: 0
-      transformOrigin: Item.Center
-    }
-    Text {
-      id: tb
-      color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
-      anchors.verticalCenter: parent.verticalCenter
-      opacity: 0
-      transformOrigin: Item.Center
-    }
-    ParallelAnimation {
-      id: aIn
-      NumberAnimation { target: ta; property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
-      NumberAnimation { target: ta; property: "anchors.verticalCenterOffset"; from: 7; to: 0; duration: 180; easing.type: Easing.OutCubic }
-      NumberAnimation { target: ta; property: "scale"; from: sw.pop ? 1.25 : 1; to: 1; duration: 220; easing.type: Easing.OutBack }
-    }
-    ParallelAnimation {
-      id: aOut
-      onStopped: { ta.opacity = 0; ta.text = "" }
-      NumberAnimation { target: ta; property: "opacity"; to: 0; duration: 140; easing.type: Easing.InCubic }
-      NumberAnimation { target: ta; property: "anchors.verticalCenterOffset"; to: -7; duration: 140; easing.type: Easing.InCubic }
-    }
-    ParallelAnimation {
-      id: bIn
-      NumberAnimation { target: tb; property: "opacity"; from: 0; to: 1; duration: 180; easing.type: Easing.OutCubic }
-      NumberAnimation { target: tb; property: "anchors.verticalCenterOffset"; from: 7; to: 0; duration: 180; easing.type: Easing.OutCubic }
-      NumberAnimation { target: tb; property: "scale"; from: sw.pop ? 1.25 : 1; to: 1; duration: 220; easing.type: Easing.OutBack }
-    }
-    ParallelAnimation {
-      id: bOut
-      onStopped: { tb.opacity = 0; tb.text = "" }
-      NumberAnimation { target: tb; property: "opacity"; to: 0; duration: 140; easing.type: Easing.InCubic }
-      NumberAnimation { target: tb; property: "anchors.verticalCenterOffset"; to: -7; duration: 140; easing.type: Easing.InCubic }
+      second: Text {
+        id: tb
+        color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
+        anchors.verticalCenter: parent.verticalCenter
+      }
     }
   }
 

@@ -3,6 +3,7 @@ import * as m from "motion/react-m"
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import type { Session } from "./agentd"
 import { Orb, orbTone } from "./Orb"
+import { fadeSwap, iconSwap, panelSwap } from "./motion"
 
 interface Props {
   sessionName: string
@@ -193,10 +194,10 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
               <m.div
                 className="inline-roster-panel"
                 key={rosterKey}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.28, ease: [0.42, 0, 0.58, 1] }}
+                variants={iconSwap}
+                initial="initial"
+                animate="animate"
+                exit="exit"
               >
                 {roster}
               </m.div>
@@ -205,16 +206,20 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
         </div>
         </m.div>
       </m.div>
-      {!!queue.length && (
-        <ol className="queued-messages" aria-label="Queued messages">
-          {queue.map((message, index) => (
-            <li key={`${message}-${index}`}>
-              <span>{message}</span>
-              <button type="button" onPointerDown={event => event.preventDefault()} onClick={() => onSteerQueued(index)}>steer now</button>
-            </li>
-          ))}
-        </ol>
-      )}
+      <AnimatePresence initial={false}>
+        {!!queue.length && (
+          <m.ol className="queued-messages" aria-label="Queued messages" variants={panelSwap} initial="initial" animate="animate" exit="exit">
+            <AnimatePresence initial={false}>
+              {queue.map((message, index) => (
+                <m.li key={`${message}-${index}`} variants={iconSwap} initial="initial" animate="animate" exit="exit">
+                  <span>{message}</span>
+                  <button type="button" onPointerDown={event => event.preventDefault()} onClick={() => onSteerQueued(index)}>steer now</button>
+                </m.li>
+              ))}
+            </AnimatePresence>
+          </m.ol>
+        )}
+      </AnimatePresence>
       <div className="composer-pill">
         <span className="prompt-glyph">›</span>
         <textarea
@@ -241,13 +246,10 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
                 type="button"
                 className="orb-interrupt"
                 aria-label="Interrupt active turn"
-                initial={{ opacity: 0, transform: "scale(0.5)" }}
-                animate={{ opacity: 1, transform: "scale(1)" }}
-                exit={{ opacity: 0, transform: "scale(0.5)" }}
-                transition={{
-                  opacity: { duration: 0.22, ease: [0.215, 0.61, 0.355, 1] },
-                  transform: { duration: 0.26, ease: [0.175, 0.885, 0.32, 1.275] },
-                }}
+                variants={iconSwap}
+                initial="initial"
+                animate="animate"
+                exit="exit"
                 onPointerDown={event => event.preventDefault()}
                 onClick={() => setConfirmInterrupt(true)}
               >
@@ -257,19 +259,21 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
           </AnimatePresence>
         </span>
       </div>
-      {confirmInterrupt && (
-        <div className="interrupt-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="interrupt-title" onPointerDown={event => { if (event.target === event.currentTarget) closeInterrupt(false) }}>
-          <section className="interrupt-dialog">
-            <span>ACTIVE TURN</span>
-            <h2 id="interrupt-title">Interrupt {sessionName}?</h2>
-            <p>The agent will stop its current work immediately.</p>
-            <div>
-              <button type="button" onPointerDown={event => event.preventDefault()} onClick={() => closeInterrupt(false)}>keep working</button>
-              <button type="button" className="confirm-interrupt" onPointerDown={event => event.preventDefault()} onClick={() => closeInterrupt(true)}>interrupt</button>
-            </div>
-          </section>
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {confirmInterrupt && (
+          <m.div className="interrupt-backdrop" role="alertdialog" aria-modal="true" aria-labelledby="interrupt-title" variants={fadeSwap} initial="initial" animate="animate" exit="exit" onPointerDown={event => { if (event.target === event.currentTarget) closeInterrupt(false) }}>
+            <m.section className="interrupt-dialog" variants={iconSwap} initial="initial" animate="animate" exit="exit">
+              <span>ACTIVE TURN</span>
+              <h2 id="interrupt-title">Interrupt {sessionName}?</h2>
+              <p>The agent will stop its current work immediately.</p>
+              <div>
+                <button type="button" onPointerDown={event => event.preventDefault()} onClick={() => closeInterrupt(false)}>keep working</button>
+                <button type="button" className="confirm-interrupt" onPointerDown={event => event.preventDefault()} onClick={() => closeInterrupt(true)}>interrupt</button>
+              </div>
+            </m.section>
+          </m.div>
+        )}
+      </AnimatePresence>
     </form>
   )
 }
