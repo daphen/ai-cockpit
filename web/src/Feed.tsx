@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useLayoutEffect, useRef } from "react"
 import { AnimatePresence } from "motion/react"
 import * as m from "motion/react-m"
 import type { Activity, FeedItem } from "./agentd"
@@ -8,13 +8,34 @@ import { iconSwap, textSwap } from "./motion"
 
 export function Feed({ items }: { items?: FeedItem[] }) {
   const feed = useRef<HTMLDivElement>(null)
-  const end = useRef<HTMLDivElement>(null)
   const following = useRef(true)
   const loaded = items !== undefined
   const rows = items ?? []
-  useEffect(() => {
-    if (following.current) end.current?.scrollIntoView({ block: "end" })
+  const scrollToEnd = () => {
+    const node = feed.current
+    if (node) node.scrollTop = node.scrollHeight
+  }
+  useLayoutEffect(() => {
+    if (following.current) scrollToEnd()
   }, [items])
+  useEffect(() => {
+    const messageSent = () => {
+      following.current = true
+      requestAnimationFrame(scrollToEnd)
+    }
+    const viewportChanged = (event: Event) => {
+      const keyboardOpen = Boolean((event as CustomEvent<{ keyboardOpen?: boolean }>).detail?.keyboardOpen)
+      if (!following.current && !keyboardOpen) return
+      following.current = true
+      requestAnimationFrame(scrollToEnd)
+    }
+    window.addEventListener("cockpit:message-sent", messageSent)
+    window.addEventListener("cockpit:viewport-change", viewportChanged)
+    return () => {
+      window.removeEventListener("cockpit:message-sent", messageSent)
+      window.removeEventListener("cockpit:viewport-change", viewportChanged)
+    }
+  }, [])
 
   return (
     <div className={`feed-stage t-skel ${loaded ? "is-revealed" : ""}`} aria-busy={!loaded}>
@@ -71,7 +92,7 @@ export function Feed({ items }: { items?: FeedItem[] }) {
           </m.article>
         )
       })}
-        <div className="feed-end-spacer" ref={end} aria-hidden="true" />
+        <div className="feed-end-spacer" aria-hidden="true" />
       </div>
     </div>
   )

@@ -98,6 +98,7 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
     if (!message || disabled || dispatching.current) return
     dispatching.current = true
     onSubmit(message)
+    window.dispatchEvent(new Event("cockpit:message-sent"))
     setText("")
     queueMicrotask(() => { dispatching.current = false })
     requestAnimationFrame(() => textarea.current?.focus({ preventScroll: true }))

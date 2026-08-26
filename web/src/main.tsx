@@ -5,14 +5,33 @@ import swUrl from "./sw.ts?worker&url"
 import "./theme.css"
 
 const viewport = window.visualViewport
-const syncViewport = () => {
-  document.documentElement.style.setProperty("--app-height", `${viewport?.height ?? window.innerHeight}px`)
-  document.documentElement.style.setProperty("--app-top", `${viewport?.offsetTop ?? 0}px`)
+let viewportFrame = 0
+let fullViewportHeight = viewport?.height ?? window.innerHeight
+const applyViewport = () => {
+  viewportFrame = 0
+  const height = viewport?.height ?? window.innerHeight
+  const top = viewport?.offsetTop ?? 0
+  if (!(document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement)) {
+    fullViewportHeight = Math.max(fullViewportHeight, height)
+  }
+  const keyboardOpen = fullViewportHeight - height > 80
+  document.documentElement.style.setProperty("--app-height", `${height}px`)
+  document.documentElement.style.setProperty("--app-top", `${top}px`)
+  document.documentElement.style.setProperty("--app-safe-bottom", keyboardOpen ? "0px" : "env(safe-area-inset-bottom)")
+  window.dispatchEvent(new CustomEvent("cockpit:viewport-change", { detail: { keyboardOpen } }))
 }
-syncViewport()
+const syncViewport = () => {
+  cancelAnimationFrame(viewportFrame)
+  viewportFrame = requestAnimationFrame(applyViewport)
+}
+applyViewport()
 viewport?.addEventListener("resize", syncViewport)
 viewport?.addEventListener("scroll", syncViewport)
 window.addEventListener("resize", syncViewport)
+window.addEventListener("orientationchange", () => {
+  fullViewportHeight = viewport?.height ?? window.innerHeight
+  syncViewport()
+})
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode><App /></StrictMode>,
