@@ -32,6 +32,11 @@
   --sky: #7dd3fc;
   --electric: #5566ff;
   --cursor: #ff570d;
+  --motion-text: 150ms;
+  --motion-icon: 250ms;
+  --motion-panel-open: 400ms;
+  --motion-panel-close: 350ms;
+  --motion-smooth: cubic-bezier(0.22, 1, 0.36, 1);
   --badge-slide-dur: 260ms;
   --badge-pop-dur: 500ms;
   --badge-pop-close-dur: 180ms;
@@ -94,7 +99,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .group-tabs button.active { background: var(--ink); color: var(--bg); }
 .scope-tabs { display: flex; gap: 5px; overflow-x: auto; padding: 6px 12px 10px; border-bottom: 1px solid var(--hairline); scrollbar-width: none; }
 .scope-tabs button, .scope-badge, .plan-chip { border: 1px solid var(--hairline); border-radius: 999px; background: transparent; color: var(--muted); font-size: 10px; padding: 4px 8px; }
-.group-tabs button, .scope-tabs button { transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out; }
+.group-tabs button, .scope-tabs button { transition: background-color var(--motion-text) var(--motion-smooth), border-color var(--motion-text) var(--motion-smooth), color var(--motion-text) var(--motion-smooth); }
 .scope-tabs button.active { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 .roster { margin: 0; padding: 8px; list-style: none; }
 .roster li { margin-bottom: 2px; }
@@ -106,8 +111,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .row-spacer { flex: 1; }
 /* Status WORDS are gone — the dot carries idle/asleep, matching the desktop rail. What
    remains is the running tool, and it fades instead of blinking at every tool boundary. */
-.tool-word { flex: none; color: var(--muted); font-size: 11px; opacity: 0; transition: opacity 180ms ease-out; }
-.tool-word.on { opacity: 1; }
+.tool-word-slot { position: relative; display: grid; flex: none; min-width: 0; }
+.tool-word { grid-area: 1 / 1; color: var(--muted); font-size: 11px; white-space: nowrap; }
 /* The marker leads the row: cloud = the session runs on the dev VM, ▭ = this machine. */
 .host-mark { flex: none; width: 14px; height: 14px; color: var(--muted); }
 /* A worker whose daemon went away — the only icon in the row, red, left of the state. */
@@ -122,6 +127,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .status-dot.ask { background: var(--orange); width: 9px; height: 9px; animation: ask-pulse 1200ms ease-in-out infinite; }
 @keyframes ask-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
 .roster-orb-slot { display: grid; flex: none; place-items: center; width: 20px; height: 20px; margin-left: 8px; }
+.roster-state { display: grid; grid-area: 1 / 1; place-items: center; }
 @keyframes needs-input-in { from { transform: translate(-8px, 12px) scale(0); opacity: 0; filter: blur(2px); } }
 .needs-input-pill { flex: none; border-radius: 999px; padding: 3px 8px; background: var(--orange); color: var(--bg); font-size: 10px; font-weight: 700; animation: needs-input-in 500ms var(--badge-pop-ease); }
 
@@ -132,8 +138,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .back { display: none; width: 38px; height: 38px; border: 0; background: transparent; font-size: 22px; }
 .feed-stage { position: relative; min-height: 0; overflow: hidden; }
 .t-skel-skeleton, .t-skel-content { position: absolute; inset: 0; }
-.t-skel-skeleton { z-index: 1; opacity: 1; filter: blur(0); transition: opacity 400ms ease-in-out, filter 400ms ease-in-out; }
-.t-skel-content { z-index: 2; opacity: 0; filter: blur(2px); transition: opacity 400ms ease-in-out, filter 400ms ease-in-out; }
+.t-skel-skeleton { z-index: 1; opacity: 1; filter: blur(0); transition: opacity var(--motion-panel-open) var(--motion-smooth), filter var(--motion-panel-open) var(--motion-smooth); }
+.t-skel-content { z-index: 2; opacity: 0; filter: blur(2px); transition: opacity var(--motion-panel-open) var(--motion-smooth), filter var(--motion-panel-open) var(--motion-smooth); }
 .t-skel.is-revealed .t-skel-skeleton { opacity: 0; filter: blur(2px); pointer-events: none; }
 .t-skel.is-revealed .t-skel-content { opacity: 1; filter: blur(0); }
 .feed-loader { display: grid; place-items: center; }
@@ -162,7 +168,7 @@ details summary::-webkit-details-marker { display: none; }
 .thinking-row pre, .activity-row pre { margin: 8px 0 0; padding: 10px; overflow-x: auto; border-radius: 10px; background: var(--bg-dim); color: var(--ink-2); font: inherit; white-space: pre-wrap; }
 .activity-row { margin-top: 13px; border-top: 1px solid var(--hairline-soft); padding-top: 10px; color: var(--muted); font-size: 12px; }
 .activity-row summary { display: flex; gap: 8px; }
-.disclosure-glyph { color: var(--ink-2); }
+.disclosure-glyph { color: var(--ink-2); transition: transform var(--motion-text) var(--motion-smooth); }
 .activity-row[open] .disclosure-glyph { transform: rotate(90deg); }
 .activity-row ol { margin: 9px 0 0; padding: 0; list-style: none; }
 .activity-row li { display: grid; grid-template-columns: 18px minmax(0, 1fr); padding: 5px 0; }
@@ -175,13 +181,15 @@ details summary::-webkit-details-marker { display: none; }
 .error-banner { padding: 8px 16px; border-bottom: 1px solid color-mix(in srgb, var(--red) 35%, transparent); background: color-mix(in srgb, var(--red) 10%, var(--bg)); font-size: 11px; }
 .error-banner.global { position: fixed; right: 12px; bottom: 12px; border: 1px solid var(--red); border-radius: 12px; }
 
-.ask-card { margin: 0 clamp(12px, 4vw, 42px) 10px; padding: 16px; border: 1px solid var(--orange); border-radius: 18px; background: color-mix(in srgb, var(--orange) 8%, var(--surface)); }
+.ask-card { min-width: 0; max-width: 100%; margin: 0 clamp(12px, 4vw, 42px) 10px; padding: 16px; overflow-x: hidden; border: 1px solid var(--orange); border-radius: 18px; background: color-mix(in srgb, var(--orange) 8%, var(--surface)); }
 .ask-kicker { color: var(--orange); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-.ask-card h2 { margin: 5px 0 8px; font-size: 15px; }
-.ask-card p { margin: 6px 0 12px; color: var(--ink-2); white-space: pre-wrap; }
-.ask-actions, .ask-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.ask-card h2 { min-width: 0; max-width: 100%; margin: 5px 0 8px; overflow-wrap: anywhere; font-size: 15px; }
+.ask-card p { min-width: 0; max-width: 100%; margin: 6px 0 12px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ask-card .command { max-width: 100%; margin: 8px 0 12px; overflow-wrap: anywhere; white-space: pre-wrap; word-break: break-word; }
+.ask-actions, .ask-options { display: flex; min-width: 0; flex-wrap: wrap; gap: 8px; }
+.ask-options button { max-width: 100%; overflow-wrap: anywhere; white-space: normal; text-align: left; }
 .ask-card button, .ask-card input, .ask-card textarea { min-height: 42px; border: 1px solid var(--hairline); border-radius: 11px; background: var(--bg); padding: 9px 12px; }
-.ask-card form { display: grid; gap: 8px; }
+.ask-card form { display: grid; min-width: 0; gap: 8px; }
 .ask-card textarea { min-height: 100px; resize: vertical; }
 button.primary { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 
@@ -248,8 +256,8 @@ button.primary { border-color: var(--ink); background: var(--ink); color: var(--
 .update-toast { position: fixed; z-index: 20; right: 14px; bottom: max(14px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 14px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--surface-3); box-shadow: 0 12px 32px color-mix(in srgb, var(--bg-dim) 65%, transparent); color: var(--ink-2); font-size: 11px; }
 .update-toast button { min-height: 34px; border: 0; border-radius: 999px; padding: 6px 12px; background: var(--orange); color: var(--bg); font-weight: 700; }
 @media (prefers-reduced-motion: reduce) {
-  .needs-input-pill, .splash-progress i { animation: none !important; }
-  .group-tabs button, .scope-tabs button, .t-skel-skeleton, .t-skel-content { transition: none !important; }
+  .needs-input-pill, .status-dot.ask, .splash-progress i { animation: none !important; }
+  .disclosure-glyph, .group-tabs button, .scope-tabs button, .t-skel-skeleton, .t-skel-content { transition: none !important; }
 }
 
 @media (max-width: 720px) {
@@ -263,7 +271,7 @@ button.primary { border-color: var(--ink); background: var(--ink); color: var(--
   .session-pane > .error-banner { grid-row: 1; }
   .feed-stage { grid-row: 2; }
   .feed { padding: 14px 12px 8px; }
-  .ask-card { grid-row: 3; }
+  .ask-card { grid-row: 3; max-height: min(52dvh, 460px); overflow-y: auto; overscroll-behavior: contain; }
   .turn-card { border-radius: 14px; padding: 16px; }
   .composer-sheet { position: absolute; z-index: 10; right: 0; bottom: 0; left: 0; margin-inline: 0; pointer-events: none; contain: layout paint; }
   .composer-drag-handle, .queued-messages, .composer-pill { pointer-events: auto; }
