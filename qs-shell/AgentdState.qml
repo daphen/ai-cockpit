@@ -154,17 +154,20 @@ Item {
   property var _compacting: ({})
   function compactingSince(sid) { return _compacting[sid] || 0 }
   // sid -> Date.now() of the last session-tagged event (roster recency sort).
-  property var _lastAct: ({})
-  function lastActFor(sid) { return _lastAct[sid] || 0 }
-  property var _curTool: ({})
-  property var _curToolAt: ({})     // sid -> Date.now() of the RUNNING tool call
-  property var _curToolLive: ({})   // sid -> true while a tool call is executing
-  property var _curToolId: ({})     // sid -> toolCallId of the RUNNING call (feed row highlight)
+  // Map, not a plain object: these are written on EVERY daemon event, and inserting a
+  // new key into a long-lived `property var` object is the exact path all four
+  // quickshell segfaults died in (Object::insertMember, via the socket read handler).
+  property var _lastAct: new Map()
+  function lastActFor(sid) { return _lastAct.get(sid) || 0 }
+  property var _curTool: new Map()
+  property var _curToolAt: new Map()     // sid -> Date.now() of the RUNNING tool call
+  property var _curToolLive: new Map()   // sid -> true while a tool call is executing
+  property var _curToolId: new Map()     // sid -> toolCallId of the RUNNING call (feed row highlight)
   property int curToolGen: 0
-  function curToolFor(sid) { return _curTool[sid] || "" }
-  function curToolAtFor(sid) { return _curToolAt[sid] || 0 }
-  function curToolLiveFor(sid) { return _curToolLive[sid] === true }
-  function curToolIdFor(sid) { return _curToolId[sid] || "" }
+  function curToolFor(sid) { return _curTool.get(sid) || "" }
+  function curToolAtFor(sid) { return _curToolAt.get(sid) || 0 }
+  function curToolLiveFor(sid) { return _curToolLive.get(sid) === true }
+  function curToolIdFor(sid) { return _curToolId.get(sid) || "" }
   // Kill just the running tool call's subprocesses; the turn survives.
   function abortTool(sid) { send({ type: "abort_tool", session: sid }) }
   // Last file each session touched — so switching TO a mid-turn session can land
@@ -762,10 +765,10 @@ Item {
     // Recency: any session-tagged event is activity. Silent (no gen bump) — the
     // roster re-sorts on the daemon's own roster pushes, which land at exactly
     // the status boundaries where order should change.
-    _lastAct[sid] = Date.now()
+    _lastAct.set(sid, Date.now())
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
-    if (t === "agent_end") { var ct0 = _curTool; delete ct0[sid]; _curTool = ct0; curToolGen++ }
+    if (t === "agent_end") { _curTool.delete(sid); curToolGen++ }
     // The whole turn is over (completed or aborted) → the next queued message goes out.
     if (t === "agent_end") root._flushQueue(sid)
     // A daemon bounce (undeliverable prompt, lineage refusal) was invisible — the send
@@ -842,10 +845,10 @@ Item {
         const cmd = String(args.command || args.cmd || "")
         if (/(<<-?\s*'?[A-Z]{2,})|(\bsed\s+-i)|(\btee\s)|(>>?\s*['"]?[\w~.\/-]+\.[A-Za-z]{1,4})/.test(cmd)) act = "bash-write"
       }
-      var ct = _curTool; ct[sid] = act; _curTool = ct
-      var ca = _curToolAt; ca[sid] = Date.now(); _curToolAt = ca
-      var cl = _curToolLive; cl[sid] = true; _curToolLive = cl
-      var ci = _curToolId; ci[sid] = m.toolCallId || ""; _curToolId = ci
+      _curTool.set(sid, act)
+      _curToolAt.set(sid, Date.now())
+      _curToolLive.set(sid, true)
+      _curToolId.set(sid, m.toolCallId || "")
       curToolGen++
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
@@ -891,8 +894,8 @@ Item {
       _setTransient(sid, "toolkill", "error",
                     "⨯ killed the running tool call (" + (m.killed || 0) + " process" + ((m.killed || 0) === 1 ? "" : "es") + ") — the turn continues", 60000)
     } else if (t === "tool_execution_end") {
-      var cl2 = _curToolLive; delete cl2[sid]; _curToolLive = cl2
-      var ci2 = _curToolId; delete ci2[sid]; _curToolId = ci2
+      _curToolLive.delete(sid)
+      _curToolId.delete(sid)
       curToolGen++
       const det = m.result && m.result.details
       // A failed tool run turns its own row red in place (Claude Code grammar).
