@@ -81,18 +81,42 @@ export default function App() {
     }
   }, [checkingToken, needsToken])
   const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])
-  // Which scope currently holds the ORCHESTRATOR role: the armed one wins (handover pins
-  // the goal on exactly one side), else the live one.
+  // Which scope holds the ORCHESTRATOR role. STICKY: once resolved it stays put while
+  // that host still has an orchestrator. Deriving it from "whoever holds an armed goal"
+  // reassigned the role the moment a goal cleared — the desktop rail showed the local
+  // session conducting the VM's workers (2026-08-26). The role moves on handover only.
+  // (The desktop reads cockpit-handover's recorded holder file; the phone cannot, so it
+  // pins its own choice instead.)
+  const [pinnedOrchScope, setPinnedOrchScope] = useState(() => {
+    try {
+      return localStorage.getItem("cockpit.orchScope") ?? ""
+    } catch {
+      return ""
+    }
+  })
   const orchScope = useMemo(() => {
+    const orchestrators = state.sessions.filter(session =>
+      (session.profile ?? "").includes("orchestrator") &&
+      (session.scope === "lovable" || session.scope === "work"))
+    if (pinnedOrchScope && orchestrators.some(session => session.scope === pinnedOrchScope)) {
+      return pinnedOrchScope
+    }
     let armed = "", live = ""
-    for (const session of state.sessions) {
-      if (!(session.profile ?? "").includes("orchestrator")) continue
-      if (session.scope !== "lovable" && session.scope !== "work") continue
+    for (const session of orchestrators) {
       if (session.goal) armed = session.scope
       else if (!live) live = session.scope
     }
     return armed || live
-  }, [state.sessions])
+  }, [state.sessions, pinnedOrchScope])
+  useEffect(() => {
+    if (!orchScope || orchScope === pinnedOrchScope) return
+    setPinnedOrchScope(orchScope)
+    try {
+      localStorage.setItem("cockpit.orchScope", orchScope)
+    } catch {
+      /* private window / blocked storage: pinning is a convenience, not a requirement */
+    }
+  }, [orchScope, pinnedOrchScope])
 
   const visibleSessions = useMemo(() => {
     const inScope = scope === "all" ? groupSessions : groupSessions.filter(session => session.scope === scope)
