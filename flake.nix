@@ -97,10 +97,44 @@
             cv="COCKPIT_$v"; hv="HEIDR_$v"
             [ -n "''${!cv:-}" ] && export "$hv=''${!cv}"
           done
-          if [ -z "''${COCKPIT_FORCE_NEW:-}" ] && command -v niri >/dev/null 2>&1 \
-             && niri msg --json windows 2>/dev/null | ${pkgs.jq}/bin/jq -e --arg t "$COCKPIT_TITLE" '.[]|select(.title==$t)' >/dev/null 2>&1; then
-            niri msg action focus-window --id "$(niri msg --json windows | ${pkgs.jq}/bin/jq -r --arg t "$COCKPIT_TITLE" '.[]|select(.title==$t)|.id' | head -1)" 2>/dev/null || true
-            exit 0
+          # Liveness by ENVIRONMENT, matching the kill sweep's scope exactly.
+          #   - the window title is not proof of life: a segfault leaves the frame mapped
+          #     and its launcher parent alive, so a title match focused a corpse (2026-08-26);
+          #   - `qs list` is not proof either: cockpit-ipc reaps registry dirs on a 1s probe
+          #     TIMEOUT, so pressing Ctrl+l de-registers a perfectly live cockpit. Trusting
+          #     it while sweeping by title meant every launch killed the running cockpit and
+          #     spawned another — an endless cockpit loop (2026-08-27).
+          # The environ carries this mode's COCKPIT_TITLE only for our own launches, and the
+          # qs launcher rewrites its argv, so this is the one identity that holds.
+          live=0
+          for pid in $(${pkgs.procps}/bin/pgrep -x qs; ${pkgs.procps}/bin/pgrep -x quickshell; ${pkgs.procps}/bin/pgrep -x '\.quickshell-wra'); do
+            [ "$pid" = "$$" ] && continue
+            # 2>/dev/null on the redirect is not enough: an unreadable environ (another
+            # user's quickshell) makes the SHELL print "Permission denied" before the
+            # redirect applies, so the whole read is guarded instead.
+            if [ -r "/proc/$pid/environ" ] && ${pkgs.coreutils}/bin/tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+               | ${pkgs.gnugrep}/bin/grep -qxF "COCKPIT_TITLE=$COCKPIT_TITLE"; then
+              live=$((live + 1))
+            fi
+          done
+          if [ -z "''${COCKPIT_FORCE_NEW:-}" ] && [ "''${live:-0}" -gt 0 ] && command -v niri >/dev/null 2>&1; then
+            wid=$(niri msg --json windows 2>/dev/null | ${pkgs.jq}/bin/jq -r --arg t "$COCKPIT_TITLE" 'first(.[]|select(.title==$t)|.id) // empty')
+            if [ -n "''${wid:-}" ]; then
+              niri msg action focus-window --id "$wid" >/dev/null 2>&1 || true
+              exit 0
+            fi
+          fi
+          # No live instance: clear this mode's orphaned frame first, identified by
+          # environment because the qs launcher rewrites its own argv to a bare
+          # ".quickshell-wrapped" with no -p to match on.
+          if [ "''${live:-0}" -eq 0 ]; then
+            for pid in $(${pkgs.procps}/bin/pgrep -x qs; ${pkgs.procps}/bin/pgrep -x quickshell; ${pkgs.procps}/bin/pgrep -x '\.quickshell-wra'); do
+              [ "$pid" = "$$" ] && continue
+              if [ -r "/proc/$pid/environ" ] && ${pkgs.coreutils}/bin/tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
+                 | ${pkgs.gnugrep}/bin/grep -qxF "COCKPIT_TITLE=$COCKPIT_TITLE"; then
+                kill "$pid" 2>/dev/null || true
+              fi
+            done
           fi
           exec qs -p "$shell"
         '';
