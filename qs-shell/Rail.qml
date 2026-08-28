@@ -613,15 +613,11 @@ Item {
   // must be worktree-relative (the box path differs). A LOCAL pi reads any absolute
   // path — its pastes live in ~/.cache/heidr-pastes and never touch the project.
   readonly property bool pasteRemote: {
-    var cwd = ""
-    if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
+    var cwd = _sessionCwdOf(selectedRaw)
     return _isRemote(cwd)
   }
   property string pasteDirFor: {
-    var cwd = ""
-    if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
+    var cwd = _sessionCwdOf(selectedRaw)
     if (!_isRemote(cwd)) return Quickshell.env("HOME") + "/.cache/heidr-pastes"
     return rail._localPath(cwd) + "/.heidr-pastes"
   }
@@ -649,9 +645,7 @@ Item {
   // (~150ms; a cold dial still beats typing the message). mutagen syncing it again a
   // moment later is a harmless no-op — identical content resolves clean.
   function _pushPasteRemote(name) {
-    var cwd = ""
-    if (agentd) for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === selectedRaw) { cwd = agentd.sessions[i].cwd; break }
+    var cwd = _sessionCwdOf(selectedRaw)
     if (!_isRemote(cwd)) return
     var vmuser = cockpitEnv("VM_USER") || "david_karlsson_lovable_dev"
     // Only the dev VM speaks plain ssh/scp; a lovbox mirror keeps mutagen as its carrier.
@@ -728,12 +722,8 @@ Item {
   }
   function landNvim(sid) {
     if (!sid || !agentd) return
-    var cwd = "", plan = ""
-    for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === sid) {
-        cwd = agentd.sessions[i].cwd
-        plan = agentd.sessions[i].plan || ""; break
-      }
+    var ss = _sessionOf(sid)
+    var cwd = ss ? String(ss.cwd || "") : "", plan = ss ? String(ss.plan || "") : ""
     if (!cwd) return
     _landedFor = sid + "@" + cwd + "#" + plan
     var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
@@ -790,9 +780,7 @@ Item {
   // `vm-sync --align` moves HEAD + index only — no checkout, no clean, no file touched —
   // so it is safe to fire on every switch. It exits immediately when already aligned.
   function _alignMirror(sid) {
-    var cwd = ""
-    for (var i = 0; i < agentd.sessions.length; i++)
-      if (agentd.sessions[i].id === sid) { cwd = agentd.sessions[i].cwd; break }
+    var cwd = _sessionCwdOf(sid)
     if (!cwd || !rail._isRemote(cwd)) return
     var m = String(sid).match(/([a-z]+-\d+)/i)
     if (!m) return
@@ -1539,13 +1527,30 @@ Item {
   // Watching a session includes watching the workers it dispatched: follow
   // accepts edits from the selected session OR any session whose parent chain
   // reaches it (the parent-view was silently ignoring its child's edits).
+  // Sessions are addressed by NAME in some events and by ID in others; an id-only
+  // lookup silently resolved no cwd and the follow was dropped (a parent watching a
+  // child saw nothing). Match either.
+  function _sessionOf(sid) {
+    if (!agentd || !sid) return null
+    for (var i = 0; i < agentd.sessions.length; i++) {
+      var ss = agentd.sessions[i]
+      if (ss.id === sid || ss.name === sid) return ss
+    }
+    return null
+  }
+  function _sessionCwdOf(sid) {
+    var ss = _sessionOf(sid)
+    return ss ? String(ss.cwd || "") : ""
+  }
   function _followsSelected(sid) {
     if (sid === selectedRaw) return true
     var hops = 0, cur = sid
     while (cur && hops < 4) {
       var parent = ""
       for (var i = 0; i < agentd.sessions.length; i++)
-        if (agentd.sessions[i].name === cur) { parent = String(agentd.sessions[i].parent || ""); break }
+        if (agentd.sessions[i].name === cur || agentd.sessions[i].id === cur) {
+          parent = String(agentd.sessions[i].parent || ""); break
+        }
       if (!parent) return false
       if (parent === selectedRaw) return true
       cur = parent; hops++
@@ -1556,9 +1561,7 @@ Item {
     target: rail.agentd
     function onEditHunk(sid, path, line) {
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
-      var cwd = ""
-      for (var i = 0; i < rail.agentd.sessions.length; i++)
-        if (rail.agentd.sessions[i].id === sid) { cwd = rail.agentd.sessions[i].cwd; break }
+      var cwd = rail._sessionCwdOf(sid)
       if (!cwd) return
       var lcwd = rail._localPath(cwd)
       var p = rail._localPath(String(path))
@@ -1568,9 +1571,7 @@ Item {
     }
     function onEditSeen(sid, path, needleB64) {
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
-      var cwd = ""
-      for (var i = 0; i < rail.agentd.sessions.length; i++)
-        if (rail.agentd.sessions[i].id === sid) { cwd = rail.agentd.sessions[i].cwd; break }
+      var cwd = rail._sessionCwdOf(sid)
       if (!cwd) return
       var lcwd = rail._localPath(cwd)
       var p = rail._localPath(String(path))
