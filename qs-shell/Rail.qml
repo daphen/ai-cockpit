@@ -271,7 +271,16 @@ Item {
   onViewChanged: if (hinting) cancelHints("view")
 
   function _unitRe() {
-    return /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)/g
+    return /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```|`([^`\n]+)`|\[[^\]]*\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s<>")\]]+)|((?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?/g
+  }
+  // A repo path the agent named: at least one slash and an extension, so prose
+  // ("e.g", "2.21.0") and bare words never match.
+  function _fileRe() { return /((?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?/g }
+  function _statFor(path) {
+    var l = changesList || []
+    for (var i = 0; i < l.length; i++) if (l[i].path === path) return l[i]
+    if (!l.length) _ensureChanges()
+    return null
   }
   function _shellLanguage(lang) {
     return /^(bash|sh|zsh|shell|console)$/.test(String(lang || "").toLowerCase())
@@ -279,14 +288,21 @@ Item {
   function _scanUnits(text, entryIndex, mode, baseOffset) {
     var re = _unitRe(), m, units = [], source = String(text || ""), base = baseOffset || 0
     while ((m = re.exec(source)) !== null) {
-      var kind = m[2] !== undefined ? "fence" : m[3] !== undefined ? "inline" : "url"
+      var kind = m[2] !== undefined ? "fence" : m[3] !== undefined ? "inline"
+        : m[6] !== undefined ? "file" : "url"
+      // Agents habitually backtick paths; a code span holding nothing but a path is
+      // a file reference, not a snippet to yank.
+      if (kind === "inline" && /^(?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6}(?::\d+)?$/.test(String(m[3]).trim()))
+        kind = "file"
       var runnable = kind === "fence" && _shellLanguage(m[1])
-      if ((mode === "hint" && !(kind === "url" || runnable)) ||
-          (mode === "yank" && !(kind === "url" || kind === "inline" || kind === "fence"))) continue
+      if ((mode === "hint" && !(kind === "url" || kind === "file" || runnable)) ||
+          (mode === "yank" && !(kind === "url" || kind === "inline" || kind === "fence" || kind === "file"))) continue
       units.push({
         key: "e" + entryIndex + ":p" + (base + m.index),
         kind: runnable ? "shell" : kind,
-        value: kind === "fence" ? m[2] : kind === "inline" ? m[3] : (m[4] || m[5]),
+        value: kind === "fence" ? m[2]
+          : kind === "file" ? String(m[6] !== undefined ? (m[6] + (m[7] || "")) : m[3]).trim()
+          : kind === "inline" ? m[3] : (m[4] || m[5]),
         start: base + m.index,
         end: base + m.index + m[0].length
       })
@@ -301,7 +317,7 @@ Item {
       for (var i = 0; i < prose.length; i++) out = out.concat(_scanUnits(prose[i].text, i, mode, 0))
     } else {
       out = _scanUnits(item.text || "", 0, mode, 0)
-      if (mode === "hint") out = out.filter(x => x.kind === "url")
+      if (mode === "hint") out = out.filter(x => x.kind === "url" || x.kind === "file")
     }
     return out
   }
@@ -342,6 +358,7 @@ Item {
       if (t) copyText(t.value)
       else if (ch === "y") copyText(String(feedCopyTarget(groupedFeed[idx]) || ""))
     } else if (t && t.kind === "shell") requestSnippet(t.value)
+    else if (t && t.kind === "file") openFileRef(t.value)
     else if (t) Quickshell.execDetached(["xdg-open", t.value])
   }
   function hintForKey(key, rowIdx) {
@@ -369,17 +386,80 @@ Item {
       return pre + "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(url) + "</u></font>](" + url + ")"
     })
   }
+  // agentd emits a `changes` diff only at TURN END, so an idle session's rows would
+  // show no numbers. Ask for the on-demand local diff instead, mapping the session's
+  // cwd through the vm-sync mirror so it works for remote sessions too.
+  property var _changesAsked: ({})
+  function _ensureChanges() {
+    if (!agentd || !selectedRaw || _changesAsked[selectedRaw]) return
+    // selectedRaw is a session NAME (see defaultRaw), so match name as well as id —
+    // comparing against id alone never matched and the refresh was never asked for.
+    var cwd = ""
+    for (var i = 0; i < agentd.sessions.length; i++) {
+      var ss = agentd.sessions[i]
+      if (ss.id === selectedRaw || ss.name === selectedRaw) { cwd = ss.cwd; break }
+    }
+    if (!cwd) return
+    _changesAsked[selectedRaw] = true
+    var localCwd = _localPath(cwd)
+    agentd.refreshChanges(selectedRaw, localCwd)
+  }
+
+  // decorateMarkdown injects hint labels INTO the prose text; a path that became its
+  // own row is no longer in that text, so the row has to render its own label.
+  function fileHintFor(path, rowIdx) {
+    if (!hinting || hintIdx !== rowIdx) return ""
+    for (var i = 0; i < hintTargets.length; i++) {
+      var t = hintTargets[i]
+      if (t.kind !== "file") continue
+      if (String(t.value).replace(/:\d+$/, "") === path) return hintLabels[i] || ""
+    }
+    return ""
+  }
+  // Own-line file paths in a feed item, for Enter-to-open.
+  function fileRefLines(item) {
+    if (!item) return []
+    var texts = item.kind === "turn" ? turnProse(item.items).map(x => x.text) : [item.text || ""]
+    var out = []
+    for (var i = 0; i < texts.length; i++) {
+      var ls = String(texts[i] || "").split("\n")
+      for (var j = 0; j < ls.length; j++) {
+        var m = ls[j].trim().match(/^`?((?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?`?[.,;:]?$/)
+        if (m && out.indexOf(m[1]) < 0) out.push(m[1])
+      }
+    }
+    return out
+  }
+  function openFileRef(ref) {
+    var r = String(ref || "")
+    var line = r.match(/:(\d+)$/)
+    openInNvim(line ? r.substring(0, r.length - line[0].length) : r)
+  }
   function proseParts(text) {
     var source = String(text || ""), out = [], start = 0, pos = 0, summary = false, chunk = ""
     var lines = source.match(/[^\n]*(?:\n|$)/g) || []
+    function flush() {
+      var lead = chunk.match(/^\s*/)[0].length, trimmed = chunk.trim()
+      if (trimmed.length) out.push({ text: trimmed, offset: start + lead, summary: summary })
+      chunk = ""
+    }
     for (var i = 0; i < lines.length; i++) {
       if (!lines[i].length) continue
+      // A line that is nothing but a path becomes the file row IN PLACE, so the
+      // reference is written once instead of inline plus a row underneath.
+      var solo = lines[i].replace(/\n$/, "").trim()
+        .match(/^`?((?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?`?[.,;:]?$/)
+      if (solo) {
+        flush()
+        out.push({ fileRef: solo[1], shown: solo[1] + (solo[2] || ""), offset: pos })
+        pos += lines[i].length
+        start = pos
+        continue
+      }
       var isSummary = isSummaryLine(lines[i].replace(/\n$/, ""))
       if (chunk.length && isSummary !== summary) {
-        var lead = chunk.match(/^\s*/)[0].length, trimmed = chunk.trim()
-        if (trimmed.length) out.push({ text: trimmed, offset: start + lead, summary: summary })
+        flush()
         start = pos
-        chunk = ""
       }
       if (!chunk.length) { start = pos; summary = isSummary }
       chunk += lines[i]
@@ -733,6 +813,10 @@ Item {
   }
   // Prose blocks of an agent turn (the headline answer).
   function turnProse(items) { return (items || []).filter(x => x.kind === "text") }
+  // Housekeeping rows (compaction). These have no prose/activity delegate of their own,
+  // so a compaction card rendered EMPTY while the identical text appeared as a live
+  // transient at the tail — the marker looked misplaced and duplicated.
+  function turnSys(items) { return (items || []).filter(x => x.kind === "sys") }
   // The pi turn-recap line ("✧ … ; next question/action: …") — coloured sky so
   // the recap reads apart from the body (matches the nvim rail's summary hue).
   function isSummaryLine(l) {
@@ -1401,6 +1485,7 @@ Item {
 
   onSelectedRawChanged: {
     rememberSelection(selectedRaw)
+    _ensureChanges()
     if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
     if (_prevSelected) {
       var m = _seenAt
@@ -1575,9 +1660,12 @@ Item {
       var cf = changesList[l]
       if (cf) openInNvim(cf.path)
     } else {
-      // Enter on a turn opens/closes its collapsed tool activity ("N bash · …") —
-      // copying moved to Y / yank-hints. Same key the activity Loader builds.
       var it = groupedFeed[l]
+      // A card naming exactly one file: Enter opens it, same as its `f` hint. With
+      // none (or several — aim with `f`), Enter keeps opening/closing the card's
+      // collapsed tool activity ("N bash · …").
+      var refs = fileRefLines(it)
+      if (refs.length === 1) { openFileRef(refs[0]); return }
       if (it) toggleGroupKey("turn-" + (it.key || l))
     }
   }
@@ -2337,6 +2425,18 @@ Item {
                 property int entryIndex: index
                 property int rowIndex: turnDel.rowIndex
                 sourceComponent: proseRow
+              }
+            }
+
+            Repeater {
+              model: turnDel.isUser ? [] : rail.turnSys(turnDel.turn.items)
+              Text {
+                width: cardCol.width
+                text: modelData.text || ""
+                color: Theme.fg_muted
+                font.family: Theme.fontFamily
+                font.pixelSize: rail.fsMeta
+                wrapMode: Text.WordWrap
               }
             }
 
@@ -3939,14 +4039,60 @@ Item {
         model: proseCol.parts
         Loader {
           width: proseCol.width
-          sourceComponent: markdownContent
-          property string sourceText: modelData.text
+          sourceComponent: modelData.fileRef !== undefined ? fileRefRow : markdownContent
+          property var refData: modelData
+          property string sourceText: modelData.text || ""
           property int sourceEntry: proseCol.parent.entryIndex
           property int sourceOffset: modelData.offset
           property int rowIndex: proseCol.parent.rowIndex
           property color bodyColor: modelData.summary ? rail.summaryColor : Theme.fg
           property bool agentAuthored: true
         }
+      }
+    }
+  }
+  Component {
+    id: fileRefRow
+    Rectangle {
+      width: parent ? parent.width : 400
+      height: refLine.implicitHeight + 12
+      radius: 6
+      color: "transparent"
+      // changesGen in the dependency list so the numbers appear when the diff lands
+      readonly property var st: (rail.agentd && rail.agentd.changesGen >= 0) ? rail._statFor(refData.path) : null
+      border.width: 1
+      border.color: Theme.hairline
+      RowLayout {
+        id: refLine
+        anchors.fill: parent
+        anchors.leftMargin: 10; anchors.rightMargin: 10
+        spacing: 8
+        Icon { name: "file-content"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
+        Text {
+          visible: text.length > 0
+          text: rail.fileHintFor(refData.path, rowIndex)
+          color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+        }
+        Text {
+          text: refData.shown; color: Theme.fg
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+          elide: Text.ElideMiddle; Layout.fillWidth: true
+        }
+          Text {
+          visible: !!st
+          text: "+" + (st ? st.add : 0); color: Theme.green
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+        }
+        Text {
+          visible: !!st
+          text: "-" + (st ? st.del : 0); color: Theme.red
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+        }
+      }
+      MouseArea {
+        anchors.fill: parent
+        cursorShape: Qt.PointingHandCursor
+        onClicked: rail.openFileRef(refData.path)
       }
     }
   }

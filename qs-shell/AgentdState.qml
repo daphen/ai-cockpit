@@ -465,9 +465,11 @@ Item {
   // locally (the roster carries each session's cwd). Works for local worktrees
   // without an agentd round-trip; the turn_end broadcast keeps it fresh after.
   property string _pendingChangesSid: ""
-  function refreshChanges(sid) {
-    var cwd = ""
-    for (var i = 0; i < sessions.length; i++)
+  // cwdOverride: a REMOTE session's cwd is a VM path that no local git can read, so
+  // the caller passes the vm-sync mirror instead (only Rail knows that mapping).
+  function refreshChanges(sid, cwdOverride) {
+    var cwd = cwdOverride || ""
+    for (var i = 0; !cwd && i < sessions.length; i++)
       if (sessions[i].id === sid || sessions[i].name === sid) { cwd = sessions[i].cwd; break }
     if (!cwd) return
     _pendingChangesSid = sid
@@ -626,7 +628,11 @@ Item {
           // Every agent card must STATE ITS OUTCOME. A turn-closing assistant message
           // with tools but no prose (the ⟢-summary contract violated, usually after
           // tool errors) rendered as bare chips — say mechanically what happened.
-          var closes = isLast || (msgs[mi + 1] && (msgs[mi + 1].role === "user" || msgs[mi + 1]._compaction))
+          // isLast alone is NOT "the turn ended": mid-turn, the newest assistant message
+          // is always last while more tool calls are still coming, so a running turn got
+          // labelled as ended without a summary. A live session closes nothing.
+          var closes = (isLast && _sessionStatus(sid) !== "streaming")
+            || (msgs[mi + 1] && (msgs[mi + 1].role === "user" || msgs[mi + 1]._compaction))
           if (closes) {
             var ntools = 0, nerrs = 0, hastext = false
             for (var si = _from; si < items.length; si++) {
@@ -884,9 +890,12 @@ Item {
     } else if (t === "compaction_end") {
       _clearTransient(sid, "compact")
       var cm2 = _compacting; delete cm2[sid]; _compacting = cm2; curToolGen++
-      _setTransient(sid, "compact", m.errorMessage ? "error" : "info",
-                    m.errorMessage ? "✗ compaction failed — " + _clip(String(m.errorMessage))
-                                   : "· context compacted", 60000)
+      // Only FAILURE gets a transient. The success marker already arrives as a
+      // `compaction` event in the transcript and renders as its own card at the
+      // boundary; a tail transient duplicated it 60s and read as a stray message.
+      if (m.errorMessage)
+        _setTransient(sid, "compact", "error",
+                      "✗ compaction failed — " + _clip(String(m.errorMessage)), 60000)
     } else if (t === "extension_error") {
       _setTransient(sid, "ext:" + _clip(String(m.error || m.message || "")).slice(0, 24), "error",
                     "✗ extension error — " + _clip(String(m.error || m.message || "unknown")), 120000)
