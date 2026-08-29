@@ -108,6 +108,10 @@ function clip(value: unknown, length = 82) {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text
 }
 
+function displayUserText(text: string) {
+  return text.replace(/\[image (\d+)\]\s+@\S+/g, "[image $1]")
+}
+
 function storedChatLabels() {
   try { return JSON.parse(localStorage.getItem(chatLabelsKey) ?? "{}") as Record<string, string> } catch { return {} }
 }
@@ -218,7 +222,7 @@ function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
     const message = entry.message
     if (!message || !["user", "assistant"].includes(message.role ?? "")) continue
     if (message.role === "user") {
-      let text = textContent(message.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "").trim()
+      let text = displayUserText(textContent(message.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")).trim()
       let sender = ""
       if (text.startsWith("⇄ ")) {
         const newline = text.indexOf("\n")
@@ -327,6 +331,24 @@ export class AgentdStore {
       }
       void this.probeHosts()
     }, 120)
+  }
+
+  async uploadImage(key: string, file: File) {
+    const state = this.scopes.get(this.owners[key])
+    if (!state?.connected) throw new Error(`${this.parts(key).scope} is disconnected`)
+    const response = await fetch(`${state.host.baseUrl}/upload?scope=${encodeURIComponent(state.scope)}`, {
+      method: "POST",
+      mode: "cors",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": file.type,
+      },
+      body: file,
+    })
+    if (!response.ok) throw new Error(response.status === 413 ? "Image exceeds 12 MB" : `Image upload failed (${response.status})`)
+    const result = await response.json() as { path?: string }
+    if (!result.path) throw new Error("Image upload returned no path")
+    return result.path
   }
 
   labelChats(sessions: Session[]) {
@@ -581,7 +603,7 @@ export class AgentdStore {
   }
 
   private echo(key: string, text: string, steered = false) {
-    const item: FeedItem = { kind: "user", text, steered, key: `echo-${Date.now()}` }
+    const item: FeedItem = { kind: "user", text: displayUserText(text), steered, key: `echo-${Date.now()}` }
     this.optimistic[key] = [...(this.optimistic[key] ?? []), item]
     this.feeds[key] = [...(this.feeds[key] ?? []), item]
     this.publish()

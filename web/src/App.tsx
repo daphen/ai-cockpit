@@ -224,6 +224,7 @@ export default function App() {
                       queue={state.queues[selected] ?? []}
                       disabled={Boolean(ask)}
                       onSubmit={text => run(() => agentd.submit(selected, text))}
+                      onUploadImage={file => agentd.uploadImage(selected, file)}
                       onSteerQueued={index => run(() => agentd.steerQueued(selected, index))}
                       onInterrupt={() => run(() => agentd.interrupt(selected))}
                       rosterExpanded={rosterExpanded}

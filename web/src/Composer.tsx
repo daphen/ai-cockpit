@@ -13,6 +13,7 @@ interface Props {
   queue: string[]
   disabled?: boolean
   onSubmit: (text: string) => void
+  onUploadImage: (file: File) => Promise<string>
   onSteerQueued: (index: number) => void
   onInterrupt: () => void
   rosterExpanded: boolean
@@ -22,11 +23,22 @@ interface Props {
   roster: ReactNode
 }
 
-export function Composer({ sessionName, currentTool, fleet, busy, queue, disabled, onSubmit, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterHeader, roster }: Props) {
+interface PendingImage {
+  id: string
+  name: string
+  preview: string
+  path?: string
+  error?: string
+}
+
+export function Composer({ sessionName, currentTool, fleet, busy, queue, disabled, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterHeader, roster }: Props) {
   const [text, setText] = useState("")
+  const [images, setImages] = useState<PendingImage[]>([])
   const [confirmInterrupt, setConfirmInterrupt] = useState(false)
   const [compositorTray, setCompositorTray] = useState(() => matchMedia("(max-width: 720px)").matches)
   const textarea = useRef<HTMLTextAreaElement>(null)
+  const imageInput = useRef<HTMLInputElement>(null)
+  const imageUrls = useRef(new Set<string>())
   const dispatching = useRef(false)
   const allowLineBreak = useRef(false)
   const rosterContent = useRef<HTMLDivElement>(null)
@@ -93,16 +105,57 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
     requestAnimationFrame(() => textarea.current?.focus({ preventScroll: true }))
   }
 
+  const removeImage = (id: string) => {
+    setImages(current => {
+      const image = current.find(item => item.id === id)
+      if (image) {
+        URL.revokeObjectURL(image.preview)
+        imageUrls.current.delete(image.preview)
+      }
+      return current.filter(item => item.id !== id)
+    })
+  }
+
+  const addImages = (files: FileList | null) => {
+    const available = Math.max(0, 4 - images.length)
+    for (const file of Array.from(files ?? []).slice(0, available)) {
+      const id = `${Date.now()}-${Math.random()}`
+      if (!/^image\/(jpeg|png|webp|gif)$/.test(file.type) || file.size > 12 * 1024 * 1024) {
+        setImages(current => [...current, { id, name: file.name, preview: "", error: file.size > 12 * 1024 * 1024 ? "over 12 MB" : "unsupported format" }])
+        continue
+      }
+      const preview = URL.createObjectURL(file)
+      imageUrls.current.add(preview)
+      setImages(current => [...current, { id, name: file.name, preview }])
+      void onUploadImage(file).then(path => {
+        setImages(current => current.map(item => item.id === id ? { ...item, path } : item))
+      }).catch(cause => {
+        setImages(current => current.map(item => item.id === id ? { ...item, error: cause instanceof Error ? cause.message : "upload failed" } : item))
+      })
+    }
+    if (imageInput.current) imageInput.current.value = ""
+  }
+
   const send = () => {
-    const message = text.trim()
+    if (images.some(image => !image.path && !image.error)) return
+    const refs = images.filter(image => image.path).map((image, index) => `[image ${index + 1}] @${image.path}`)
+    const message = [text.trim(), ...refs].filter(Boolean).join("\n\n")
     if (!message || disabled || dispatching.current) return
     dispatching.current = true
     onSubmit(message)
     window.dispatchEvent(new Event("cockpit:message-sent"))
     setText("")
+    for (const image of images) if (image.preview) URL.revokeObjectURL(image.preview)
+    imageUrls.current.clear()
+    setImages([])
     queueMicrotask(() => { dispatching.current = false })
     requestAnimationFrame(() => textarea.current?.focus({ preventScroll: true }))
   }
+
+  useEffect(() => () => {
+    for (const url of imageUrls.current) URL.revokeObjectURL(url)
+    imageUrls.current.clear()
+  }, [])
 
   useEffect(() => {
     const media = matchMedia("(max-width: 720px)")
@@ -221,8 +274,22 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
           </m.ol>
         )}
       </AnimatePresence>
+      {!!images.length && (
+        <div className="attachment-tray" aria-label="Image attachments">
+          {images.map(image => (
+            <div className={`attachment-chip ${image.error ? "error" : image.path ? "ready" : "uploading"}`} key={image.id}>
+              {image.preview ? <img src={image.preview} alt="" /> : <span className="attachment-placeholder" />}
+              <span>{image.error ? `${image.name} · ${image.error}` : image.path ? image.name : `${image.name} · uploading`}</span>
+              <button type="button" aria-label={`Remove ${image.name}`} onClick={() => removeImage(image.id)}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="composer-pill">
-        <span className="prompt-glyph">›</span>
+        <input ref={imageInput} className="image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={event => addImages(event.target.files)} />
+        <button type="button" className="attach-button" aria-label="Attach images" disabled={disabled || images.length >= 4} onPointerDown={event => event.preventDefault()} onClick={() => imageInput.current?.click()}>
+          <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M13.75,4.25c-.414,0-.75,.336-.75,.75v6.75c0,2.068-1.682,3.75-3.75,3.75s-3.75-1.682-3.75-3.75V4.75c0-1.241,1.009-2.25,2.25-2.25s2.25,1.009,2.25,2.25v7c0,.414-.336,.75-.75,.75s-.75-.336-.75-.75V5c0-.414-.336-.75-.75-.75s-.75,.336-.75,.75v6.75c0,1.241,1.009,2.25,2.25,2.25s2.25-1.009,2.25-2.25V4.75c0-2.068-1.682-3.75-3.75-3.75s-3.75,1.682-3.75,3.75v7c0,2.895,2.355,5.25,5.25,5.25s5.25-2.355,5.25-5.25V5c0-.414-.336-.75-.75-.75Z" /></svg>
+        </button>
         <textarea
           ref={textarea}
           rows={1}

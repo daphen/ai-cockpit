@@ -103,7 +103,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .scope-tabs button.active { border-color: var(--ink); background: var(--ink); color: var(--bg); }
 .roster { margin: 0; padding: 8px; list-style: none; }
 .roster li { margin-bottom: 2px; }
-.session-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 7px 9px; border: 1px solid transparent; border-radius: 12px; background: transparent; text-align: left; }
+.session-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 7px 9px 7px calc(9px + var(--session-depth, 0) * 20px); border: 1px solid transparent; border-radius: 12px; background: transparent; text-align: left; }
 .session-row.selected { border-color: var(--hairline-soft); background: var(--surface-1); }
 .session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
 .role-badge { flex: none; border: 1px solid var(--hairline-soft); border-radius: 999px; padding: 1px 6px; color: var(--muted); font-size: 10px; line-height: 16px; }
@@ -218,9 +218,19 @@ button.primary { border-color: var(--ink); background: var(--ink); color: var(--
 .queued-messages li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 34px; padding: 5px 6px 5px 10px; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
 .queued-messages li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queued-messages button { min-height: 26px; border: 1px solid var(--hairline); border-radius: 999px; padding: 3px 8px; background: var(--surface-0); color: var(--orange); font-size: 10px; }
-.composer-pill { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; margin-top: 9px; align-items: center; min-height: 52px; border: 2px solid var(--hairline); border-radius: 26px; background: var(--surface-1); }
+.attachment-tray { position: relative; z-index: 1; display: flex; gap: 7px; margin: 9px 4px 0; overflow-x: auto; }
+.attachment-chip { display: grid; grid-template-columns: 32px minmax(70px, 1fr) 28px; flex: 0 0 min(240px, 78vw); align-items: center; gap: 7px; min-width: 0; padding: 5px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--surface-2); color: var(--ink-2); font-size: 10px; }
+.attachment-chip.error { border-color: color-mix(in srgb, var(--red) 55%, var(--hairline)); color: var(--red); }
+.attachment-chip img, .attachment-placeholder { width: 32px; height: 32px; border-radius: 8px; object-fit: cover; background: var(--surface-3); }
+.attachment-chip.uploading img { opacity: .45; }
+.attachment-chip > span:not(.attachment-placeholder) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-chip button { width: 28px; height: 28px; border: 0; border-radius: 50%; padding: 0; background: transparent; color: var(--muted); font-size: 18px; }
+.composer-pill { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; margin-top: 9px; align-items: center; min-height: 52px; border: 2px solid var(--hairline); border-radius: 26px; background: var(--surface-1); }
 .composer-pill:focus-within { border-color: var(--ink-2); }
-.prompt-glyph { align-self: start; padding: 13px 0 0 13px; color: var(--orange); font-size: 16px; line-height: 24px; }
+.image-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.attach-button { display: grid; place-items: center; width: 40px; height: 48px; border: 0; padding: 0; background: transparent; color: var(--orange); }
+.attach-button:disabled { color: var(--muted); opacity: .5; }
+.attach-button svg { width: 18px; height: 18px; fill: currentColor; }
 .composer-pill textarea { width: 100%; height: 48px; min-height: 48px; max-height: 130px; resize: none; border: 0; outline: 0; background: transparent; padding: 13px 7px 11px; caret-color: var(--cursor); line-height: 24px; }
 .orb-interrupt-slot { display: grid; place-items: center; width: 48px; height: 48px; }
 .orb-interrupt { display: grid; grid-area: 1 / 1; place-items: center; width: 48px; height: 48px; border: 0; border-radius: 50%; padding: 2px; background: transparent; will-change: opacity, transform; }

@@ -1,5 +1,6 @@
 import { AnimatePresence } from "motion/react"
 import * as m from "motion/react-m"
+import type { CSSProperties } from "react"
 import type { Session } from "./agentd"
 import { sessionKey } from "./agentd"
 import { Orb, orbTone } from "./Orb"
@@ -39,7 +40,7 @@ export function Roster({ sessions, selected, onSelect }: Props) {
   if (!sessions.length) return <div className="empty">No agent sessions are online.</div>
   return (
     <ol className="roster" aria-label="Agent sessions">
-      {sessions.map(session => {
+      {nestedSessions(sessions, selected).map(({ session, depth }) => {
         const key = sessionKey(session.scope, session.name)
         const role = roleName(session.profile)
         const offline = session.status === "offline"
@@ -49,6 +50,7 @@ export function Roster({ sessions, selected, onSelect }: Props) {
             <button
               type="button"
               className={`session-row ${selected === key ? "selected" : ""}`}
+              style={{ "--session-depth": Math.min(depth, 1) } as CSSProperties}
               onClick={() => onSelect(key)}
               aria-label={`${session.displayName ?? session.name} — ${statusLabel(session)}`}
             >
@@ -96,6 +98,38 @@ export function Roster({ sessions, selected, onSelect }: Props) {
       })}
     </ol>
   )
+}
+
+function nestedSessions(sessions: Session[], selected: string) {
+  const byKey = new Map(sessions.map(session => [sessionKey(session.scope, session.name), session]))
+  const children = new Map<string, Session[]>()
+  const roots: Session[] = []
+  const activeChildren: Session[] = []
+  const byName = (a: Session, b: Session) => a.name.localeCompare(b.name)
+
+  for (const session of sessions) {
+    const parentKey = session.parent ? sessionKey(session.scope, session.parent) : ""
+    if (parentKey === selected && !byKey.has(selected)) activeChildren.push(session)
+    else if (parentKey && byKey.has(parentKey)) children.set(parentKey, [...(children.get(parentKey) ?? []), session])
+    else roots.push(session)
+  }
+  roots.sort(byName)
+  activeChildren.sort(byName)
+  for (const nested of children.values()) nested.sort(byName)
+
+  const ordered: Array<{ session: Session; depth: number }> = []
+  const visited = new Set<string>()
+  const walk = (session: Session, depth: number) => {
+    const key = sessionKey(session.scope, session.name)
+    if (visited.has(key)) return
+    visited.add(key)
+    ordered.push({ session, depth: Math.min(depth, 1) })
+    for (const child of children.get(key) ?? []) walk(child, depth + 1)
+  }
+  for (const session of activeChildren) walk(session, 1)
+  for (const session of roots) walk(session, 0)
+  for (const session of sessions) walk(session, 0)
+  return ordered
 }
 
 function statusLabel(session: Session) {

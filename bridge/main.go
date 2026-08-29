@@ -7,7 +7,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -31,6 +33,7 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:8787", "HTTP listen address")
 	runtimeDir := flag.String("runtime-dir", envOr("XDG_RUNTIME_DIR", filepath.Join(os.TempDir(), fmt.Sprintf("runtime-%d", os.Getuid()))), "directory containing agentd sockets")
 	staticDir := flag.String("static-dir", "../web/dist", "built web app directory")
+	uploadDir := flag.String("upload-dir", filepath.Join(home, ".cache", "cockpit", "uploads"), "directory for mobile image uploads")
 	tokenFile := flag.String("token-file", filepath.Join(home, ".config/cockpit/bridge-token"), "bearer token file")
 	flag.Parse()
 	if !isAllowedAddress(*addr) {
@@ -44,6 +47,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/scopes", requireToken(token, scopesHandler(*runtimeDir)))
 	mux.Handle("/ws", requireToken(token, websocketHandler(*runtimeDir)))
+	mux.Handle("/upload", requireToken(token, uploadHandler(*runtimeDir, *uploadDir)))
 	mux.Handle("/", spaHandler(*staticDir))
 
 	server := &http.Server{Addr: *addr, Handler: logRequests(allowCrossOrigin(mux)), ReadHeaderTimeout: 5 * time.Second}
@@ -173,6 +177,90 @@ func sockets(runtimeDir string) ([]string, error) {
 	return scopes, nil
 }
 
+func uploadHandler(runtimeDir, uploadDir string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		scope := r.URL.Query().Get("scope")
+		if !scopePattern.MatchString(scope) {
+			http.Error(w, "invalid scope", http.StatusBadRequest)
+			return
+		}
+		info, err := os.Stat(filepath.Join(runtimeDir, "agentd-"+scope+".sock"))
+		if err != nil || info.Mode()&os.ModeSocket == 0 {
+			http.Error(w, "scope unavailable", http.StatusBadGateway)
+			return
+		}
+		contentType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type"))
+		extension := map[string]string{
+			"image/jpeg": ".jpg",
+			"image/png":  ".png",
+			"image/webp": ".webp",
+			"image/gif":  ".gif",
+		}[contentType]
+		if extension == "" {
+			http.Error(w, "unsupported image type", http.StatusUnsupportedMediaType)
+			return
+		}
+		if err := os.MkdirAll(uploadDir, 0o700); err != nil {
+			http.Error(w, "create upload directory", http.StatusInternalServerError)
+			return
+		}
+		pruneUploads(uploadDir)
+		file, err := os.CreateTemp(uploadDir, "image-*"+extension)
+		if err != nil {
+			http.Error(w, "create upload", http.StatusInternalServerError)
+			return
+		}
+		path := file.Name()
+		keep := false
+		defer func() {
+			_ = file.Close()
+			if !keep {
+				_ = os.Remove(path)
+			}
+		}()
+		reader := http.MaxBytesReader(w, r.Body, 12<<20)
+		written, err := io.Copy(file, reader)
+		if err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, "image exceeds 12 MB", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "store upload", http.StatusInternalServerError)
+			return
+		}
+		if written == 0 {
+			http.Error(w, "empty image", http.StatusBadRequest)
+			return
+		}
+		if err := file.Chmod(0o600); err != nil || file.Close() != nil {
+			http.Error(w, "finish upload", http.StatusInternalServerError)
+			return
+		}
+		keep = true
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"path": path, "size": written})
+	}
+}
+
+func pruneUploads(uploadDir string) {
+	entries, err := os.ReadDir(uploadDir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err == nil && !entry.IsDir() && info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(uploadDir, entry.Name()))
+		}
+	}
+}
+
 func scopesHandler(runtimeDir string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -291,7 +379,7 @@ func allowCrossOrigin(next http.Handler) http.Handler {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Add("Vary", "Origin")
 		}
 		if r.Method == http.MethodOptions {
