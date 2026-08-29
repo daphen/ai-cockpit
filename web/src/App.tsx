@@ -228,7 +228,7 @@ export default function App() {
                     <AnimatePresence initial={false}>
                       {error && <m.div className="error-banner" key={error} variants={textSwap} initial="initial" animate="animate" exit="exit">{error}</m.div>}
                     </AnimatePresence>
-                    <Feed items={state.feeds[selected]} />
+                    <Feed items={state.feeds[selected]} pinToEnd={Boolean(ask)} />
                     <AnimatePresence initial={false}>
                       {ask && <AskCard key={`${ask.title}-${ask.method}`} ask={ask} onAnswer={response => run(() => agentd.answer(selected, response))} />}
                     </AnimatePresence>

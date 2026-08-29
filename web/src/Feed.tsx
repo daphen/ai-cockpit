@@ -6,7 +6,7 @@ import { LoadingIndicator } from "./LoadingIndicator"
 import { MessageIcon } from "./MessageIcon"
 import { iconSwap, textSwap } from "./motion"
 
-export function Feed({ items }: { items?: FeedItem[] }) {
+export function Feed({ items, pinToEnd = false }: { items?: FeedItem[]; pinToEnd?: boolean }) {
   const feed = useRef<HTMLDivElement>(null)
   const following = useRef(true)
   const loaded = items !== undefined
@@ -18,6 +18,12 @@ export function Feed({ items }: { items?: FeedItem[] }) {
   useLayoutEffect(() => {
     if (following.current) scrollToEnd()
   }, [items])
+  useLayoutEffect(() => {
+    if (!pinToEnd) return
+    following.current = true
+    scrollToEnd()
+    requestAnimationFrame(scrollToEnd)
+  }, [pinToEnd])
   useEffect(() => {
     const messageSent = () => {
       following.current = true
