@@ -108,4 +108,9 @@ echo "QML_IMPORT_PATH=$QML_IMPORT_PATH"
 # hosting it. Pinning it to the named `lovable` workspace yanked the cockpit off the
 # workspace David had it on and stranded it above his stack (2026-08-25). Boot-time
 # placement is cockpit-boot's job; a refresh happens in place.
+# Per-ticket infrastructure (mutagen syncs, devenv stacks) outlives its ticket and
+# keeps burning CPU; reap what no live session claims. Best-effort, never blocking,
+# and it refuses to act when no agentd roster answers.
+( "$HOME/.config/niri/scripts/cockpit-reap-stale" --yes >/dev/null 2>&1 & ) || true
+
 exec qs -p "$shellDir"
