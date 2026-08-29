@@ -19,6 +19,7 @@ interface Props {
   rosterExpanded: boolean
   onRosterExpandedChange: (expanded: boolean) => void
   rosterKey: string
+  rosterFeatured: ReactNode
   rosterHeader: ReactNode
   roster: ReactNode
 }
@@ -31,7 +32,7 @@ interface PendingImage {
   error?: string
 }
 
-export function Composer({ sessionName, currentTool, fleet, busy, queue, disabled, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterHeader, roster }: Props) {
+export function Composer({ sessionName, currentTool, fleet, busy, queue, disabled, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterFeatured, rosterHeader, roster }: Props) {
   const [text, setText] = useState("")
   const [images, setImages] = useState<PendingImage[]>([])
   const [confirmInterrupt, setConfirmInterrupt] = useState(false)
@@ -241,7 +242,8 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
           </m.span>
         </button>
         <m.div className="inline-roster-shell" aria-hidden={!rosterExpanded} inert={!rosterExpanded} style={{ height: rosterShellHeight, opacity: rosterOpacity, clipPath: rosterClip }}>
-        <div ref={rosterContent} className="inline-roster-content">
+        <div ref={rosterContent} className={`inline-roster-content ${rosterFeatured ? "has-featured" : ""}`}>
+          {rosterFeatured}
           {rosterHeader}
           <div className="inline-roster-stack">
             <AnimatePresence initial={false} mode="popLayout">

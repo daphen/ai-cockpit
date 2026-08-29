@@ -151,6 +151,22 @@ export default function App() {
   useEffect(() => { if (scope === "chat") agentd.labelChats(visibleSessions) }, [scope, visibleSessions])
 
   const active = state.sessions.find(session => sessionKey(session.scope, session.name) === selected)
+  const activeFamily = useMemo(() => {
+    if (!active) return []
+    const family = new Set([active.name])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const session of state.sessions) {
+        if (session.scope !== active.scope || !session.parent || !family.has(session.parent) || family.has(session.name)) continue
+        family.add(session.name)
+        changed = true
+      }
+    }
+    return state.sessions.filter(session => session.scope === active.scope && session.name !== active.name && family.has(session.name))
+  }, [active, state.sessions])
+  const activeFamilyKeys = new Set(activeFamily.map(session => sessionKey(session.scope, session.name)))
+  const remainingRoster = visibleSessions.filter(session => sessionKey(session.scope, session.name) !== selected && !activeFamilyKeys.has(sessionKey(session.scope, session.name)))
   const scopes = useMemo(() => [...new Set(groupSessions.map(session => session.scope))], [groupSessions])
   const ask = selected ? state.asks[selected] : undefined
   const run = (action: () => void) => { try { setError(""); action() } catch (cause) { setError(String(cause)) } }
@@ -230,6 +246,11 @@ export default function App() {
                       rosterExpanded={rosterExpanded}
                       onRosterExpandedChange={setRosterExpanded}
                       rosterKey={`${group}/${scope}`}
+                      rosterFeatured={activeFamily.length ? (
+                        <div className="featured-nested-roster">
+                          <Roster sessions={activeFamily} selected={selected} onSelect={key => { selectSession(key); setRosterExpanded(false) }} />
+                        </div>
+                      ) : null}
                       rosterHeader={(
                         <nav className="group-tabs" aria-label="Cockpit group">
                           {(["work", "private"] as CockpitGroup[]).map(item => <button type="button" className={group === item ? "active" : ""} key={item} onClick={() => chooseGroup(item)}>{item}</button>)}
@@ -240,7 +261,7 @@ export default function App() {
                           <nav className="scope-tabs" aria-label={`${group} scope filter`} hidden>
                             {["all", ...scopes].map(item => <button type="button" className={scope === item ? "active" : ""} key={item} onClick={() => chooseScope(item)}>{item}</button>)}
                           </nav>
-                          <Roster sessions={visibleSessions.filter(session => sessionKey(session.scope, session.name) !== selected)} selected={selected} onSelect={key => { selectSession(key); setRosterExpanded(false) }} />
+                          <Roster sessions={remainingRoster} selected={selected} onSelect={key => { selectSession(key); setRosterExpanded(false) }} />
                         </>
                       )}
                     />
