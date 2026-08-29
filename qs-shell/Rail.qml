@@ -2286,11 +2286,10 @@ Item {
           anchors { left: parent.left; right: parent.right }
           implicitHeight: cardCol.implicitHeight + 36
           radius: 14
-          // Cursor gets a pronounced fill (surface2 pops in both light+dark) plus
-          // a strong fg-alpha hairpin — the dsqrd message-cursor grammar.
-          color: turnDel.cursor ? Theme.surface2 : (turnDel.isUser ? Theme.surface0 : Theme.surface)
-          // Dark: borderless — the bgDim ground separates the fill on its own.
-          // Light: surfaces sit too close to the ground, keep the hairline.
+          // Fill-only separation, verified against the reference UI by sampling it:
+          // ground 10,10,10 → card 23,23,23 → inner element 31,31,31, and NO borders
+          // anywhere. The step sizes carry it; an added hairline just muddies them.
+          color: turnDel.cursor ? Theme.surface : Theme.bg
           border.width: (turnDel.cursor || Theme.mode === "light") ? 1 : 0
           border.color: turnDel.cursor ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45) : Theme.hairline
           HoverHandler { id: fhov }
@@ -3375,7 +3374,7 @@ Item {
         // Flickable scrolls the caret into view.
         implicitHeight: Math.max(52, Math.min(composerInput.implicitHeight + 30, 94))
         radius: Math.min(height / 2, 26)   // pill at one line, rounded card when grown
-        color: Theme.surface0
+        color: Theme.bg
         border.color: rail.insert ? rail.activeRing : Theme.hairline
         border.width: 2
         Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }

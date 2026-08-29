@@ -321,10 +321,15 @@ Item {
   // rebuild otherwise wipes them mid-retry. Keyed per kind so an end-event replaces
   // or clears its start; ttl caps anything whose end never arrives.
   property var _transients: ({})   // sid -> { kindKey: {tool, text, at, ttl} }
-  function _setTransient(sid, key, tool, text, ttl) {
+  // quiet: record the transient WITHOUT pushing a feed row. A row pushed here is
+  // permanent — _clearTransient drops the record but cannot retract the row — so a
+  // progress message with a terminal event ("compacting context…") sat in the feed
+  // forever once the work finished. Progress belongs in the live indicator
+  // (compactingSince); the feed keeps only durable facts, e.g. errors.
+  function _setTransient(sid, key, tool, text, ttl, quiet) {
     var t = _transients; (t[sid] = t[sid] || {})[key] = { tool: tool, text: text, at: Date.now(), ttl: ttl }
     _transients = t
-    _push(sid, { kind: "cmd", tool: tool, text: text })
+    if (!quiet) _push(sid, { kind: "cmd", tool: tool, text: text })
   }
   function _clearTransient(sid, key) {
     var t = _transients
@@ -885,7 +890,7 @@ Item {
       if (m.success === false)
         _setTransient(sid, "retry", "error", "✗ retries exhausted — " + _clip(String(m.finalError || "provider error")), 120000)
     } else if (t === "compaction_start") {
-      _setTransient(sid, "compact", "info", "· compacting context…", 300000)
+      _setTransient(sid, "compact", "info", "· compacting context…", 300000, true)
       var cm = _compacting; cm[sid] = Date.now(); _compacting = cm; curToolGen++
     } else if (t === "compaction_end") {
       _clearTransient(sid, "compact")
