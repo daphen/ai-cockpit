@@ -3613,19 +3613,37 @@ Item {
         Rectangle {
           id: scopeSwitch
           Layout.alignment: Qt.AlignVCenter
-          implicitWidth: scopeLabel.implicitWidth + 20
+          readonly property color tint: rail.scopeMode === "work" ? Theme.electric : Theme.orange
+          readonly property bool expanded: scopeHover.hovered
+          implicitWidth: expanded ? scopeRow.implicitWidth + 18 : 32
           implicitHeight: 22
           radius: 11
-          color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.13)
+          color: expanded ? Qt.alpha(scopeSwitch.tint, 0.14) : "transparent"
           border.width: 1
-          border.color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.55)
-          Text {
-            id: scopeLabel
-            anchors.centerIn: parent
-            text: rail.scopeMode.toUpperCase()
-            color: rail.scopeMode === "work" ? Theme.electric : Theme.orange
-            font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 700 }
+          border.color: Qt.alpha(scopeSwitch.tint, expanded ? 0.9 : 0.0)
+          Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+          Behavior on color { ColorAnimation { duration: 140 } }
+          Behavior on border.color { ColorAnimation { duration: 140 } }
+          clip: true
+          Row {
+            id: scopeRow
+            anchors { left: parent.left; leftMargin: 9; verticalCenter: parent.verticalCenter }
+            spacing: 5
+            Icon {
+              anchors.verticalCenter: parent.verticalCenter
+              width: 14; height: 14
+              name: "toggle-3"
+              color: scopeSwitch.tint
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: scopeSwitch.expanded
+              text: "SWITCH TO " + (rail.scopeMode === "work" ? "PERSONAL" : "WORK")
+              color: scopeSwitch.tint
+              font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+            }
           }
+          HoverHandler { id: scopeHover }
           TapHandler {
             onTapped: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
           }
