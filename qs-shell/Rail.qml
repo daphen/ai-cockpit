@@ -1062,6 +1062,11 @@ Item {
       if (liveSessions[ci].name === selectedRaw) return String(liveSessions[ci].cwd || "")
     return ""
   }
+  readonly property string selectedParent: {
+    for (var pi = 0; pi < liveSessions.length; pi++)
+      if (liveSessions[pi].name === selectedRaw) return String(liveSessions[pi].parent || "")
+    return ""
+  }
 
   readonly property string selectedStatus: {
     for (var si = 0; si < liveSessions.length; si++)
@@ -2641,10 +2646,29 @@ Item {
                 }
               }
             }
-            Text {
+            Row {
               anchors.verticalCenter: parent.verticalCenter
-              text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
-              color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
+              spacing: 6
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: rail.selectedParent.length > 0
+                text: rail.shortName(rail.selectedParent).toUpperCase()
+                color: Theme.fg_muted
+                font { family: Theme.fontFamily; pixelSize: rail.fsMeta; weight: 600 }
+              }
+              Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: rail.selectedParent.length > 0
+                name: "chevron-right"
+                width: 11; height: 11
+                color: Theme.fg_muted
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
+                color: Theme.fg
+                font { family: Theme.fontFamily; pixelSize: rail.fsName; bold: true }
+              }
             }
             Text {
               anchors.verticalCenter: parent.verticalCenter
