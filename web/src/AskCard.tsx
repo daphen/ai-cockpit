@@ -12,6 +12,7 @@ export function AskCard({ ask, onAnswer }: Props) {
   const [value, setValue] = useState("")
   const userBash = ask.title === "__cockpit_user_bash__"
   const payload = userBash ? parsePayload(ask.message) : null
+  const prompt = ask.message || ask.placeholder
   const options = (ask.options ?? []).map(option => typeof option === "string" ? { label: option, value: option } : { label: option.label ?? option.value ?? "option", value: option.value ?? option.label ?? "" })
 
   return (
@@ -20,7 +21,7 @@ export function AskCard({ ask, onAnswer }: Props) {
       <h2>{userBash ? "Run this command?" : ask.title || "Question"}</h2>
       {payload ? (
         <><pre className="command">{String(payload.command ?? "")}</pre>{payload.reason && <p>{String(payload.reason)}</p>}</>
-      ) : ask.message ? <p>{ask.message}</p> : null}
+      ) : prompt ? <p>{prompt}</p> : null}
 
       {(ask.method === "confirm" || userBash) && (
         <div className="ask-actions">

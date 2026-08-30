@@ -3077,6 +3077,7 @@ Item {
       id: askCard
       readonly property var ask: rail.pendingAsk
       readonly property var userBash: rail.pendingUserBash
+      readonly property string prompt: ask ? String(ask.message || ask.placeholder || "") : ""
       visible: ask !== null && rail.view === "chat"
       Layout.fillWidth: true
       implicitHeight: askCol.implicitHeight + 28
@@ -3111,7 +3112,7 @@ Item {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
           text: askCard.userBash
               ? (String(askCard.userBash.reason || "") + "\n" + String(askCard.userBash.host || "") + ":" + String(askCard.userBash.cwd || ""))
-              : (askCard.ask ? (askCard.ask.message || "") : "")
+              : askCard.prompt
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
         // An ask with NO title and NO message is unanswerable as posed — say so
@@ -3119,7 +3120,7 @@ Item {
         Text {
           visible: askCard.ask && !askCard.userBash
                    && !String(askCard.ask.title || "").length
-                   && !String(askCard.ask.message || "").length
+                   && !askCard.prompt.length
           width: parent.width; wrapMode: Text.Wrap
           text: "the agent asked for input without saying why — press t to make it explain, or esc to cancel the question"
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta

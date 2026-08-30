@@ -27,6 +27,7 @@ export interface Ask {
   method: "confirm" | "select" | "input" | "editor"
   title?: string
   message?: string
+  placeholder?: string
   options?: Array<string | { label?: string; value?: string }>
 }
 
