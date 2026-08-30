@@ -8,83 +8,67 @@ export COCKPIT_ASSET_DIR="$PWD/assets"
 [ -f build/qml/Heidr/libheidr_termplugin.so ] || {
   echo "plugin missing — build first: nix-shell --run 'cmake --build build -j'"; exit 1; }
 
-# MODE by launch context. The DEFAULT is PRIVATE: the personal scope only, files and
-# sessions all on this machine. Launching from the lovable workspace is the special
-# case that wires the work cockpit — local lovable scope (orchestrator + PR
-# reviewers) first, then the tunneled VM work scope; private/personal sessions
-# stay out of the work rail entirely (they have their own cockpit).
-for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DEV VENDORED_GHOSTTY; do
+for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK INSTANCE VM VM_USER VM_HOST DEMO DEV VENDORED_GHOSTTY; do
   cv="COCKPIT_$v"; hv="HEIDR_$v"
   if [ -n "${!cv:-}" ]; then export "$hv=${!cv}"
   elif [ -n "${!hv:-}" ]; then export "$cv=${!hv}"
   fi
 done
-if [ -z "${COCKPIT_AGENTD_SOCKS:-}" ] && [ -z "${COCKPIT_AGENTD_SOCK:-}" ]; then
-  # Mode from the cockpit ALREADY on this workspace, when there is one: the key
-  # means "refresh the cockpit I'm looking at". Inferring from the workspace NAME
-  # alone made one keybind mean two things depending on where you stood, and a
-  # relaunch could replace the lovable cockpit with a private one (David, 2026-08-25).
-  focused_ws_id=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .id' 2>/dev/null || true)
-  here=$(niri msg --json windows 2>/dev/null | jq -r --arg w "${focused_ws_id:-}" \
-    '.[] | select((.workspace_id|tostring) == $w) | .title // empty' 2>/dev/null | grep -m1 '^cockpit-qs' || true)
-  case "${here:-}" in
-    *lovable*) ws="lovable" ;;
-    *private*) ws="private" ;;
-    *) ws=$(niri msg --json workspaces 2>/dev/null | jq -r '.[] | select(.is_focused) | .name // empty' 2>/dev/null || true) ;;
-  esac
-  case "${ws:-}" in
-    lovable*)
-      scopes="lovable work"
-      export COCKPIT_SCOPE="${COCKPIT_SCOPE:-lovable}"
-      export COCKPIT_NEW_CWD="${COCKPIT_NEW_CWD:-$HOME/work/lovable}"
-      ;;
-    *)
-      scopes="personal"
-      export COCKPIT_SCOPE="${COCKPIT_SCOPE:-personal}"
-      export COCKPIT_NEW_CWD="${COCKPIT_NEW_CWD:-$HOME/personal}"
-      ;;
-  esac
-  socks=""
-  # Paths included even before the daemon binds: the rail re-dials every 2s, so a
-  # cold daemon just connects late instead of being silently absent forever.
-  for sc in $scopes; do socks="${socks:+$socks,}${XDG_RUNTIME_DIR}/agentd-${sc}.sock"; done
-  export COCKPIT_AGENTD_SOCKS="$socks"
-  echo "mode=${COCKPIT_SCOPE} COCKPIT_AGENTD_SOCKS=$COCKPIT_AGENTD_SOCKS"
-fi
 
-# Per-mode window identity + qs config-path identity, so a private and a work cockpit
-# can run SIMULTANEOUSLY: same path = the kill-old sweep above takes down the other
-# mode's instance, and identical titles leave cockpit-ipc unable to route to the focused
-# window. The private mode runs a symlink MIRROR of qs-shell (same live QML, distinct
-# path — the rail-nav harness pattern).
+requested_scope="${COCKPIT_SCOPE:-}"
+if [ -z "${COCKPIT_INSTANCE:-}" ]; then
+  case "$requested_scope" in
+    lovable|work) COCKPIT_INSTANCE=work ;;
+    personal)     COCKPIT_INSTANCE=personal ;;
+    *)            COCKPIT_INSTANCE=main ;;
+  esac
+fi
+export COCKPIT_INSTANCE
+mode_file="$HOME/.local/state/cockpit/mode-$COCKPIT_INSTANCE"
+if [ -z "$requested_scope" ] && [ -r "$mode_file" ]; then
+  requested_scope=$(cat "$mode_file")
+fi
+case "$requested_scope" in
+  lovable|work)
+    export COCKPIT_SCOPE=lovable
+    export COCKPIT_NEW_CWD="${COCKPIT_NEW_CWD:-$HOME/work/lovable}"
+    default_socks="$XDG_RUNTIME_DIR/agentd-lovable.sock,$XDG_RUNTIME_DIR/agentd-work.sock"
+    ;;
+  *)
+    export COCKPIT_SCOPE=personal
+    export COCKPIT_NEW_CWD="${COCKPIT_NEW_CWD:-$HOME/personal}"
+    default_socks="$XDG_RUNTIME_DIR/agentd-personal.sock"
+    ;;
+esac
+export COCKPIT_AGENTD_SOCKS="${COCKPIT_AGENTD_SOCKS:-$default_socks}"
+export COCKPIT_TITLE="cockpit-instance-$COCKPIT_INSTANCE"
+echo "instance=$COCKPIT_INSTANCE mode=$COCKPIT_SCOPE"
+
+# Config-path identity belongs to the window instance, not its current scope. Switching
+# Personal ↔ Work must not turn one process into the other process's duplicate.
 shellDir="$PWD/qs-shell"
-if [ "${COCKPIT_SCOPE:-lovable}" = "personal" ]; then
-  export COCKPIT_TITLE="${COCKPIT_TITLE:-cockpit-qs · private}"
-  mirror="$HOME/.local/state/cockpit/private-shell"
+if [ "$COCKPIT_INSTANCE" != "main" ]; then
+  safe_instance=$(printf '%s' "$COCKPIT_INSTANCE" | tr -c 'A-Za-z0-9_-' '_')
+  mirror="$HOME/.local/state/cockpit/instance-$safe_instance-shell"
   mkdir -p "$mirror"; rm -f "$mirror"/*.qml
   for f in "$PWD"/qs-shell/*.qml; do ln -s "$f" "$mirror/$(basename "$f")"; done
   shellDir="$mirror"
-else
-  export COCKPIT_TITLE="${COCKPIT_TITLE:-cockpit-qs · lovable}"
 fi
 for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DEV VENDORED_GHOSTTY; do
   cv="COCKPIT_$v"; hv="HEIDR_$v"
   [ -n "${!cv:-}" ] && export "$hv=${!cv}"
 done
 
-# Clear a stale instance of THIS MODE only (config-path scoped): a relaunch must show
-# the current QML, but the OTHER mode's cockpit keeps running — that is the whole point
-# of per-mode config paths. `qs kill -p` does not always take; verify and escalate.
+# Clear only this stable instance. Its current Personal/Work selection is mutable.
 qs kill -p "$shellDir" >/dev/null 2>&1 || true
 # Argv is NOT a reliable identity: the qs launcher rewrites itself to a bare
 # ".quickshell-wrapped" with no args, so a "-p <path>" scan misses it and the
 # old instance survives every relaunch (new + old then fight over the same
-# shell id and crash). Identify by environment: only OUR launches carry this
-# mode's COCKPIT_TITLE.
+# shell id and crash). Identify it by the stable instance environment.
 survivors_of_mode() {
   for pid in $(pgrep -x qs; pgrep -x quickshell; pgrep -x '\.quickshell-wra'); do
     [ "$pid" = "$$" ] && continue
-    if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qxF "COCKPIT_TITLE=$COCKPIT_TITLE"; then
+    if tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qxF "COCKPIT_INSTANCE=$COCKPIT_INSTANCE"; then
       echo "$pid"
     fi
   done

@@ -10,8 +10,39 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
-    // Per-mode title lets both Cockpit instances coexist and keeps focused-window IPC routing exact.
-    title: Quickshell.env("COCKPIT_TITLE") || Quickshell.env("HEIDR_TITLE") || "cockpit-qs"
+    readonly property string startupMode: {
+      var s = Quickshell.env("COCKPIT_SCOPE") || Quickshell.env("HEIDR_SCOPE") || "personal"
+      return s === "lovable" || s === "work" ? "work" : "personal"
+    }
+    property string scopeMode: startupMode
+    readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE") || "main"
+    readonly property var agentd: scopeMode === "work" ? workAgentd : personalAgentd
+    readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
+    function envSockPaths() {
+      var raw = String(Quickshell.env("COCKPIT_AGENTD_SOCKS") || Quickshell.env("HEIDR_AGENTD_SOCKS") || "").trim()
+      return raw ? raw.split(",").map(p => p.trim()).filter(p => p.length > 0) : null
+    }
+    function pathsFor(mode) {
+      var custom = mode === startupMode ? envSockPaths() : null
+      if (custom) return custom
+      return mode === "work"
+        ? [runtimeDir + "/agentd-lovable.sock", runtimeDir + "/agentd-work.sock"]
+        : [runtimeDir + "/agentd-personal.sock"]
+    }
+    function setScopeMode(mode) {
+      var next = mode === "work" ? "work" : "personal"
+      if (next === scopeMode) return
+      personalAgentd.setPresence("")
+      workAgentd.setPresence("")
+      scopeMode = next
+      modeWrite.running = false
+      modeWrite.command = ["sh", "-c", 'mkdir -p "$1"; printf %s "$2" > "$3"',
+                           "sh", Quickshell.env("HOME") + "/.local/state/cockpit", next,
+                           Quickshell.env("HOME") + "/.local/state/cockpit/mode-" + instanceName]
+      modeWrite.running = true
+      Qt.callLater(syncPresence)
+    }
+    title: "cockpit-qs · " + scopeMode + " · " + instanceName
     visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
     // Wide by default: the cockpit is two panes (nvim ~60% + rail ~40%), so 1600
     // left the terminal too narrow for real code once the rail took its share.
@@ -25,7 +56,8 @@ ShellRoot {
 
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
-      agentd.setPresence(windowFocused ? rail.selectedRaw : "")
+      personalAgentd.setPresence(scopeMode === "personal" && windowFocused ? rail.selectedRaw : "")
+      workAgentd.setPresence(scopeMode === "work" && windowFocused ? rail.selectedRaw : "")
     }
     onWindowFocusedChanged: syncPresence()
     Component.onCompleted: syncPresence()
@@ -76,10 +108,12 @@ ShellRoot {
         return win.pane
       }
       function title(): string      { return win.title }   // cockpit-ipc instance routing
+      function scopeMode(): string  { return win.scopeMode }
+      function switchScope(): string { win.setScopeMode(win.scopeMode === "work" ? "personal" : "work"); return win.scopeMode }
       // Parent binding for the pane's nvim: its NVIM_LISTEN_ADDRESS is unique to THIS
       // instance, so cockpit-cross can target its own Cockpit without asking niri anything.
       function nvimSock(): string   { return term.nvimSocket }
-      function attachAgentd(path: string): string { return agentd.attachSocket(path) ? "ok" : "rejected" }
+      function attachAgentd(path: string): string { return workAgentd.attachSocket(path) ? "ok" : "rejected" }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
       // Super+i ask-jump: land on the session that needs an answer.
       function selectSession(n: string): string { win.pane = "rail"; rail.jumpToSession(n); return "ok" }
@@ -158,8 +192,8 @@ ShellRoot {
       // when several sockets are wired up (COCKPIT_AGENTD_SOCKS).
       function sessions(): string {
         var out = []
-        for (var i = 0; i < agentd.sessions.length; i++) {
-          var s = agentd.sessions[i]
+        for (var i = 0; i < win.agentd.sessions.length; i++) {
+          var s = win.agentd.sessions[i]
           out.push((s.scope || "?") + "/" + s.name + " " + (s.status || "?"))
         }
         return out.length ? out.join("\n") : "(empty)"
@@ -171,7 +205,17 @@ ShellRoot {
     // the width unsnapped while the height snapped correctly.
     readonly property real termDpr: term.dpr > 0 ? term.dpr : 1
 
-    AgentdState { id: agentd; scope: "lovable" }
+    Process { id: modeWrite }
+    AgentdState {
+      id: personalAgentd
+      scope: "personal"
+      configuredSockPaths: win.pathsFor("personal")
+    }
+    AgentdState {
+      id: workAgentd
+      scope: "lovable"
+      configuredSockPaths: win.pathsFor("work")
+    }
 
     Rectangle {
       anchors.fill: parent
@@ -240,12 +284,15 @@ ShellRoot {
           id: rail
           width: parent.width - termCol.width - 1
           height: parent.height
-          agentd: agentd
+          agentd: win.agentd
+          scopeMode: win.scopeMode
+          instanceName: win.instanceName
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
           nvimSock: term.nvimSocket
           focused: win.pane === "rail"
           onFocusNvim: win.pane = "nvim"
           onRequestFocus: win.pane = "rail"
+          onRequestScopeMode: mode => win.setScopeMode(mode)
           onActiveFocusChanged: if (activeFocus) win.pane = "rail"
         }
       }

@@ -10,6 +10,7 @@ Item {
   id: root
 
   property string scope: "lovable"
+  property var configuredSockPaths: null
   property bool connected: false
   property var sessions: []      // merged roster across every scope, each tagged .scope
   property int gen: 0            // bumped on every roster push
@@ -23,6 +24,7 @@ Item {
   // still selects a single daemon. Order matters: on a name collision the EARLIER
   // socket wins, so list the local scope first to keep it addressable.
   function envSockPaths() {
+    if (configuredSockPaths !== null) return configuredSockPaths
     var multi = String(cockpitEnv("AGENTD_SOCKS") || "").trim()
     if (multi) return multi.split(",").map(p => p.trim()).filter(p => p.length > 0)
     var one = cockpitEnv("AGENTD_SOCK")

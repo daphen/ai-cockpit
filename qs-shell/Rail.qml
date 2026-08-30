@@ -17,6 +17,9 @@ Item {
   clip: true
 
   property var agentd: null
+  property string scopeMode: "personal"
+  property string instanceName: "main"
+  signal requestScopeMode(string mode)
   // Set by shell.qml from TermView.nvimSocket — the socket THIS instance's nvim listens
   // on. Never rebuild this path here: a guessed shared name is how the rail ended up
   // talking to a socket a newer Cockpit had already unlinked.
@@ -1024,8 +1027,9 @@ Item {
   // loop — hence the explicit recompute.)
   property string defaultRaw: ""
   property string savedRaw: ""
-  readonly property string selectionStatePath: Quickshell.env("HOME") + "/.local/state/cockpit/selected-" + (cockpitEnv("SCOPE") || "personal")
+  readonly property string selectionStatePath: Quickshell.env("HOME") + "/.local/state/cockpit/selected-" + instanceName + "-" + scopeMode
   FileView {
+    id: selectionFile
     path: rail.selectionStatePath
     onLoaded: { rail.savedRaw = String(text() || "").trim(); rail._recomputeDefault() }
   }
@@ -1047,6 +1051,13 @@ Item {
     defaultRaw = pool.length ? pool[0].name : ""
   }
   onLiveSessionsChanged: _recomputeDefault()
+  onScopeModeChanged: {
+    activeRaw = ""
+    defaultRaw = ""
+    savedRaw = ""
+    rosterOverride = false
+    Qt.callLater(function() { selectionFile.reload(); rail._recomputeDefault() })
+  }
   Connections {
     target: rail.agentd
     function onSettledChanged() { rail._recomputeDefault() }
@@ -1241,7 +1252,7 @@ Item {
   property string newMode: ""      // "" = choosing, then "local" | "remote"
   // Remote (VM worktree) sessions are a LOVABLE concept — the personal scope has no
   // VM, so its new-session flow skips the l/r chooser and goes straight to local.
-  readonly property bool remoteOffered: cockpitEnv("SCOPE") === "lovable"
+  readonly property bool remoteOffered: scopeMode === "work"
   // Folder-first new-session flow (declarative-sessions plan): n opens a
   // FOLDER list; picking one shows resume-or-new for that folder.
   property var newFolders: []       // [{path, name}] recent-first
@@ -1464,11 +1475,9 @@ Item {
       vmWt.command = ["vm-wt", n]
       vmWt.running = true
     } else if (agentd) {
-      // The launcher exports the mode's home dir: ~/work/lovable in the work cockpit,
-      // ~/personal in the private one — a hardcoded lovable path spawned private
-      // sessions into the work checkout.
       agentd.send({ type: "spawn", session: n.toLowerCase(),
-                    cwd: cockpitEnv("NEW_CWD") || (Quickshell.env("HOME") + "/work/lovable") })
+                    cwd: scopeMode === "work" ? Quickshell.env("HOME") + "/work/lovable"
+                                              : Quickshell.env("HOME") + "/personal" })
     }
     closeNew()
   }
@@ -1848,6 +1857,9 @@ Item {
       }
       return true
     case Qt.Key_N:      rail.openNew(); return true             // new session
+    case Qt.Key_W:
+      if (shift) { rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work"); return true }
+      break
     case Qt.Key_P:
       if (shift) { rail.openPlanBinding(); return true }
       break
@@ -2579,6 +2591,26 @@ Item {
             // On the ORCHESTRATOR this icon is also the handover switch — it already
             // says which host runs the role, so a second pill was a duplicate. Hover
             // expands it into a labelled control; elsewhere it stays a plain marker.
+            Rectangle {
+              id: scopeSwitch
+              anchors.verticalCenter: parent.verticalCenter
+              width: scopeLabel.implicitWidth + 20
+              height: 24
+              radius: 12
+              color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.13)
+              border.width: 1
+              border.color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.55)
+              Text {
+                id: scopeLabel
+                anchors.centerIn: parent
+                text: rail.scopeMode.toUpperCase()
+                color: rail.scopeMode === "work" ? Theme.electric : Theme.orange
+                font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 700 }
+              }
+              TapHandler {
+                onTapped: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
+              }
+            }
             Rectangle {
               id: locSlot
               anchors.verticalCenter: parent.verticalCenter
