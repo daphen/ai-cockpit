@@ -1262,9 +1262,10 @@ Item {
   function scanFolders() {
     newFolders = []
     var home = Quickshell.env("HOME")
-    var cmd = remoteOffered
+    var roots = remoteOffered
       ? "ls -dt " + home + "/work/lovable " + home + "/work/lovable.*/ 2>/dev/null | sed 's:/*$::'"
       : "ls -dt " + home + "/personal/*/ 2>/dev/null | sed 's:/*$::'"
+    var cmd = "{ " + roots + "; zoxide query -l 2>/dev/null | head -80; } | awk 'NF && !seen[$0]++'"
     folderScan.command = ["sh", "-c", cmd]
     folderScan.running = true
   }
@@ -1377,11 +1378,15 @@ Item {
     // A typed PATH (~/x or /x) becomes a pickable row — folders outside the
     // scope roots are one keystroke away instead of unreachable.
     if (f.charAt(0) === "~" || f.charAt(0) === "/") {
-      var pth = newFilter.replace(/^~/, Quickshell.env("HOME"))
-      return [{ path: pth, name: newFilter, typed: true }]
+      var home = Quickshell.env("HOME")
+      var pth = newFilter.replace(/^~/, home)
+      var rows = newFolders.filter(d => d.path.toLowerCase().indexOf(pth.toLowerCase()) === 0)
+        .map(d => ({ path: d.path, name: d.path.indexOf(home) === 0 ? "~" + d.path.slice(home.length) : d.path }))
+      if (!rows.some(d => d.path === pth)) rows.push({ path: pth, name: newFilter, typed: true })
+      return rows
     }
     if (!f.length) return newFolders
-    return newFolders.filter(d => d.name.toLowerCase().indexOf(f) >= 0)
+    return newFolders.filter(d => d.name.toLowerCase().indexOf(f) >= 0 || d.path.toLowerCase().indexOf(f) >= 0)
   }
   // The visible window FOLLOWS the cursor (a fixed first-12 slice let j walk
   // the selection off-stage).
@@ -1762,8 +1767,17 @@ Item {
     }
     if (newMode === "remote" || newMode === "plan-new") return false
     var rows = newSpawnPending ? newPlanRows : newFolder.length ? newWhichRows : newFolderRows
-    if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { newCur = Math.min(rows.length - 1, newCur + 1); return true }
-    if (e.key === Qt.Key_K || e.key === Qt.Key_Up)   { newCur = Math.max(0, newCur - 1); return true }
+    if (e.key === Qt.Key_Down || ((newFolder.length || newSpawnPending) && e.key === Qt.Key_J)) { newCur = Math.min(Math.max(0, rows.length - 1), newCur + 1); return true }
+    if (e.key === Qt.Key_Up || ((newFolder.length || newSpawnPending) && e.key === Qt.Key_K))   { newCur = Math.max(0, newCur - 1); return true }
+    if (!newFolder.length && !newSpawnPending && e.key === Qt.Key_Tab) {
+      var completion = newFolderRows[newCur]
+      if (completion) {
+        var home = Quickshell.env("HOME")
+        newFilter = completion.path.indexOf(home) === 0 ? "~" + completion.path.slice(home.length) : completion.path
+        newCur = 0
+      }
+      return true
+    }
     if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
       if (newSpawnPending) activatePlan(newPlanRows[newCur])
       else if (!newFolder.length) { var d = newFolderRows[newCur]; if (d) pickFolder(d.path) }
@@ -3383,7 +3397,7 @@ Item {
                 : rail.newMode === "plan-new" ? "enter dispatches /plan-ticket · esc cancels"
                 : rail.newSpawnPending      ? "type to filter plans · j/k + enter binds · esc back"
                 : rail.newFolder.length     ? "j/k + enter — resume or start new · esc back"
-                : "type to filter, or ~/path for any folder · j/k + enter picks" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
+                : "type a name or ~/path · zoxide matches · ↑/↓ picks · tab completes · enter opens" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
             color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
         }
