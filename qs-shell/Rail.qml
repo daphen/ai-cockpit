@@ -2592,26 +2592,6 @@ Item {
             // says which host runs the role, so a second pill was a duplicate. Hover
             // expands it into a labelled control; elsewhere it stays a plain marker.
             Rectangle {
-              id: scopeSwitch
-              anchors.verticalCenter: parent.verticalCenter
-              width: scopeLabel.implicitWidth + 20
-              height: 24
-              radius: 12
-              color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.13)
-              border.width: 1
-              border.color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.55)
-              Text {
-                id: scopeLabel
-                anchors.centerIn: parent
-                text: rail.scopeMode.toUpperCase()
-                color: rail.scopeMode === "work" ? Theme.electric : Theme.orange
-                font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 700 }
-              }
-              TapHandler {
-                onTapped: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
-              }
-            }
-            Rectangle {
               id: locSlot
               anchors.verticalCenter: parent.verticalCenter
               readonly property bool isSwitch: rail.selectedIsOrchestrator
@@ -3629,6 +3609,27 @@ Item {
       RowLayout {
         Layout.fillWidth: true
         spacing: 6
+
+        Rectangle {
+          id: scopeSwitch
+          Layout.alignment: Qt.AlignVCenter
+          implicitWidth: scopeLabel.implicitWidth + 20
+          implicitHeight: 22
+          radius: 11
+          color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.13)
+          border.width: 1
+          border.color: Qt.alpha(rail.scopeMode === "work" ? Theme.electric : Theme.orange, 0.55)
+          Text {
+            id: scopeLabel
+            anchors.centerIn: parent
+            text: rail.scopeMode.toUpperCase()
+            color: rail.scopeMode === "work" ? Theme.electric : Theme.orange
+            font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 700 }
+          }
+          TapHandler {
+            onTapped: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
+          }
+        }
 
         // Watchdog state lives here rather than in the header cluster: it is status you
         // glance at, not something you act on mid-stream, and the header had three
