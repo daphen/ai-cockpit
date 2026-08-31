@@ -101,18 +101,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .scope-tabs button, .scope-badge, .plan-chip { border: 1px solid var(--hairline); border-radius: 999px; background: transparent; color: var(--muted); font-size: 10px; padding: 4px 8px; }
 .group-tabs button, .scope-tabs button { transition: background-color var(--motion-text) var(--motion-smooth), border-color var(--motion-text) var(--motion-smooth), color var(--motion-text) var(--motion-smooth); }
 .scope-tabs button.active { border-color: var(--ink); background: var(--ink); color: var(--bg); }
-.roster { margin: 0; padding: 8px; list-style: none; }
-.roster li { margin-bottom: 2px; }
-.session-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 42px; padding: 7px 9px 7px calc(9px + var(--session-depth, 0) * 20px); border: 1px solid transparent; border-radius: 12px; background: transparent; text-align: left; }
+.roster { min-width: 0; max-width: 100%; margin: 0; padding: 8px; overflow-x: hidden; list-style: none; }
+.roster li { min-width: 0; max-width: 100%; margin-bottom: 2px; }
+.session-row { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; max-width: 100%; min-height: 42px; padding: 7px 9px 7px calc(9px + var(--session-depth, 0) * 20px); overflow: hidden; border: 1px solid transparent; border-radius: 12px; background: transparent; text-align: left; }
 .session-row.selected { border-color: var(--hairline-soft); background: var(--surface-1); }
-.session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
-.role-badge { flex: none; border: 1px solid var(--hairline-soft); border-radius: 999px; padding: 1px 6px; color: var(--muted); font-size: 10px; line-height: 16px; }
+.session-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 600; }
+.role-badge { flex: 0 1 auto; min-width: 0; max-width: 76px; overflow: hidden; border: 1px solid var(--hairline-soft); border-radius: 999px; padding: 1px 6px; color: var(--muted); font-size: 10px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .linked-mark { flex: none; color: var(--muted); }
-.row-spacer { flex: 1; }
+.row-spacer { flex: 0 0 0; min-width: 0; }
 /* Status WORDS are gone — the dot carries idle/asleep, matching the desktop rail. What
    remains is the running tool, and it fades instead of blinking at every tool boundary. */
-.tool-word-slot { position: relative; display: grid; flex: none; min-width: 0; }
-.tool-word { grid-area: 1 / 1; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.tool-word-slot { position: relative; display: grid; flex: 0 1 auto; min-width: 0; max-width: 84px; overflow: hidden; }
+.tool-word { grid-area: 1 / 1; min-width: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 /* The marker leads the row: cloud = the session runs on the dev VM, ▭ = this machine. */
 .host-mark { flex: none; width: 14px; height: 14px; color: var(--muted); }
 /* A worker whose daemon went away — the only icon in the row, red, left of the state. */
@@ -200,21 +200,22 @@ button.primary { border-color: var(--ink); background: var(--ink); color: var(--
 .composer-drag-handle { position: absolute; z-index: 2; top: 0; left: 50%; width: 52px; height: 24px; border: 0; padding: 0; background: transparent; touch-action: pan-x; transform: translateX(-50%); }
 .composer-drag-handle::before { content: ""; position: absolute; top: 5px; left: 50%; width: 28px; height: 3px; border-radius: 999px; background: var(--hairline); transform: translateX(-50%); }
 .composer-glance { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 48px; border: 0; padding: 0; background: transparent; text-align: left; pointer-events: auto; }
-.composer-session { display: flex; align-items: center; min-width: 0; min-height: 44px; padding: 0 6px; text-align: left; }
-.composer-glance strong { display: block; overflow: hidden; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
+.composer-session { display: flex; flex: 1 1 auto; align-items: center; min-width: 0; min-height: 44px; padding: 0 6px; text-align: left; }
+.composer-glance strong { display: block; max-width: 100%; overflow: hidden; color: var(--ink-2); font-size: 11px; letter-spacing: .08em; text-overflow: ellipsis; white-space: nowrap; }
 .composer-dot-row { display: flex; align-items: center; gap: 5px; min-height: 44px; margin-left: auto; padding: 0 6px; }
 .composer-dot-slot { display: grid; place-items: center; width: 16px; height: 16px; }
 .composer-dot-row .status-dot { width: 7px; height: 7px; }
 .needs-input-dot { background: var(--orange); }
 .inline-roster-shell { min-height: 0; overflow: hidden; pointer-events: auto; will-change: height, opacity, clip-path; }
 .inline-roster-shell[aria-hidden="true"] { pointer-events: none; }
-.inline-roster-content { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; max-height: min(48dvh, 360px); overflow: hidden; border-top: 1px solid var(--hairline-soft); }
-.inline-roster-content.has-featured { grid-template-rows: auto auto minmax(0, 1fr); }
+.inline-roster-content { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; min-width: 0; max-width: 100%; max-height: min(48dvh, 360px); overflow: hidden; border-top: 1px solid var(--hairline-soft); }
+.inline-roster-content.has-featured { grid-template-rows: auto minmax(0, 1fr) auto; }
+.featured-nested-roster { min-width: 0; max-width: 100%; overflow: hidden; }
 .featured-nested-roster .roster { max-height: 90px; padding: 5px 5px 2px; overflow-y: auto; }
-.inline-roster-stack { position: relative; min-height: 0; }
-.inline-roster-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; max-height: calc(min(48dvh, 360px) - 48px); overflow: hidden; will-change: opacity; }
+.inline-roster-stack { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+.inline-roster-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); width: 100%; min-width: 0; max-width: 100%; max-height: calc(min(48dvh, 360px) - 48px); overflow: hidden; will-change: opacity; }
 .inline-roster-content.has-featured .inline-roster-panel { max-height: calc(min(48dvh, 360px) - 98px); }
-.inline-roster-content .group-tabs { margin: 7px 5px 2px; }
+.inline-roster-content .group-tabs { margin: 2px 5px 7px; }
 .inline-roster-content .scope-tabs { padding: 5px 6px 7px; }
 .inline-roster-content .roster { min-height: 0; overflow-y: auto; padding: 5px; }
 .queued-messages { display: grid; gap: 5px; max-height: 112px; margin: 9px 0 0; padding: 0 5px; overflow-y: auto; list-style: none; }

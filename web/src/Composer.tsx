@@ -244,7 +244,6 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
         <m.div className="inline-roster-shell" aria-hidden={!rosterExpanded} inert={!rosterExpanded} style={{ height: rosterShellHeight, opacity: rosterOpacity, clipPath: rosterClip }}>
         <div ref={rosterContent} className={`inline-roster-content ${rosterFeatured ? "has-featured" : ""}`}>
           {rosterFeatured}
-          {rosterHeader}
           <div className="inline-roster-stack">
             <AnimatePresence initial={false} mode="popLayout">
               <m.div
@@ -259,6 +258,7 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
               </m.div>
             </AnimatePresence>
           </div>
+          {rosterHeader}
         </div>
         </m.div>
       </m.div>
