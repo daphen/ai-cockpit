@@ -433,6 +433,10 @@ Item {
     }
     return out
   }
+  function shownFileRef(ref) {
+    var r = String(ref || "")
+    return /^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(r) ? "/" + r : r
+  }
   function openFileRef(ref) {
     var r = String(ref || "")
     var line = r.match(/:(\d+)$/)
@@ -454,7 +458,7 @@ Item {
         .match(/^`?((?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?`?[.,;:]?$/)
       if (solo) {
         flush()
-        out.push({ fileRef: solo[1], shown: solo[1] + (solo[2] || ""), offset: pos })
+        out.push({ fileRef: solo[1], shown: shownFileRef(solo[1]) + (solo[2] || ""), offset: pos })
         pos += lines[i].length
         start = pos
         continue
