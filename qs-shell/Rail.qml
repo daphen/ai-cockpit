@@ -792,13 +792,23 @@ Item {
   }
 
   function openInNvim(path) {
-    if (!path || !String(path).length) return
+    if (!path || !String(path).length || !nvimSock.length) return
     var p = String(path)
-    // Resolve worktree-relative paths against the selected session's cwd — nvim's
-    // own cwd is the cockpit dir, so a bare "web/…" would open an empty buffer.
-    if (p.charAt(0) !== "/" && changesCwd) p = changesCwd + "/" + p
-    p = rail._localPath(p)   // box path → local SSHFS mount (no-op for local sessions)
-    if (!nvimSock.length) return
+    if (p.indexOf("~/") === 0) p = Quickshell.env("HOME") + p.substring(1)
+    if (p.charAt(0) !== "/") {
+      var repoPath = rail._localPath(changesCwd ? changesCwd + "/" + p : p)
+      if (/^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(p)) {
+        var vaultPath = Quickshell.env("HOME") + "/personal/notes/storage/" + p
+        var chosen = "filereadable(" + JSON.stringify(vaultPath) + ") ? "
+                   + JSON.stringify(vaultPath) + " : " + JSON.stringify(repoPath)
+        Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
+                                 'execute("edit " . fnameescape(' + chosen + "))"])
+        rail.focusNvim()
+        return
+      }
+      p = repoPath
+    }
+    p = rail._localPath(p)
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote", p])
     rail.focusNvim()
   }
