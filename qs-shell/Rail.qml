@@ -2574,7 +2574,27 @@ Item {
         // The glance stays as the HEADER when expanded — the active session lives
         // there (big title + orb), never duplicated as a list row.
         implicitHeight: glanceCol.implicitHeight + (rail.rosterExpanded ? rosterInner.implicitHeight + 4 : 0) + 8
-        Behavior on implicitHeight { NumberAnimation { duration: 130; easing.type: Easing.OutCubic } }
+        Behavior on implicitHeight {
+          NumberAnimation {
+            duration: Motion.slow
+            easing.type: Motion.easeEmphasized
+            easing.bezierCurve: Motion.curveEmphasized
+          }
+        }
+
+        function collapsedOrbX(rowIndex) {
+          var count = 0
+          var rank = -1
+          for (var i = 0; i < rosterModel.count; i++) {
+            var data = rosterModel.get(i).d
+            if ((data.depth || 0) !== 0) continue
+            if (i === rowIndex) rank = count
+            count++
+          }
+          if (rank < 0) return width
+          var rightMargin = rail.featuredStreaming ? 44 : 32
+          return width - rightMargin - (count * 16 + Math.max(0, count - 1) * 12) + rank * 28
+        }
 
         // Glance = the active session's home in BOTH states: collapsed it is the
         // whole roster; expanded it becomes the header above the others-list.
@@ -2797,37 +2817,9 @@ Item {
               Item {
                 readonly property var md: model.d
                 readonly property bool self: (md.rawName || md.name) === rail.selectedRaw
-                // needs-input outranks status here too: without it a collapsed
-                // roster hid a parked ask behind an ordinary green spinner.
-                readonly property bool hasAsk: {
-                  rail.agentd ? rail.agentd.askGen : 0
-                  return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
-                }
                 visible: !self && (md.depth || 0) === 0
                 width: 16; height: 16
                 Component.onCompleted: rail.probeDotCreates++
-                // The working signifier is the ORB here too — same grammar as the
-                // expanded rows and the composer glance, not a separate spinner.
-                ThinkingOrb {
-                  anchors.centerIn: parent
-                  width: 16; height: 16
-                  running: parent.visible && !parent.hasAsk && md.status === "streaming"
-                  glow: rail.actionGlow(md.rawName || md.name)
-                  seedKey: md.rawName || md.name
-                }
-                Rectangle {
-                  anchors.centerIn: parent; visible: parent.visible && !parent.hasAsk && md.status !== "streaming"
-                  width: 7; height: 7; radius: 3.5; color: rail.dotColor(md.status)
-                }
-                Rectangle {
-                  anchors.centerIn: parent; visible: parent.visible && parent.hasAsk
-                  width: 9; height: 9; radius: 4.5; color: Theme.orange
-                  SequentialAnimation on opacity {
-                    running: visible; loops: Animation.Infinite
-                    NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-                    NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
-                  }
-                }
               }
               }
             }
@@ -3006,8 +2998,8 @@ Item {
                   Layout.alignment: Qt.AlignVCenter
                   ThinkingOrb {
                     anchors.fill: parent
-                    visible: sessRow.streaming && !sessRow.hasAsk
-                    running: sessRow.streaming && !sessRow.hasAsk
+                    visible: sessRow.streaming && !sessRow.hasAsk && (modelData.depth || 0) > 0
+                    running: visible
                     nodes: 13
                     glow: rail.actionGlow(modelData.rawName || modelData.name)
                     seedKey: modelData.rawName || modelData.name
@@ -3015,13 +3007,13 @@ Item {
                   }
                   Rectangle {
                     anchors.centerIn: parent
-                    visible: !sessRow.streaming && !sessRow.hasAsk
+                    visible: !sessRow.streaming && !sessRow.hasAsk && (modelData.depth || 0) > 0
                     width: 7; height: 7; radius: 3.5
                     color: rail.dotColor(modelData.status || modelData.state || "")
                   }
                   Rectangle {
                     anchors.centerIn: parent
-                    visible: sessRow.hasAsk
+                    visible: sessRow.hasAsk && (modelData.depth || 0) > 0
                     width: 9; height: 9; radius: 4.5; color: Theme.orange
                     SequentialAnimation on opacity {
                       running: visible; loops: Animation.Infinite
@@ -3030,6 +3022,55 @@ Item {
                     }
                   }
                 }
+              }
+            }
+          }
+        }
+
+        // Root-session markers stay mounted while moving between the collapsed
+        // glance and expanded row, preserving orb shader phase exactly.
+        Repeater {
+          model: rosterModel
+          Item {
+            id: sharedRosterOrb
+            readonly property var md: model.d
+            readonly property bool rootSession: (md.depth || 0) === 0
+            readonly property bool hasAsk: {
+              rail.agentd ? rail.agentd.askGen : 0
+              return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
+            }
+            width: rail.rosterExpanded ? 20 : 16
+            height: width
+            x: rail.rosterExpanded ? rosterCard.width - 34 : rosterCard.collapsedOrbX(index) - 14
+            y: rail.rosterExpanded ? rosterInner.y + index * 43 + 10 : glanceCol.y + 18
+            visible: rootSession
+            z: 5
+
+            Behavior on x { NumberAnimation { duration: Motion.slow; easing.type: Motion.easeEmphasized; easing.bezierCurve: Motion.curveEmphasized } }
+            Behavior on y { NumberAnimation { duration: Motion.slow; easing.type: Motion.easeEmphasized; easing.bezierCurve: Motion.curveEmphasized } }
+            Behavior on width { NumberAnimation { duration: Motion.slow; easing.type: Motion.easeEmphasized; easing.bezierCurve: Motion.curveEmphasized } }
+
+            ThinkingOrb {
+              anchors.fill: parent
+              visible: !sharedRosterOrb.hasAsk && sharedRosterOrb.md.status === "streaming"
+              running: visible
+              glow: rail.actionGlow(sharedRosterOrb.md.rawName || sharedRosterOrb.md.name)
+              seedKey: sharedRosterOrb.md.rawName || sharedRosterOrb.md.name
+            }
+            Rectangle {
+              anchors.centerIn: parent
+              visible: !sharedRosterOrb.hasAsk && sharedRosterOrb.md.status !== "streaming"
+              width: 7; height: 7; radius: 3.5
+              color: rail.dotColor(sharedRosterOrb.md.status || sharedRosterOrb.md.state || "")
+            }
+            Rectangle {
+              anchors.centerIn: parent
+              visible: sharedRosterOrb.hasAsk
+              width: 9; height: 9; radius: 4.5; color: Theme.orange
+              SequentialAnimation on opacity {
+                running: visible; loops: Animation.Infinite
+                NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
+                NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutQuad }
               }
             }
           }
