@@ -10,12 +10,13 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
+    readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE") || "main"
     readonly property string startupMode: {
       var s = Quickshell.env("COCKPIT_SCOPE") || Quickshell.env("HEIDR_SCOPE") || "personal"
       return s === "lovable" || s === "work" ? "work" : "personal"
     }
+    readonly property string modeStatePath: Quickshell.env("HOME") + "/.local/state/cockpit/mode-" + instanceName
     property string scopeMode: startupMode
-    readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE") || "main"
     readonly property var agentd: scopeMode === "work" ? workAgentd : personalAgentd
     readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
     function envSockPaths() {
@@ -37,10 +38,24 @@ ShellRoot {
       scopeMode = next
       modeWrite.running = false
       modeWrite.command = ["sh", "-c", 'mkdir -p "$1"; printf %s "$2" > "$3"',
-                           "sh", Quickshell.env("HOME") + "/.local/state/cockpit", next,
-                           Quickshell.env("HOME") + "/.local/state/cockpit/mode-" + instanceName]
+                           "sh", Quickshell.env("HOME") + "/.local/state/cockpit", next, modeStatePath]
       modeWrite.running = true
       Qt.callLater(syncPresence)
+    }
+    function restoreScopeMode(mode) {
+      var next = mode === "work" ? "work" : mode === "personal" ? "personal" : ""
+      if (!next || next === scopeMode) return
+      personalAgentd.setPresence("")
+      workAgentd.setPresence("")
+      scopeMode = next
+      Qt.callLater(syncPresence)
+    }
+    FileView {
+      id: modeState
+      path: win.modeStatePath
+      watchChanges: true
+      onFileChanged: reload()
+      onLoaded: win.restoreScopeMode(String(text() || "").trim())
     }
     title: "cockpit-qs · " + scopeMode + " · " + instanceName
     visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
