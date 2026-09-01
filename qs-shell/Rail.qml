@@ -2575,11 +2575,7 @@ Item {
         // there (big title + orb), never duplicated as a list row.
         implicitHeight: glanceCol.implicitHeight + (rail.rosterExpanded ? rosterInner.implicitHeight + 4 : 0) + 8
         Behavior on implicitHeight {
-          NumberAnimation {
-            duration: Motion.slow
-            easing.type: Motion.easeEmphasized
-            easing.bezierCurve: Motion.curveEmphasized
-          }
+          NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad }
         }
 
         function collapsedOrbX(rowIndex) {
@@ -3046,9 +3042,9 @@ Item {
             visible: rootSession
             z: 5
 
-            Behavior on x { NumberAnimation { duration: Motion.slow; easing.type: Motion.easeEmphasized; easing.bezierCurve: Motion.curveEmphasized } }
-            Behavior on y { NumberAnimation { duration: Motion.slow; easing.type: Motion.easeEmphasized; easing.bezierCurve: Motion.curveEmphasized } }
-            Behavior on width { NumberAnimation { duration: Motion.slow; easing.type: Motion.easeEmphasized; easing.bezierCurve: Motion.curveEmphasized } }
+            Behavior on x { NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad } }
+            Behavior on y { NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad } }
+            Behavior on width { NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad } }
 
             ThinkingOrb {
               anchors.fill: parent
