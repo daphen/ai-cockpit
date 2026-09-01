@@ -4,7 +4,7 @@ import Quickshell.Io
 import QsLib
 
 // The cockpit's statusline: renders the state nvim pushes via cockpit/chin.lua
-// (a watched JSON file, one per cockpit mode). Mirrors the retired lualine
+// (a watched JSON file, one per cockpit instance). Mirrors the retired lualine
 // layout — left: path+modified · diagnostics · searchcount · REC pill;
 // right: filetype · worktree diff · plan chip · ticket chip · scrollbar glyph —
 // but animated: values crossfade (out-up / in-from-below), numbers pop, and
@@ -16,10 +16,8 @@ Rectangle {
   color: Theme.bgDim
 
   property var st: ({})
-  readonly property string scope: {
-    var s = Quickshell.env("COCKPIT_SCOPE") || Quickshell.env("HEIDR_SCOPE")
-    return s || "personal"
-  }
+  readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE")
+      || Quickshell.env("HEIDR_INSTANCE") || "main"
   function _n(v) { return typeof v === "number" ? v : 0 }
 
   // Animated value cell: crossfades text changes (old rises out, new enters from
@@ -87,7 +85,7 @@ Rectangle {
   }
 
   FileView {
-    path: Quickshell.env("HOME") + "/.local/state/cockpit/chin-" + chin.scope + ".json"
+    path: Quickshell.env("HOME") + "/.local/state/cockpit/chin-" + chin.instanceName + ".json"
     watchChanges: true
     onFileChanged: reload()
     onLoaded: {
