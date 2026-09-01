@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import QsLib
 
 // Client for agentd's unix socket ($XDG_RUNTIME_DIR/agentd-<scope>.sock).
 // On connect the daemon pushes {type:"roster",sessions:[...]}; it also streams
@@ -850,15 +851,7 @@ Item {
     if (t === "tool_execution_start") {
       const tn = m.toolName || ""
       const args = m.args || {}
-      // Agents write plenty of code THROUGH bash (inline heredoc scripts, sed -i,
-      // tee, redirects into files). Those read as editing, not running -- without
-      // this the orb sat orange through entire coding sessions.
-      var act = tn
-      if (tn === "bash" || tn === "shell") {
-        const cmd = String(args.command || args.cmd || "")
-        if (/(<<-?\s*'?[A-Z]{2,})|(\bsed\s+-i)|(\btee\s)|(>>?\s*['"]?[\w~.\/-]+\.[A-Za-z]{1,4})/.test(cmd)) act = "bash-write"
-      }
-      _curTool.set(sid, act)
+      _curTool.set(sid, AgentActivity.classify(tn, args))
       _curToolAt.set(sid, Date.now())
       _curToolLive.set(sid, true)
       _curToolId.set(sid, m.toolCallId || "")

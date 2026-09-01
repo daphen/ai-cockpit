@@ -980,13 +980,7 @@ Item {
   }
   function actionGlow(sid) {
     agentd ? agentd.curToolGen : 0
-    var t = agentd ? agentd.curToolFor(sid) : ""
-    if (t === "edit" || t === "write" || t === "create" || t === "str_replace" || t === "bash-write") return Theme.green
-    if (t === "bash" || t === "shell") return Theme.orange
-    if (t === "read" || t === "grep" || t === "glob" || t === "find" || t === "ls" || t === "ripgrep" || t === "search_files") return Theme.sky
-    // Qt.color, not a bare string: activeRing reads .hslHue off this return,
-    // and on a raw string that's undefined -> the outline computed a garbage hue.
-    return Qt.color("#3aa0ff")
+    return AgentActivity.colorFor(agentd ? agentd.curToolFor(sid) : "")
   }
   // Composer chrome color is FIXED per theme, not action-reactive — the input
   // frame recoloring with every tool change was too much motion. Light rides
