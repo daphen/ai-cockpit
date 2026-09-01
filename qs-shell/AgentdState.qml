@@ -171,6 +171,34 @@ Item {
   function curToolAtFor(sid) { return _curToolAt.get(sid) || 0 }
   function curToolLiveFor(sid) { return _curToolLive.get(sid) === true }
   function curToolIdFor(sid) { return _curToolId.get(sid) || "" }
+  function _reconcileCurrentTools() {
+    var authoritative = new Map()
+    for (var index in _rosters) {
+      var roster = _rosters[index] || []
+      for (var i = 0; i < roster.length; i++) {
+        var session = roster[i]
+        var name = session.name || session.id || ""
+        if (name && session.currentTool)
+          authoritative.set(name, String(session.currentTool))
+      }
+    }
+
+    var changed = false
+    for (const name of Array.from(_curTool.keys())) {
+      if (authoritative.has(name)) continue
+      _curTool.delete(name)
+      _curToolAt.delete(name)
+      _curToolLive.delete(name)
+      _curToolId.delete(name)
+      changed = true
+    }
+    for (const [name, tool] of authoritative) {
+      if (_curTool.get(name) === tool) continue
+      _curTool.set(name, tool)
+      changed = true
+    }
+    if (changed) curToolGen++
+  }
   // Kill just the running tool call's subprocesses; the turn survives.
   function abortTool(sid) { send({ type: "abort_tool", session: sid }) }
   // Last file each session touched — so switching TO a mid-turn session can land
@@ -758,6 +786,7 @@ Item {
       if (String(m.health || "") !== String(hh[si] || "")) { hh[si] = String(m.health || ""); _health = hh; healthGen++ }
       _noteReported(si)
       _rebuildSessions()
+      _reconcileCurrentTools()
       // Rosters are authoritative for asks: clearing used to depend solely on
       // catching the ask_answered event, so a rail that was relaunching or
       // disconnected at that moment kept a ghost card forever — which hides
