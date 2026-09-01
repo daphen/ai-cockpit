@@ -3042,9 +3042,9 @@ Item {
             visible: rootSession
             z: 5
 
-            Behavior on x { NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad } }
-            Behavior on y { NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad } }
-            Behavior on width { NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad } }
+            Behavior on x { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
+            Behavior on y { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
+            Behavior on width { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
 
             ThinkingOrb {
               anchors.fill: parent
