@@ -27,8 +27,9 @@ pass=0 fail=0
 
 say()  { printf '\033[36m[rail-test]\033[0m %s\n' "$*"; }
 st()   { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railState 2>/dev/null | tail -1; }
-key()  { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railKey "$1" >/dev/null 2>&1; }
-fake() { echo "$1" >> "$CMD"; sleep "${2:-2.5}"; }
+key()    { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railKey "$1" >/dev/null 2>&1; }
+select_session() { timeout 10 qs -p "$T/qs-shell" ipc call cockpit selectSession "$1" >/dev/null 2>&1; }
+fake()   { echo "$1" >> "$CMD"; sleep "${2:-2.5}"; }
 
 # field <json> <key> — read one value without depending on jq
 field() { python3 -c "import json,sys;print(json.loads(sys.argv[1]).get(sys.argv[2]))" "$1" "$2"; }
@@ -207,21 +208,25 @@ PY
 say "  rows measured: $(python3 -c "import json,sys;print(len(json.loads(sys.argv[1] or '[]')))" "$geom")"
 check "overlapping row pairs" "$ov" "0"
 
-say "11. a live ask escapes insert mode, y answers it through the real path"
-# The deadlock this pins: sending leaves the composer in insert on purpose, so an ask
-# landing right after a send arrived with insert still true — the key handler's insert
-# guard then ate y/n while the hidden composer had no focus. Keys went nowhere at all.
+say "11. a live ask cannot steal typing keys"
+select_session every-9001; sleep 1
 rm -f "$SOCK.answers"
 key i
 check "insert entered" "$(field "$(st)" ins)" "True"
 fake ask
 a1=$(st)
-check "ask arrived"            "$(field "$a1" ask)" "True"
-check "insert escaped on ask"  "$(field "$a1" ins)" "False"
+check "ask arrived"              "$(field "$a1" ask)" "True"
+check "typing remains active"    "$(field "$a1" ins)" "True"
+check "keyboard answer deferred" "$(field "$a1" askDeferred)" "True"
+key y; sleep 1
+ans=$(grep -c '"type": "answer"' "$SOCK.answers" 2>/dev/null || true)
+check "typing y did not answer" "${ans:-0}" "0"
+key esc
+check "esc armed the question" "$(field "$(st)" askDeferred)" "False"
 key y; sleep 2
 ans=$(grep -c '"type": "answer".*"confirmed": true' "$SOCK.answers" 2>/dev/null || true)
-check "answer reached the daemon" "${ans:-0}" "1"
-check "card cleared"              "$(field "$(st)" ask)" "False"
+check "deliberate y reached the daemon" "${ans:-0}" "1"
+check "card cleared"                  "$(field "$(st)" ask)" "False"
 
 say "12. the stale notice: never over a streaming session, and self-heals"
 # The ghost this pins: answering a live ask raced the transcript refresh — pi resumed but

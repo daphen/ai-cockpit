@@ -12,7 +12,7 @@ SOCK = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fake-agentd.sock"
 
 BASE = ["alpha-1000", "every-9001", "zulu-9999"]
 state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0, "transcript_ask": None,
-         "user_bash": None}
+         "live_ask": None, "user_bash": None}
 clients = []
 lock = threading.Lock()
 
@@ -20,11 +20,14 @@ lock = threading.Lock()
 def sessions():
     out = []
     for n in state["names"]:
-        out.append({
+        session = {
             "name": n,
             "status": "streaming" if n == state["streaming"] else "idle",
             "cwd": f"/home/daphen/work/lovable.daphen-{n}",
-        })
+        }
+        if n == "every-9001" and state["live_ask"]:
+            session["ask"] = state["live_ask"]
+        out.append(session)
     return out
 
 
@@ -143,12 +146,14 @@ def serve(conn):
                 response = m.get("response", m)
                 if response.get("confirmed") is not None and state["user_bash"] == "pending":
                     state["user_bash"] = "approved" if response.get("confirmed") else "declined"
+                state["live_ask"] = None
                 answered = {"type": "ask_answered", "session": sid}
                 for key in ("confirmed", "value", "cancelled"):
                     if key in response:
                         answered[key] = response[key]
                 broadcast(answered)
                 broadcast({"type": "turn_end", "session": sid})
+                push_roster()
             if t == "get_entries":
                 sid = m.get("session")
 
@@ -199,11 +204,15 @@ def driver():
             elif c == "stream_off":
                 state["streaming"] = None
             elif c == "ask":
+                state["live_ask"] = {"title": "T-live: proceed?", "method": "confirm"}
+                push_roster()
                 broadcast({"type": "extension_ui_request", "session": "every-9001",
                            "method": "confirm", "id": "fake-live-1",
                            "title": "T-live: proceed?", "message": "live question"})
             elif c == "user_bash":
                 state["user_bash"] = "pending"
+                state["live_ask"] = {"title": "__cockpit_user_bash__", "method": "confirm"}
+                push_roster()
                 broadcast({"type": "extension_ui_request", "session": "every-9001",
                            "method": "confirm", "id": "fake-user-bash-1",
                            "title": "__cockpit_user_bash__",

@@ -1168,10 +1168,12 @@ Item {
   // after a send otherwise landed with insert still true, and the key handler's insert
   // guard ate y/n while the hidden composer had no focus: keys went nowhere at all.
   onPendingAskChanged: {
-    if (!pendingAsk) return
+    if (!pendingAsk) { askDeferred = false; return }
+    if (insert) { askDeferred = true; return }
+    askDeferred = false
     var m = pendingAsk.method
     if (m === "input" || m === "editor") { rail.requestFocus(); Qt.callLater(rail.enterInsert) }
-    else rail.exitInsert()   // clears insert AND focuses the rail
+    else rail.exitInsert()
   }
 
   readonly property var featured: {
@@ -1640,14 +1642,12 @@ Item {
   // Focus follows whichever field is VISIBLE: with a question up, the composer is
   // hidden and typing belongs to the ask, so `i` must land there instead.
   readonly property bool askWantsText: pendingAsk && (pendingAsk.method === "input" || pendingAsk.method === "editor")
+  property bool askDeferred: false
   function enterInsert() {
-    // A blocking confirm/select ask owns the keyboard and HIDES the composer —
-    // entering insert would focus an invisible input and strand every key
-    // (selecting a session that already had an ask pending hit exactly this).
-    if (pendingAsk && !askWantsText) { exitInsert(); return }
+    if (pendingAsk && !askDeferred && !askWantsText) { exitInsert(); return }
     insert = true
     if (newOpen && newMode !== "") newInput.forceActiveFocus()
-    else if (askWantsText) askInput.forceActiveFocus()
+    else if (askWantsText && !askDeferred) askInput.forceActiveFocus()
     else composerInput.forceActiveFocus()
   }
   function exitInsert() {
@@ -1730,8 +1730,8 @@ Item {
   // like the old else-if ladder — but each mode is now a named function and the
   // active mode is observable (railState.im), so a shadowed binding can't hide.
   readonly property string imode:
-      (insert && !(pendingAsk && !askWantsText)) ? "insert"
-    : (pendingAsk && !askWantsText)              ? "ask"
+      (insert && (!pendingAsk || askDeferred || askWantsText)) ? "insert"
+    : (pendingAsk && !askWantsText)                         ? "ask"
     : hinting                                    ? (yankMode ? "yank" : "hint")
     : (newOpen && newMode === "")                ? "new"
     : pendingAsk                                 ? "ask"
@@ -1890,7 +1890,7 @@ Item {
     if (keyGlobal(e)) { e.accepted = true; return }
     // Insert: the focused input owns the keyboard — except a blocking confirm/
     // select ask, which hides the composer, so its keys must still land here.
-    if (insert && !(pendingAsk && !askWantsText)) return
+    if (insert && (!pendingAsk || askDeferred || askWantsText)) return
     if (hinting && keyHint(e)) { e.accepted = true; return }
     if (newOpen && keyNew(e)) { e.accepted = true; return }
     if (pendingAsk && keyAsk(e)) { e.accepted = true; return }
@@ -1955,7 +1955,7 @@ Item {
     // Ask answers go through the SAME path as the real keys — but only when the key
     // handler would accept them, so a test faithfully exercises the insert guard too.
     else if (k === "y" || k === "n") {
-      if (pendingAsk && !(insert && askWantsText)) answerAsk({ confirmed: k === "y" })
+      if (pendingAsk && !askDeferred && !(insert && askWantsText)) answerAsk({ confirmed: k === "y" })
     }
     else if (k === "x") {
       if (curSection() === "roster") {
@@ -1967,7 +1967,11 @@ Item {
     else if (k === "yank") startYank()
     else if (k.indexOf("hintkey:") === 0) hintKey(k.slice(8))
     else if (k === "esc") {
-      if (featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
+      if (askDeferred) {
+        askDeferred = false
+        if (askWantsText) Qt.callLater(enterInsert)
+        else exitInsert()
+      } else if (featuredStreaming && agentd && selectedRaw) agentd.interrupt(selectedRaw)
       else if (insert) exitInsert()
     }
     else if (k === "killtool") {
@@ -3297,7 +3301,8 @@ Item {
         }
 
         Text {
-          text: askCard.userBash ? "click Run · y runs · n declines · esc cancels"
+          text: rail.askDeferred ? "finish typing · esc to answer"
+              : askCard.userBash ? "click Run · y runs · n declines · esc cancels"
               : (askCard.ask && askCard.ask.method === "select")
                 ? "press a number · t to talk · esc cancels" : "t to talk · esc cancels"
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
@@ -3465,7 +3470,7 @@ Item {
       // composer that still looks ready for an unrelated message.
       Rectangle {
         Layout.fillWidth: true
-        visible: !rail.pendingAsk && !rail.newOpen
+        visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
         // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
         // Flickable scrolls the caret into view.
         implicitHeight: Math.max(52, Math.min(composerInput.implicitHeight + 30, 94))
@@ -3514,6 +3519,7 @@ Item {
             // TextArea has no onAccepted — plain Enter routes here from Keys below.
             // Shift+Enter falls through to the default handler = a newline.
             function sendNow() {
+              if (rail.askDeferred) return
               var pa = rail.pendingAsk
               // /goal — rail-intercepted (never reaches pi): pins a watchdog goal
               // on the selected session; "/goal done" or bare "/goal" clears it.
@@ -3586,7 +3592,11 @@ Item {
               // insert — you are about to type what it should do instead. Idle: the
               // usual leave-insert.
               if (e.key === Qt.Key_Escape) {
-                if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.interrupt(rail.selectedRaw)
+                if (rail.askDeferred) {
+                  rail.askDeferred = false
+                  if (rail.askWantsText) Qt.callLater(rail.enterInsert)
+                  else rail.exitInsert()
+                } else if (rail.featuredStreaming && rail.agentd && rail.selectedRaw) rail.agentd.interrupt(rail.selectedRaw)
                 else rail.exitInsert()
                 e.accepted = true; return
               }

@@ -168,7 +168,7 @@ ShellRoot {
         return JSON.stringify({ cur: rail.cur, rSize: rail.rSize, navTotal: rail.navTotal,
                                 view: rail.view, mode: rail.scrollMode,
                                 sel: rail.selectedRaw, key: rail.cursorKey,
-                                ins: rail.insert, ask: !!rail.pendingAsk, stale: !!rail.staleAsk,
+                                ins: rail.insert, ask: !!rail.pendingAsk, askDeferred: rail.askDeferred, stale: !!rail.staleAsk,
                                 q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
                                 hint: rail.hinting, yank: rail.yankMode, labels: rail.hintLabels.length,
                                 asksTotal: rail.agentd ? (rail.agentd.askGen >= 0 ? rail.agentd.askCount() : 0) : 0,
