@@ -17,6 +17,7 @@ ShellRoot {
     }
     readonly property string modeStatePath: Quickshell.env("HOME") + "/.local/state/cockpit/mode-" + instanceName
     property string scopeMode: startupMode
+    property bool modeReady: false
     readonly property var agentd: scopeMode === "work" ? workAgentd : personalAgentd
     readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
     function envSockPaths() {
@@ -55,7 +56,15 @@ ShellRoot {
       path: win.modeStatePath
       watchChanges: true
       onFileChanged: reload()
-      onLoaded: win.restoreScopeMode(String(text() || "").trim())
+      onLoaded: {
+        win.restoreScopeMode(String(text() || "").trim())
+        win.modeReady = true
+        win.syncPresence()
+      }
+      onLoadFailed: {
+        win.modeReady = true
+        win.syncPresence()
+      }
     }
     title: "cockpit-qs · " + scopeMode + " · " + instanceName
     visible: true       // match mlqs — a cold-started FloatingWindow must map explicitly
@@ -71,8 +80,8 @@ ShellRoot {
 
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
-      personalAgentd.setPresence(scopeMode === "personal" && windowFocused ? rail.selectedRaw : "")
-      workAgentd.setPresence(scopeMode === "work" && windowFocused ? rail.selectedRaw : "")
+      personalAgentd.setPresence(modeReady && scopeMode === "personal" && windowFocused ? rail.selectedRaw : "")
+      workAgentd.setPresence(modeReady && scopeMode === "work" && windowFocused ? rail.selectedRaw : "")
     }
     onWindowFocusedChanged: syncPresence()
     Component.onCompleted: syncPresence()
@@ -299,7 +308,7 @@ ShellRoot {
           id: rail
           width: parent.width - termCol.width - 1
           height: parent.height
-          agentd: win.agentd
+          agentd: win.modeReady ? win.agentd : null
           scopeMode: win.scopeMode
           instanceName: win.instanceName
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
