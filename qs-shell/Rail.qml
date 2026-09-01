@@ -2809,7 +2809,7 @@ Item {
                   rail.agentd ? rail.agentd.askGen : 0
                   return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
                 }
-                visible: !self
+                visible: !self && !String(md.parent || "").length
                 width: 16; height: 16
                 Component.onCompleted: rail.probeDotCreates++
                 // The working signifier is the ORB here too — same grammar as the
