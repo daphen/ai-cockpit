@@ -123,16 +123,17 @@ function ActivityDisclosure({ items }: { items: Activity[] }) {
 
 function activitySummary(items: Activity[]) {
   const counts = new Map<string, number>()
-  let edits = 0
+  const edits: Activity[] = []
   let errors = 0
   for (const item of items) {
-    if (["edit", "write", "create", "str_replace"].includes(item.tool)) edits++
+    if (["edit", "write", "create", "str_replace"].includes(item.tool)) edits.push(item)
     else if (item.tool === "error") errors++
     else counts.set(item.tool, (counts.get(item.tool) ?? 0) + 1)
     if (item.failed && item.tool !== "error") errors++
   }
   const parts = [...counts].map(([tool, count]) => `${count} ${tool}`)
-  if (edits) parts.push(`edited ${edits}`)
+  if (edits.length === 1) parts.push(`edited ${edits[0].label.replace(/^\S+\s+/, "")}`)
+  else if (edits.length) parts.push(`edited ${edits.length}`)
   if (errors) parts.push(`${errors} error${errors === 1 ? "" : "s"}`)
   return parts.join(" · ")
 }
