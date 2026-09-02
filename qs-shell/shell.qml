@@ -76,7 +76,24 @@ ShellRoot {
     onClosed: Qt.quit()              // niri close-window quits (FloatingWindow ignores it otherwise)
 
     property string pane: "nvim"   // "nvim" | "rail"
+    property bool railCollapsed: false
     readonly property bool dashboardActive: !!(chin.st.dashboard && chin.st.dashboard.active)
+
+    function toggleRail() {
+      railCollapsed = !railCollapsed
+      if (railCollapsed) {
+        pane = "nvim"
+        Qt.callLater(function() {
+          if (dashboardActive) dashboard.forceActiveFocus()
+          else term.forceActiveFocus()
+        })
+      }
+    }
+    Shortcut {
+      sequence: "Ctrl+Shift+F"
+      context: Qt.ApplicationShortcut
+      onActivated: win.toggleRail()
+    }
 
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
@@ -99,6 +116,7 @@ ShellRoot {
       if ((term.activeFocus || dashboard.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
       else if (rail.activeFocus && win.pane !== "rail") win.pane = "rail"
       if (dir === "right") {
+        if (win.railCollapsed) return "passed"
         if (win.pane === "nvim") { win.pane = "rail"; return "consumed" }
         return "passed"
       } else {
@@ -254,7 +272,8 @@ ShellRoot {
 
         Column {
           id: termCol
-          width: Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
+          width: win.railCollapsed ? parent.width
+            : Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
           height: parent.height
           Item {
             id: renderStack
@@ -302,12 +321,13 @@ ShellRoot {
 
         // Divider stops at the chin's top hairline — the two meet in a clean
         // corner instead of the divider's tail running past it to the edge.
-        Rectangle { width: 1; height: parent.height - chin.height; color: Theme.hairline }
+        Rectangle { id: divider; width: win.railCollapsed ? 0 : 1; height: parent.height - chin.height; color: Theme.hairline }
 
         Rail {
           id: rail
-          width: parent.width - termCol.width - 1
+          width: parent.width - termCol.width - divider.width
           height: parent.height
+          enabled: !win.railCollapsed
           agentd: win.modeReady ? win.agentd : null
           scopeMode: win.scopeMode
           instanceName: win.instanceName
