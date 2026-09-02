@@ -749,7 +749,7 @@ Item {
       if (lp0.charAt(0) !== "/") lp0 = lcwd0 + "/" + lp0
       var follow = 'v:lua.require("cockpit").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)'
       var land = 'isdirectory("' + lcwd0 + '") && filereadable("' + lp0 + '")'
-        + ' ? (execute("cd ' + lcwd0 + '") . ' + follow + ') : ' + fallback
+        + ' ? (execute("cd ' + lcwd0 + '") . ' + dashAt(lcwd0) + ' . ' + follow + ') : ' + fallback
       Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", land])
       _alignMirror(sid)
       return
