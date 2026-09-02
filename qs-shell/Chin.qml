@@ -168,11 +168,13 @@ Rectangle {
       border.color: Theme.hairline
       Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
-        width: 10; height: 1
+        width: 10; height: 2
         color: Theme.orange
-        y: 2 + (parent.height - height - 4)
+        readonly property real targetY: 2 + (parent.height - height - 4)
           * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
-        Behavior on y { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        property real animatedY: targetY
+        y: Math.round(animatedY)
+        Behavior on animatedY { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
       }
     }
   }
