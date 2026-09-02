@@ -89,23 +89,23 @@ ShellRoot {
       }
     }
     Timer {
-      id: railCollapseTimer
+      id: railLayoutTimer
       interval: Motion.med
-      onTriggered: if (win.railCollapsed) win.railLayoutCollapsed = true
+      onTriggered: if (!win.railCollapsed) win.railLayoutCollapsed = false
     }
     function toggleRail() {
       if (railCollapsed) {
         railCollapsed = false
-        railCollapseTimer.stop()
-        railLayoutCollapsed = false
         railReveal = 0
+        railLayoutTimer.restart()
         Qt.callLater(function() { railReveal = 1 })
         return
       }
       railCollapsed = true
+      railLayoutTimer.stop()
+      railLayoutCollapsed = true
       pane = "nvim"
       railReveal = 0
-      railCollapseTimer.restart()
       Qt.callLater(function() {
         if (dashboardActive) dashboard.forceActiveFocus()
         else term.forceActiveFocus()
@@ -289,13 +289,14 @@ ShellRoot {
       // paints its own ground, so the root only ever shows in seams.
       color: Theme.bgDim
 
-      Row {
+      Item {
+        id: paneLayout
         anchors.fill: parent
+        readonly property real splitX: Math.round(width * 0.6 * win.termDpr) / win.termDpr
 
         Column {
           id: termCol
-          width: win.railLayoutCollapsed ? parent.width
-            : Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
+          width: win.railLayoutCollapsed ? parent.width : paneLayout.splitX
           height: parent.height
           Item {
             id: renderStack
@@ -345,7 +346,8 @@ ShellRoot {
         // corner instead of the divider's tail running past it to the edge.
         Rectangle {
           id: divider
-          width: win.railLayoutCollapsed ? 0 : 1
+          x: rail.x - 1
+          width: 1
           height: parent.height - chin.height
           opacity: win.railReveal
           color: Theme.hairline
@@ -353,13 +355,13 @@ ShellRoot {
 
         Rail {
           id: rail
-          width: parent.width - termCol.width - divider.width
+          width: parent.width - paneLayout.splitX - 1
           height: parent.height
+          x: paneLayout.splitX + 1 + (1 - win.railReveal) * width
           opacity: win.railReveal
           enabled: !win.railCollapsed
           layer.enabled: win.railReveal > 0 && win.railReveal < 1
           layer.smooth: false
-          transform: Translate { x: (1 - win.railReveal) * rail.width }
           agentd: win.modeReady ? win.agentd : null
           scopeMode: win.scopeMode
           instanceName: win.instanceName
