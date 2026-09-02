@@ -530,7 +530,7 @@ void TermView::workerLoop() {
     if (fds[0].revents & POLLIN) {
       // Drain the whole burst before rendering — one nvim redraw can span many
       // reads; rendering per-chunk would emit redundant mid-burst frames (the
-      // big-file-open stutter). Inner poll(0) gates extra reads on a blocking fd.
+      // big-file-open stutter). A bounded wait catches the tail of split redraws.
       uint8_t buf[65536];
       for (;;) {
         ssize_t n = ::read(master_, buf, sizeof(buf));
@@ -538,7 +538,7 @@ void TermView::workerLoop() {
           ghostty_terminal_vt_write(term_, buf, (size_t)n);
           dirty = true;
           struct pollfd more; more.fd = master_; more.events = POLLIN; more.revents = 0;
-          if (::poll(&more, 1, 0) > 0 && (more.revents & POLLIN)) continue;
+          if (::poll(&more, 1, 2) > 0 && (more.revents & POLLIN)) continue;
           break;
         }
         if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) ptyClosed = true;
