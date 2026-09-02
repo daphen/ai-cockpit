@@ -160,18 +160,20 @@ Rectangle {
            value: String(chin.st.plan || ""); tint: Theme.fg }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg }
-  }
-
-  Rectangle {
-    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-    height: 1
-    color: Theme.hairline
     Rectangle {
-      height: parent.height
-      width: parent.width
-        * (chin._n(chin.st.lines) > 0 ? chin._n(chin.st.line) / chin._n(chin.st.lines) : 0)
-      color: Theme.orange
-      Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      anchors.verticalCenter: parent.verticalCenter
+      width: 18; height: 18; radius: 5
+      color: Theme.surface0
+      border.width: 1
+      border.color: Theme.hairline
+      Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: 10; height: 1
+        color: Theme.orange
+        y: 2 + (parent.height - height - 4)
+          * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
+        Behavior on y { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+      }
     }
   }
 }
