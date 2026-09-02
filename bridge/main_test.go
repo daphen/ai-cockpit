@@ -12,6 +12,28 @@ import (
 	"testing"
 )
 
+func TestScopesHandlerReportsOrchestratorHolder(t *testing.T) {
+	runtimeDir := t.TempDir()
+	holderFile := filepath.Join(t.TempDir(), "orchestrator-holder")
+	if err := os.WriteFile(holderFile, []byte("lovable\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("unix", filepath.Join(runtimeDir, "agentd-lovable.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	response := httptest.NewRecorder()
+	scopesHandler(runtimeDir, holderFile).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/scopes", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if got := response.Header().Get("X-Cockpit-Orchestrator"); got != "lovable" {
+		t.Fatalf("holder = %q", got)
+	}
+}
+
 func TestUploadHandler(t *testing.T) {
 	runtimeDir := t.TempDir()
 	uploadDir := t.TempDir()

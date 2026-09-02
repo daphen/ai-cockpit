@@ -95,13 +95,16 @@ export default function App() {
     const orchestrators = state.sessions.filter(session =>
       (session.profile ?? "").includes("orchestrator") &&
       (session.scope === "lovable" || session.scope === "work"))
+    if (state.orchestratorScope && orchestrators.some(session => session.scope === state.orchestratorScope)) {
+      return state.orchestratorScope
+    }
     const armed = orchestrators.find(session => session.goal)
     if (armed) return armed.scope
     if (pinnedOrchScope && orchestrators.some(session => session.scope === pinnedOrchScope)) {
       return pinnedOrchScope
     }
     return orchestrators[0]?.scope ?? ""
-  }, [state.sessions, pinnedOrchScope])
+  }, [state.sessions, state.orchestratorScope, pinnedOrchScope])
   useEffect(() => {
     if (!orchScope || orchScope === pinnedOrchScope) return
     setPinnedOrchScope(orchScope)

@@ -35,6 +35,7 @@ func main() {
 	staticDir := flag.String("static-dir", "../web/dist", "built web app directory")
 	uploadDir := flag.String("upload-dir", filepath.Join(home, ".cache", "cockpit", "uploads"), "directory for mobile image uploads")
 	tokenFile := flag.String("token-file", filepath.Join(home, ".config/cockpit/bridge-token"), "bearer token file")
+	holderFile := flag.String("orchestrator-holder-file", filepath.Join(home, ".local/state/cockpit/orchestrator-holder"), "active orchestrator scope file")
 	flag.Parse()
 	if !isAllowedAddress(*addr) {
 		log.Fatalf("refusing listen address %q; only loopback and routed 10.x addresses are allowed", *addr)
@@ -45,7 +46,7 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/scopes", requireToken(token, scopesHandler(*runtimeDir)))
+	mux.Handle("/scopes", requireToken(token, scopesHandler(*runtimeDir, *holderFile)))
 	mux.Handle("/ws", requireToken(token, websocketHandler(*runtimeDir)))
 	mux.Handle("/upload", requireToken(token, uploadHandler(*runtimeDir, *uploadDir)))
 	mux.Handle("/", spaHandler(*staticDir))
@@ -261,7 +262,7 @@ func pruneUploads(uploadDir string) {
 	}
 }
 
-func scopesHandler(runtimeDir string) http.HandlerFunc {
+func scopesHandler(runtimeDir, holderFile string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			w.WriteHeader(http.StatusMethodNotAllowed)
@@ -271,6 +272,12 @@ func scopesHandler(runtimeDir string) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if holder, readErr := os.ReadFile(holderFile); readErr == nil {
+			scope := strings.TrimSpace(string(holder))
+			if scope == "lovable" || scope == "work" {
+				w.Header().Set("X-Cockpit-Orchestrator", scope)
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(scopes)
@@ -379,6 +386,7 @@ func allowCrossOrigin(next http.Handler) http.Handler {
 		if origin := r.Header.Get("Origin"); origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Cockpit-Orchestrator")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Add("Vary", "Origin")
 		}

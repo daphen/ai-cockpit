@@ -88,9 +88,10 @@ export interface Snapshot {
   asks: Record<string, Ask>
   connectedScopes: string[]
   queues: Record<string, string[]>
+  orchestratorScope: string
 }
 
-const EMPTY: Snapshot = { sessions: [], feeds: {}, asks: {}, connectedScopes: [], queues: {} }
+const EMPTY: Snapshot = { sessions: [], feeds: {}, asks: {}, connectedScopes: [], queues: {}, orchestratorScope: "" }
 const chatLabelsKey = "cockpit.chatLabels"
 
 export class UnauthorizedError extends Error {
@@ -282,6 +283,7 @@ export class AgentdStore {
   private chatLabels = storedChatLabels()
   private labelRequests = new Set<string>()
   private owners: Record<string, string> = {}
+  private orchestratorScopes = new Map<string, string>()
   private snapshot: Snapshot = EMPTY
   private token = ""
   private probeTimer = 0
@@ -425,10 +427,14 @@ export class AgentdStore {
       })
       if (response.status === 401) return "unauthorized"
       if (!response.ok) return "offline"
+      const holder = response.headers.get("X-Cockpit-Orchestrator") ?? ""
+      if (holder === "lovable" || holder === "work") this.orchestratorScopes.set(host.id, holder)
+      else this.orchestratorScopes.delete(host.id)
       const scopes = await response.json() as string[]
       this.reconcileHost(host, scopes)
       return "connected"
     } catch {
+      this.orchestratorScopes.delete(host.id)
       return "offline"
     } finally {
       window.clearTimeout(timeout)
@@ -664,6 +670,7 @@ export class AgentdStore {
       asks: { ...this.asks },
       queues: { ...this.queues },
       connectedScopes: [...new Set([...this.scopes.values()].filter(scope => scope.connected).map(scope => scope.scope))],
+      orchestratorScope: this.orchestratorScopes.get("proart") ?? "",
     }
     this.listeners.forEach(listener => listener())
   }
