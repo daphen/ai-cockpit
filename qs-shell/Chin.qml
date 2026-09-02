@@ -164,12 +164,12 @@ Rectangle {
 
   Rectangle {
     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-    height: 1
-    color: Theme.hairline
+    height: 2
+    color: Qt.alpha(Theme.fg, 0.2)
     Rectangle {
       height: parent.height
       width: parent.width
-        * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
+        * (chin._n(chin.st.lines) > 0 ? chin._n(chin.st.line) / chin._n(chin.st.lines) : 0)
       color: Theme.fg
       Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     }
