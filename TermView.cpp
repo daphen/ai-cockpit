@@ -530,7 +530,7 @@ void TermView::workerLoop() {
     if (fds[0].revents & POLLIN) {
       // Drain the whole burst before rendering — one nvim redraw can span many
       // reads; rendering per-chunk would emit redundant mid-burst frames (the
-      // big-file-open stutter). A bounded wait catches the tail of split redraws.
+      // big-file-open stutter). Inner poll(0) gates extra reads on a blocking fd.
       uint8_t buf[65536];
       for (;;) {
         ssize_t n = ::read(master_, buf, sizeof(buf));
@@ -538,7 +538,7 @@ void TermView::workerLoop() {
           ghostty_terminal_vt_write(term_, buf, (size_t)n);
           dirty = true;
           struct pollfd more; more.fd = master_; more.events = POLLIN; more.revents = 0;
-          if (::poll(&more, 1, 2) > 0 && (more.revents & POLLIN)) continue;
+          if (::poll(&more, 1, 0) > 0 && (more.revents & POLLIN)) continue;
           break;
         }
         if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) ptyClosed = true;
@@ -773,10 +773,8 @@ QImage TermView::renderFrame() {
   p->fillRect(QRect(0, 0, img.width(), img.height()), defBg);
 
   uint16_t cx = 0, cy = 0;
-  bool cvis = true;
   ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_CURSOR_X, &cx);
   ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &cy);
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_CURSOR_VISIBLE, &cvis);
 
   // Two passes: fill EVERY background first, then draw glyphs on top. A glyph
   // can overhang its cell (wide Nerd icons horizontally, descenders vertically);
@@ -888,7 +886,7 @@ QImage TermView::renderFrame() {
   }
 
   // Cursor: honor the app's requested shape (nvim swaps block/beam by mode).
-  if (cvis && active_.load() && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
+  if (active_.load() && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
     const qreal x = padLD_ + cx * cellWD_, y = padTD_ + cy * cellHD_;
     switch (cursorShape_) {
       case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR:
