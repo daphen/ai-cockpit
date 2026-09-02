@@ -20,6 +20,11 @@ Item {
   property string scopeMode: "personal"
   property string instanceName: "main"
   signal requestScopeMode(string mode)
+  Shortcut {
+    sequence: "Ctrl+S"
+    context: Qt.ApplicationShortcut
+    onActivated: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
+  }
   // Set by shell.qml from TermView.nvimSocket — the socket THIS instance's nvim listens
   // on. Never rebuild this path here: a guessed shared name is how the rail ended up
   // talking to a socket a newer Cockpit had already unlinked.
@@ -1746,6 +1751,10 @@ Item {
     // The stale-ask notice advertises C-d while the composer is focused — its
     // whole point is "type your answer instead", so it must work in insert.
     if (ctrl && e.key === Qt.Key_D && staleAsk) { dismissStaleAsk(); return true }
+    if (ctrl && e.key === Qt.Key_S) {
+      requestScopeMode(scopeMode === "work" ? "personal" : "work")
+      return true
+    }
     // Ctrl+T = the in-app Super+T: open the roster and park on the active row;
     // pressed again while parked, put it away and return to the composer.
     if (ctrl && e.key === Qt.Key_T) {
@@ -3670,9 +3679,10 @@ Item {
         Rectangle {
           id: scopeSwitch
           Layout.alignment: Qt.AlignVCenter
+          Layout.rightMargin: -4
           readonly property color tint: rail.scopeMode === "work" ? Theme.electric : Theme.orange
           readonly property bool expanded: scopeHover.hovered
-          implicitWidth: expanded ? scopeRow.implicitWidth + 18 : 32
+          implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 26
           implicitHeight: 22
           radius: 11
           color: expanded ? Qt.alpha(scopeSwitch.tint, 0.14) : "transparent"
@@ -3684,7 +3694,7 @@ Item {
           clip: true
           Row {
             id: scopeRow
-            anchors { left: parent.left; leftMargin: 9; verticalCenter: parent.verticalCenter }
+            anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
             spacing: 5
             Icon {
               anchors.verticalCenter: parent.verticalCenter
@@ -3717,7 +3727,7 @@ Item {
           readonly property bool armed: rail.selectedGoal.length > 0
           readonly property color tint: armed ? Theme.green : Theme.orange
           readonly property bool expanded: goalHover.hovered
-          implicitWidth: expanded ? goalRow.implicitWidth + 18 : 32   // 9 + 14 + 9
+          implicitWidth: expanded ? goalRow.implicitWidth + 12 : 26
           implicitHeight: 22
           radius: 11
           color: expanded ? Qt.alpha(goalPill.tint, 0.14) : "transparent"
@@ -3729,7 +3739,7 @@ Item {
           clip: true
           Row {
             id: goalRow
-            anchors { left: parent.left; leftMargin: 9; verticalCenter: parent.verticalCenter }
+            anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
             spacing: 5
             Icon {
               anchors.verticalCenter: parent.verticalCenter
