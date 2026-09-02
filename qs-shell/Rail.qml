@@ -3674,6 +3674,7 @@ Item {
       // shows its answer keys, and normal mode differs between a roster and a feed cursor.
       RowLayout {
         Layout.fillWidth: true
+        transform: Translate { y: 6 }
         spacing: 6
 
         Rectangle {
