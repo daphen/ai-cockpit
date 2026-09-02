@@ -3683,7 +3683,7 @@ Item {
           Layout.rightMargin: -4
           readonly property color tint: rail.scopeMode === "work" ? Theme.electric : Theme.orange
           readonly property bool expanded: scopeHover.hovered
-          implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 28
+          implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
           implicitHeight: 22
           radius: 11
           color: expanded ? Qt.alpha(scopeSwitch.tint, 0.14) : "transparent"
@@ -3699,7 +3699,7 @@ Item {
             spacing: 5
             Icon {
               anchors.verticalCenter: parent.verticalCenter
-              width: 16; height: 16
+              width: 18; height: 18
               name: "toggle-3"
               color: scopeSwitch.tint
             }
@@ -3728,7 +3728,7 @@ Item {
           readonly property bool armed: rail.selectedGoal.length > 0
           readonly property color tint: armed ? Theme.green : Theme.orange
           readonly property bool expanded: goalHover.hovered
-          implicitWidth: expanded ? goalRow.implicitWidth + 12 : 28
+          implicitWidth: expanded ? goalRow.implicitWidth + 12 : 30
           implicitHeight: 22
           radius: 11
           color: expanded ? Qt.alpha(goalPill.tint, 0.14) : "transparent"
@@ -3744,7 +3744,7 @@ Item {
             spacing: 5
             Icon {
               anchors.verticalCenter: parent.verticalCenter
-              width: 16; height: 16
+              width: 18; height: 18
               name: "target"
               color: goalPill.tint
             }
