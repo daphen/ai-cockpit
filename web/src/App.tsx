@@ -81,12 +81,9 @@ export default function App() {
     }
   }, [checkingToken, needsToken])
   const groupSessions = useMemo(() => state.sessions.filter(session => groupScopes[group].has(session.scope)), [group, state.sessions])
-  // Which scope holds the ORCHESTRATOR role. STICKY: once resolved it stays put while
-  // that host still has an orchestrator. Deriving it from "whoever holds an armed goal"
-  // reassigned the role the moment a goal cleared — the desktop rail showed the local
-  // session conducting the VM's workers (2026-08-26). The role moves on handover only.
-  // (The desktop reads cockpit-handover's recorded holder file; the phone cannot, so it
-  // pins its own choice instead.)
+  // The armed watchdog goal is the authoritative handover signal. Keep the last holder
+  // only as a fallback while no orchestrator has a goal, so clearing a completed goal
+  // does not move the visible conductor.
   const [pinnedOrchScope, setPinnedOrchScope] = useState(() => {
     try {
       return localStorage.getItem("cockpit.orchScope") ?? ""
@@ -98,15 +95,12 @@ export default function App() {
     const orchestrators = state.sessions.filter(session =>
       (session.profile ?? "").includes("orchestrator") &&
       (session.scope === "lovable" || session.scope === "work"))
+    const armed = orchestrators.find(session => session.goal)
+    if (armed) return armed.scope
     if (pinnedOrchScope && orchestrators.some(session => session.scope === pinnedOrchScope)) {
       return pinnedOrchScope
     }
-    let armed = "", live = ""
-    for (const session of orchestrators) {
-      if (session.goal) armed = session.scope
-      else if (!live) live = session.scope
-    }
-    return armed || live
+    return orchestrators[0]?.scope ?? ""
   }, [state.sessions, pinnedOrchScope])
   useEffect(() => {
     if (!orchScope || orchScope === pinnedOrchScope) return
