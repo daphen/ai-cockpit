@@ -77,17 +77,39 @@ ShellRoot {
 
     property string pane: "nvim"   // "nvim" | "rail"
     property bool railCollapsed: false
+    property bool railLayoutCollapsed: false
+    property real railReveal: 1
     readonly property bool dashboardActive: !!(chin.st.dashboard && chin.st.dashboard.active)
 
-    function toggleRail() {
-      railCollapsed = !railCollapsed
-      if (railCollapsed) {
-        pane = "nvim"
-        Qt.callLater(function() {
-          if (dashboardActive) dashboard.forceActiveFocus()
-          else term.forceActiveFocus()
-        })
+    Behavior on railReveal {
+      NumberAnimation {
+        duration: Motion.med
+        easing.type: Motion.easeEmphasized
+        easing.bezierCurve: Motion.curveDecel
       }
+    }
+    Timer {
+      id: railCollapseTimer
+      interval: Motion.med
+      onTriggered: if (win.railCollapsed) win.railLayoutCollapsed = true
+    }
+    function toggleRail() {
+      if (railCollapsed) {
+        railCollapsed = false
+        railCollapseTimer.stop()
+        railLayoutCollapsed = false
+        railReveal = 0
+        Qt.callLater(function() { railReveal = 1 })
+        return
+      }
+      railCollapsed = true
+      pane = "nvim"
+      railReveal = 0
+      railCollapseTimer.restart()
+      Qt.callLater(function() {
+        if (dashboardActive) dashboard.forceActiveFocus()
+        else term.forceActiveFocus()
+      })
     }
     Shortcut {
       sequence: "Ctrl+Shift+F"
@@ -272,9 +294,8 @@ ShellRoot {
 
         Column {
           id: termCol
-          width: win.railCollapsed ? parent.width
+          width: win.railLayoutCollapsed ? parent.width
             : Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
-          Behavior on width { NumberAnimation { duration: Motion.med; easing.type: Motion.easeSymmetric } }
           height: parent.height
           Item {
             id: renderStack
@@ -324,19 +345,21 @@ ShellRoot {
         // corner instead of the divider's tail running past it to the edge.
         Rectangle {
           id: divider
-          width: win.railCollapsed ? 0 : 1
+          width: win.railLayoutCollapsed ? 0 : 1
           height: parent.height - chin.height
+          opacity: win.railReveal
           color: Theme.hairline
-          Behavior on width { NumberAnimation { duration: Motion.med; easing.type: Motion.easeSymmetric } }
         }
 
         Rail {
           id: rail
           width: parent.width - termCol.width - divider.width
           height: parent.height
-          opacity: win.railCollapsed ? 0 : 1
+          opacity: win.railReveal
           enabled: !win.railCollapsed
-          Behavior on opacity { NumberAnimation { duration: Motion.base; easing.type: Motion.easeSymmetric } }
+          layer.enabled: win.railReveal > 0 && win.railReveal < 1
+          layer.smooth: false
+          transform: Translate { x: (1 - win.railReveal) * rail.width }
           agentd: win.modeReady ? win.agentd : null
           scopeMode: win.scopeMode
           instanceName: win.instanceName
