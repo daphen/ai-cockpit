@@ -323,6 +323,13 @@ Item {
     if (item.kind === "turn") {
       var prose = turnProse(item.items)
       for (var i = 0; i < prose.length; i++) out = out.concat(_scanUnits(prose[i].text, i, mode, 0))
+      if (mode === "hint") {
+        var refs = activityFileRefs(item)
+        for (var j = 0; j < refs.length; j++) {
+          if (!out.some(x => x.kind === "file" && x.value === refs[j]))
+            out.push({ key: "edit:" + j, kind: "file", value: refs[j], start: 0, end: 0 })
+        }
+      }
     } else {
       out = _scanUnits(item.text || "", 0, mode, 0)
       if (mode === "hint") out = out.filter(x => x.kind === "url" || x.kind === "file")
@@ -436,6 +443,20 @@ Item {
         if (m && out.indexOf(m[1]) < 0) out.push(m[1])
       }
     }
+    return out
+  }
+  function activityFileRefs(item) {
+    var out = []
+    if (!item || item.kind !== "turn") return out
+    for (var i = 0; i < (item.items || []).length; i++) {
+      var entry = item.items[i], path = entry && entry.kind === "edit" ? String(entry.path || "") : ""
+      if (path && out.indexOf(path) < 0) out.push(path)
+    }
+    return out
+  }
+  function cardFileRefs(item) {
+    var out = fileRefLines(item), edits = activityFileRefs(item)
+    for (var i = 0; i < edits.length; i++) if (out.indexOf(edits[i]) < 0) out.push(edits[i])
     return out
   }
   function shownFileRef(ref) {
@@ -1699,7 +1720,7 @@ Item {
       // A card naming exactly one file: Enter opens it, same as its `f` hint. With
       // none (or several — aim with `f`), Enter keeps opening/closing the card's
       // collapsed tool activity ("N bash · …").
-      var refs = fileRefLines(it)
+      var refs = cardFileRefs(it)
       if (refs.length === 1) { openFileRef(refs[0]); return }
       if (it) toggleGroupKey("turn-" + (it.key || l))
     }
@@ -4263,6 +4284,7 @@ Item {
       // Diff stats only when known (live edits); transcript edits carry none.
       Text { visible: (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
       Text { visible: (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+      TapHandler { onTapped: rail.openFileRef(entry.path) }
     }
   }
 }
