@@ -274,6 +274,7 @@ ShellRoot {
           id: termCol
           width: win.railCollapsed ? parent.width
             : Math.round(parent.width * 0.6 * win.termDpr) / win.termDpr
+          Behavior on width { NumberAnimation { duration: Motion.med; easing.type: Motion.easeSymmetric } }
           height: parent.height
           Item {
             id: renderStack
@@ -321,13 +322,21 @@ ShellRoot {
 
         // Divider stops at the chin's top hairline — the two meet in a clean
         // corner instead of the divider's tail running past it to the edge.
-        Rectangle { id: divider; width: win.railCollapsed ? 0 : 1; height: parent.height - chin.height; color: Theme.hairline }
+        Rectangle {
+          id: divider
+          width: win.railCollapsed ? 0 : 1
+          height: parent.height - chin.height
+          color: Theme.hairline
+          Behavior on width { NumberAnimation { duration: Motion.med; easing.type: Motion.easeSymmetric } }
+        }
 
         Rail {
           id: rail
           width: parent.width - termCol.width - divider.width
           height: parent.height
+          opacity: win.railCollapsed ? 0 : 1
           enabled: !win.railCollapsed
+          Behavior on opacity { NumberAnimation { duration: Motion.base; easing.type: Motion.easeSymmetric } }
           agentd: win.modeReady ? win.agentd : null
           scopeMode: win.scopeMode
           instanceName: win.instanceName
