@@ -3982,22 +3982,27 @@ Item {
       id: actCol
       width: parent ? parent.width : 400
       spacing: 9
+      readonly property bool directEdit: items.length === 1 && items[0].kind === "edit"
       Row {
         spacing: 7
-        Icon { name: expanded ? "chevron-down" : "chevron-right"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+        Icon { visible: !actCol.directEdit; name: expanded ? "chevron-down" : "chevron-right"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+        Icon { visible: actCol.directEdit; name: "paintbrush"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
         Text {
-          text: summary; color: Theme.fg_muted
+          text: summary; color: actCol.directEdit ? Theme.fg : Theme.fg_muted
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          font.bold: actCol.directEdit
           anchors.verticalCenter: parent.verticalCenter
         }
-        TapHandler { onTapped: rail.toggleGroupKey(ekey) }
+        TapHandler {
+          onTapped: actCol.directEdit ? rail.openFileRef(items[0].path) : rail.toggleGroupKey(ekey)
+        }
       }
       Repeater {
         // An INT model, not the array: an array-model Repeater destroys and recreates
         // EVERY row when the array identity changes — which is every stream update on
         // the auto-expanded live turn, i.e. the chat "blinking". With a count model,
         // growth instantiates only the new indexes and existing rows rebind in place.
-        model: expanded ? items.length : 0
+        model: !actCol.directEdit && expanded ? items.length : 0
         Loader {
           width: actCol.width
           Component.onCompleted: rail.probeActCreates++
