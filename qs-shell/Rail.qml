@@ -860,13 +860,16 @@ Item {
   function turnThinks(items) { return (items || []).filter(x => x.kind === "think") }
   function turnUserBash(items) { return (items || []).filter(x => x.kind === "userbash") }
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
-  // counted): "4 bash · 6 read · edited 3".
+  // counted): "4 bash · 6 read · edited file.ts".
   function turnActivitySummary(items) {
-    var counts = {}, edits = 0, interrupts = 0, errors = 0
+    var counts = {}, editFiles = [], interrupts = 0, errors = 0
     for (var i = 0; i < (items || []).length; i++) {
       var it = items[i]
       if (it.kind === "text" || it.kind === "think" || it.kind === "userbash") continue
-      else if (it.kind === "edit") edits++
+      else if (it.kind === "edit") {
+        var file = String(it.file || it.path || "")
+        if (file && editFiles.indexOf(file) < 0) editFiles.push(file)
+      }
       else if (it.kind === "cmd" && it.tool === "error") {
         // "1 error" says nothing. Name the interrupt; other errors count as words.
         if (String(it.text || "").indexOf("⏹") === 0) interrupts++
@@ -880,7 +883,8 @@ Item {
     }
     var parts = []
     for (var k in counts) parts.push(counts[k] + " " + k)
-    if (edits) parts.push("edited " + edits)
+    if (editFiles.length === 1) parts.push("edited " + editFiles[0])
+    else if (editFiles.length) parts.push("edited " + editFiles.length + " files")
     if (interrupts) parts.push("interrupted")
     if (errors) parts.push(errors === 1 ? "1 error" : errors + " errors")
     return parts.join("  ·  ")
