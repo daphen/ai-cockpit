@@ -160,23 +160,18 @@ Rectangle {
            value: String(chin.st.plan || ""); tint: Theme.fg }
     Swap { anchors.verticalCenter: parent.verticalCenter
            value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg }
-    // Scroll position as a real track: the thumb slides over the unscrolled
-    // remainder — a proper miniature scrollbar, not lualine's glyph cell.
+  }
+
+  Rectangle {
+    anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+    height: 1
+    color: Theme.hairline
     Rectangle {
-      anchors.verticalCenter: parent.verticalCenter
-      // Wide like the old lualine glyph cell (two block chars), not a skinny bar.
-      width: 16; height: 18; radius: 3
-      color: Theme.surface0
-      border.width: 1
-      border.color: Theme.hairline
-      Rectangle {
-        width: parent.width; height: 5; radius: 2.5
-        // The special scroll-timeline red lualine used, not the theme red.
-        color: "#ED333B"
-        y: (parent.height - height)
-           * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
-        Behavior on y { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-      }
+      height: parent.height
+      width: parent.width
+        * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
+      color: Theme.fg
+      Behavior on width { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
     }
   }
 }
