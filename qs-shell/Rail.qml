@@ -734,7 +734,9 @@ Item {
     if (!cwd) return
     _landedFor = sid + "@" + cwd + "#" + plan
     var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
-    var dashAt = function (d) { return 'execute(\'lua require("cockpit").dashboard("' + d + '")\')' }
+    var dashAt = function (d) {
+      return 'v:lua.require("cockpit").dashboard(' + JSON.stringify(d) + ',' + JSON.stringify(sid) + ')'
+    }
     var fallback = plan.length
       ? 'v:lua.require("plan-nvim").open(' + JSON.stringify(plan) + ')'
       : dashAt(repo)
