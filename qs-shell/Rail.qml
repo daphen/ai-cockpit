@@ -432,7 +432,7 @@ Item {
     for (var i = 0; i < texts.length; i++) {
       var ls = String(texts[i] || "").split("\n")
       for (var j = 0; j < ls.length; j++) {
-        var m = ls[j].trim().match(/^`?((?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?`?[.,;:]?$/)
+        var m = ls[j].trim().match(/^`?((?:\/|~\/)?(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?`?[.,;:]?$/)
         if (m && out.indexOf(m[1]) < 0) out.push(m[1])
       }
     }
