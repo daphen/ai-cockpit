@@ -208,24 +208,19 @@ PY
 say "  rows measured: $(python3 -c "import json,sys;print(len(json.loads(sys.argv[1] or '[]')))" "$geom")"
 check "overlapping row pairs" "$ov" "0"
 
-say "11. a live ask cannot steal typing keys"
+say "11. a live ask takes over an empty composer"
 select_session every-9001; sleep 1
 rm -f "$SOCK.answers"
 key i
 check "insert entered" "$(field "$(st)" ins)" "True"
 fake ask
 a1=$(st)
-check "ask arrived"              "$(field "$a1" ask)" "True"
-check "typing remains active"    "$(field "$a1" ins)" "True"
-check "keyboard answer deferred" "$(field "$a1" askDeferred)" "True"
-key y; sleep 1
-ans=$(grep -c '"type": "answer"' "$SOCK.answers" 2>/dev/null || true)
-check "typing y did not answer" "${ans:-0}" "0"
-key esc
-check "esc armed the question" "$(field "$(st)" askDeferred)" "False"
+check "ask arrived"                 "$(field "$a1" ask)" "True"
+check "empty composer yielded focus" "$(field "$a1" ins)" "False"
+check "keyboard answer is armed"     "$(field "$a1" askDeferred)" "False"
 key y; sleep 2
 ans=$(grep -c '"type": "answer".*"confirmed": true' "$SOCK.answers" 2>/dev/null || true)
-check "deliberate y reached the daemon" "${ans:-0}" "1"
+check "question answer reached the daemon" "${ans:-0}" "1"
 check "card cleared"                  "$(field "$(st)" ask)" "False"
 
 say "12. the stale notice: never over a streaming session, and self-heals"

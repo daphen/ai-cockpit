@@ -1279,7 +1279,7 @@ Item {
   // guard ate y/n while the hidden composer had no focus: keys went nowhere at all.
   onPendingAskChanged: {
     if (!pendingAsk) { askDeferred = false; return }
-    if (insert) { askDeferred = true; return }
+    if (insert && composerText.length > 0) { askDeferred = true; return }
     askDeferred = false
     var m = pendingAsk.method
     if (m === "input" || m === "editor") { rail.requestFocus(); Qt.callLater(rail.enterInsert) }
