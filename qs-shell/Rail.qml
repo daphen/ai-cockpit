@@ -275,12 +275,17 @@ Item {
   onCommandMatchesChanged: slashCur = 0
   property var fileChoices: []
   property int fileChoiceCur: 0
+  property string fileChoiceKey: ""
   readonly property bool filePickerOpen: fileChoices.length > 0
-  function openFilePicker(paths) {
+  function openFilePicker(paths, key) {
     fileChoices = paths.slice()
     fileChoiceCur = 0
+    fileChoiceKey = key
+    Qt.callLater(function() {
+      if (cur >= rSize) feedView.positionViewAtIndex(cur - rSize, ListView.End)
+    })
   }
-  function closeFilePicker() { fileChoices = [] }
+  function closeFilePicker() { fileChoices = []; fileChoiceKey = "" }
   function acceptFileChoice() {
     var path = fileChoices[Math.max(0, Math.min(fileChoiceCur, fileChoices.length - 1))]
     closeFilePicker()
@@ -1783,7 +1788,7 @@ Item {
       var it = groupedFeed[l]
       var edits = activityFileRefs(it)
       if (edits.length === 1) { openFileRef(edits[0]); return }
-      if (edits.length > 1) { openFilePicker(edits); return }
+      if (edits.length > 1) { openFilePicker(edits, "turn-" + (it.key || l)); return }
       var refs = cardFileRefs(it)
       if (refs.length === 1) { openFileRef(refs[0]); return }
       if (it) toggleGroupKey("turn-" + (it.key || l))
@@ -2001,6 +2006,7 @@ Item {
 
   // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
+    if (filePickerOpen) closeFilePicker()
     if (hinting) cancelHints("cur-move")   // any cursor move invalidates the labeled row
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
@@ -3890,41 +3896,37 @@ Item {
     }
   }
 
-  // Slash commands and edit-file choices share one inline picker.
-  Rectangle {
-    id: slashPalette
-    readonly property int w: 340
-    visible: rail.slashOpen || rail.filePickerOpen
-    anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
-    width: Math.min(w, parent.width - 40)
-    height: visible ? Math.min(slashList.contentHeight + 8, 248) : 0
+  component InlinePicker: Rectangle {
+    required property var entries
+    required property int choice
+    property bool files: false
+    signal picked(int index)
+    width: Math.min(340, parent ? parent.width : 340)
+    height: visible ? Math.min(pickerList.contentHeight + 8, 248) : 0
     color: Theme.bg_alt
     radius: Theme.radius !== undefined ? Theme.radius : 10
     border.color: Theme.hairline
     border.width: 1
     z: 12
     ListView {
-      id: slashList
+      id: pickerList
       anchors.fill: parent; anchors.margins: 4; clip: true
-      model: rail.filePickerOpen ? rail.fileChoices : rail.commandMatches
-      currentIndex: rail.filePickerOpen
-        ? Math.max(0, Math.min(rail.fileChoiceCur, rail.fileChoices.length - 1))
-        : Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
+      model: entries
+      currentIndex: Math.max(0, Math.min(choice, entries.length - 1))
       highlightFollowsCurrentItem: false
       interactive: contentHeight > height
       boundsBehavior: Flickable.StopAtBounds
       onCurrentIndexChanged: positionViewAtIndex(currentIndex, ListView.Contain)
       delegate: Rectangle {
-        id: slashRow
+        id: pickerRow
         required property var modelData
         required property int index
-        readonly property bool sel: index === slashList.currentIndex
-        readonly property bool isFile: rail.filePickerOpen
-        readonly property bool isSkill: !isFile && String(modelData).indexOf("skill:") === 0
-        width: slashList.width; height: 32
+        readonly property bool sel: index === pickerList.currentIndex
+        readonly property bool isSkill: !files && String(modelData).indexOf("skill:") === 0
+        width: pickerList.width; height: 32
         radius: 9
         color: sel ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
-             : chov.hovered ? Theme.hover : "transparent"
+             : pickerHover.hovered ? Theme.hover : "transparent"
         border.width: 1
         border.color: sel ? Theme.hairline : "transparent"
         Row {
@@ -3933,27 +3935,36 @@ Item {
             width: 20; height: 20; anchors.verticalCenter: parent.verticalCenter
             Icon {
               anchors.centerIn: parent
-              name: slashRow.isFile ? "file" : (slashRow.isSkill ? "puzzle-piece" : "bolt-lightning")
+              name: files ? "file" : (pickerRow.isSkill ? "puzzle-piece" : "bolt-lightning")
               width: 14; height: 14
-              color: slashRow.sel ? Theme.fg : Theme.fg_muted
+              color: pickerRow.sel ? Theme.fg : Theme.fg_muted
             }
           }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: slashRow.isFile ? rail.shownFileRef(modelData) : "/" + modelData
-            color: slashRow.sel ? Theme.fg : Theme.fg_secondary
+            text: files ? rail.shownFileRef(modelData) : "/" + modelData
+            color: pickerRow.sel ? Theme.fg : Theme.fg_secondary
             font.family: Theme.fontFamily; font.pixelSize: 14
             width: parent.width - 29; elide: Text.ElideMiddle
           }
         }
-        HoverHandler { id: chov }
-        TapHandler {
-          onTapped: {
-            if (slashRow.isFile) { rail.fileChoiceCur = slashRow.index; rail.acceptFileChoice() }
-            else { rail.slashCur = slashRow.index; rail.acceptSlash(); composerInput.forceActiveFocus() }
-          }
-        }
+        HoverHandler { id: pickerHover }
+        TapHandler { onTapped: picked(pickerRow.index) }
       }
+    }
+  }
+
+  InlinePicker {
+    id: slashPalette
+    visible: rail.slashOpen
+    anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
+    width: Math.min(340, parent.width - 40)
+    entries: rail.commandMatches
+    choice: rail.slashCur
+    onPicked: index => {
+      rail.slashCur = index
+      rail.acceptSlash()
+      composerInput.forceActiveFocus()
     }
   }
 
@@ -4067,6 +4078,13 @@ Item {
         TapHandler {
           onTapped: actCol.directEdit ? rail.openFileRef(items[0].path) : rail.toggleGroupKey(ekey)
         }
+      }
+      InlinePicker {
+        visible: rail.filePickerOpen && rail.fileChoiceKey === ekey
+        entries: rail.fileChoices
+        choice: rail.fileChoiceCur
+        files: true
+        onPicked: index => { rail.fileChoiceCur = index; rail.acceptFileChoice() }
       }
       Repeater {
         // An INT model, not the array: an array-model Repeater destroys and recreates
