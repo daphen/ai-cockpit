@@ -4113,14 +4113,24 @@ Item {
           property var entry: actCol.bashItems[index]
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
-          sourceComponent: {
-            var k = (entry || {}).kind
-            if (k === "edit")  return editRow
-            if (k === "think") return thinkRow
-            if (k === "group") return groupRow
-            return cmdRow
-          }
+          sourceComponent: bashRow
         }
+      }
+    }
+  }
+  Component {
+    id: bashRow
+    RowLayout {
+      spacing: 8
+      Icon {
+        name: "bolt-lightning"; width: 13; height: 13
+        color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter
+      }
+      Text {
+        text: entry.text || entry.command || ""
+        color: Theme.fg_secondary
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        elide: Text.ElideRight; Layout.fillWidth: true
       }
     }
   }
