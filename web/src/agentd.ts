@@ -574,6 +574,13 @@ export class AgentdStore {
         this.optimistic[key] = (this.optimistic[key] ?? []).filter(item => item.kind !== "user" || (!item.steered && !corpus.includes(item.text)))
         this.feeds[key] = [...authoritative, ...(this.optimistic[key] ?? [])]
       }
+    } else if (message.type === "prompt_accepted") {
+      const text = String(message.message ?? "")
+      if (text && key === this.selectedKey) {
+        const item: FeedItem = { kind: "user", text, steered: message.steered === true, key: `accepted-${Date.now()}` }
+        this.optimistic[key] = [...(this.optimistic[key] ?? []), item]
+        this.feeds[key] = [...(this.feeds[key] ?? []), item]
+      }
     } else if (message.type === "extension_ui_request" && ["confirm", "select", "input", "editor"].includes(message.method)) {
       this.asks[key] = message as Ask
     } else if (message.type === "ask_answered") {

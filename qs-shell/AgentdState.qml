@@ -826,6 +826,14 @@ Item {
         send({ type: "prompt", session: sid, message: sp.text })
     }
 
+    if (t === "prompt_accepted") {
+      var accepted = String(m.message || "")
+      if (accepted.length) {
+        _push(sid, { kind: "user", text: accepted, steered: m.steered === true })
+        _echoTrack(sid, accepted)
+      }
+      return
+    }
     if (t === "goal_set") {
       var goal = String(m.goal || "")
       _setTransient(sid, "goal-receipt", "info",
