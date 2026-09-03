@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Run Cockpit inside Quickshell: the terminal plugin (TermView) + a QsLib
 # sidebar in one qs window. qs is the system binary; the plugin resolves its
-# own deps (libheidr_term, libghostty-vt) via RUNPATH, so no nix-shell needed.
+# own deps (libheidr_term, with librio linked in statically) via RUNPATH, so no nix-shell needed.
 set -euo pipefail
 cd "$(dirname "$0")"
 export COCKPIT_ASSET_DIR="$PWD/assets"
 [ -f build/qml/Heidr/libheidr_termplugin.so ] || {
   echo "plugin missing — build first: nix-shell --run 'cmake --build build -j'"; exit 1; }
 
-for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK INSTANCE VM VM_USER VM_HOST DEMO DEV VENDORED_GHOSTTY; do
+for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK INSTANCE VM VM_USER VM_HOST DEMO DEV; do
   cv="COCKPIT_$v"; hv="HEIDR_$v"
   if [ -n "${!cv:-}" ]; then export "$hv=${!cv}"
   elif [ -n "${!hv:-}" ]; then export "$cv=${!hv}"
@@ -54,7 +54,7 @@ if [ "$COCKPIT_INSTANCE" != "main" ]; then
   for f in "$PWD"/qs-shell/*.qml; do ln -s "$f" "$mirror/$(basename "$f")"; done
   shellDir="$mirror"
 fi
-for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DEV VENDORED_GHOSTTY; do
+for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DEV; do
   cv="COCKPIT_$v"; hv="HEIDR_$v"
   [ -n "${!cv:-}" ] && export "$hv=${!cv}"
 done
@@ -83,7 +83,7 @@ done
 export QML2_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml${QML2_IMPORT_PATH:+:$QML2_IMPORT_PATH}"
 export QML_IMPORT_PATH="$QML2_IMPORT_PATH"
 # Keep the vendored library explicit so cached plugins remain launchable across path moves.
-export LD_LIBRARY_PATH="$PWD/build:$PWD/vendor/libghostty-vt/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$PWD/build:${LD_LIBRARY_PATH:-}"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 _user=$(id -un)
 export PATH="/etc/profiles/per-user/$_user/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"

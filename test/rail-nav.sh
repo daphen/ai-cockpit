@@ -18,7 +18,7 @@ B="$PWD"
 # The termplugin's RUNPATH predates the repo move; resolve its deps by env,
 # exactly as run-qs.sh does — without this the rail never loads and every
 # assertion fails on an empty window.
-export LD_LIBRARY_PATH="$B/build:$B/vendor/libghostty-vt/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="$B/build:${LD_LIBRARY_PATH:-}"
 T="${TMPDIR:-/tmp}/cockpit-rail-test"
 SOCK="${TMPDIR:-/tmp}/cockpit-fake-agentd.sock"
 CMD="$SOCK.cmd"

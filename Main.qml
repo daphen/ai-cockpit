@@ -6,7 +6,7 @@ Window {
   visible: true
   width: 1200
   height: 800
-  title: "Cockpit × libghostty-vt"
+  title: "Cockpit × librio"
   color: "#181818"
 
   Row {
@@ -63,7 +63,7 @@ Window {
       }
     }
 
-    // Right: the real libghostty-vt terminal.
+    // Right: the real librio terminal.
     TermView {
       id: term
       width: parent.width - rail.width

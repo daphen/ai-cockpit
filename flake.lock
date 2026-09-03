@@ -37,10 +37,27 @@
         "type": "github"
       }
     },
+    "rio": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788439194,
+        "narHash": "sha256-9ge90M9i/H0Z2ojZsUqWC0xv1HXqXTdDvTPq+GODyKA=",
+        "owner": "raphamorim",
+        "repo": "rio",
+        "rev": "f2391b6744281a30e47702dbb5c214c55cee98cd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "raphamorim",
+        "repo": "rio",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "nixpkgs": "nixpkgs",
-        "quickshell": "quickshell"
+        "quickshell": "quickshell",
+        "rio": "rio"
       }
     }
   },
