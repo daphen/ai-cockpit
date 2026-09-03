@@ -957,7 +957,19 @@ Item {
     return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && x.kind !== "userbash" && !(x.kind === "cmd" && x.tool === "info"))
   }
   function turnEditItems(items) { return turnActivityItems(items).filter(x => x.kind === "edit") }
-  function turnBashItems(items) { return turnActivityItems(items).filter(x => x.tool === "bash") }
+  function turnBashItems(items) {
+    var activity = turnActivityItems(items), out = []
+    for (var i = 0; i < activity.length; i++) {
+      var entry = activity[i]
+      if (entry.tool !== "bash") continue
+      if (entry.kind === "group") {
+        var cmds = entry.cmds || []
+        for (var j = 0; j < cmds.length; j++)
+          out.push({ kind: "cmd", tool: "bash", text: cmds[j].text, command: cmds[j].command || "" })
+      } else out.push(entry)
+    }
+    return out
+  }
   function turnInfos(items) {
     return (items || []).filter(x => x.kind === "cmd" && x.tool === "info").map(x => String(x.text || ""))
   }
