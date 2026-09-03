@@ -1026,9 +1026,8 @@ Item {
   function dotColor(st) {
     if (st === "streaming") return Theme.green
     if (st === "error")     return Theme.red
-    // Idle is the normal resting state — muted ink, no colour, so it does not compete
-    // for attention. Asleep is the one that means "this will not answer until woken".
-    if (st === "asleep")    return Theme.yellow
+    // Idle and asleep are both resting states. Neither needs an attention colour;
+    // selecting an asleep session wakes it automatically.
     return Theme.fg_muted
   }
   function toolIcon(tool) {
@@ -3027,7 +3026,7 @@ Item {
                   color: Theme.red
                 }
                 // ONE state slot at the right edge, same vocabulary as the collapsed dots:
-                // orb = working, yellow dot = idle, red dot = asleep, pulsing orange =
+                // orb = working, muted dot = resting, pulsing orange =
                 // needs input. The slot is always reserved so nothing shifts on a change.
                 Item {
                   Layout.preferredWidth: 20; Layout.preferredHeight: 20

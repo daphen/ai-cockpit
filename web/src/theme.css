@@ -122,8 +122,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .orb-fallback { background: var(--sky); }
 .status-dot.streaming { background: var(--green); box-shadow: 0 0 9px color-mix(in srgb, var(--green) 55%, transparent); }
 .status-dot.error, .status-dot.offline { background: var(--red); }
-.status-dot.asleep { background: var(--yellow); }
-.status-dot.idle { background: var(--muted); }
+.status-dot.asleep, .status-dot.idle { background: var(--muted); }
 .status-dot.ask { background: var(--orange); width: 9px; height: 9px; animation: ask-pulse 1200ms ease-in-out infinite; }
 @keyframes ask-pulse { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
 .roster-orb-slot { display: grid; flex: none; place-items: center; width: 20px; height: 20px; margin-left: 8px; }
