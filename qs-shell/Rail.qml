@@ -276,21 +276,24 @@ Item {
   property var fileChoices: []
   property int fileChoiceCur: 0
   property string fileChoiceKey: ""
-  readonly property bool filePickerOpen: fileChoices.length > 0
-  function openFilePicker(paths, key) {
+  readonly property bool fileSelectOpen: fileChoices.length > 0
+  function startFileSelection(paths, key) {
     fileChoices = paths.slice()
     fileChoiceCur = 0
     fileChoiceKey = key
   }
-  function closeFilePicker() { fileChoices = []; fileChoiceKey = "" }
+  function closeFileSelection() { fileChoices = []; fileChoiceKey = "" }
   function acceptFileChoice() {
     var path = fileChoices[Math.max(0, Math.min(fileChoiceCur, fileChoices.length - 1))]
-    closeFilePicker()
+    closeFileSelection()
     if (path) openFileRef(path)
   }
-  function keyFilePicker(e) {
+  function keyFileSelection(e) {
     var ctrl = e.modifiers & Qt.ControlModifier
-    if (e.key === Qt.Key_Escape) { closeFilePicker(); return true }
+    if (e.key === Qt.Key_Escape) { closeFileSelection(); return true }
+    if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
+      toggleCurBash(); return true
+    }
     if (e.key === Qt.Key_J || e.key === Qt.Key_Down || (ctrl && e.key === Qt.Key_N)) {
       fileChoiceCur = (fileChoiceCur + 1) % fileChoices.length; return true
     }
@@ -523,10 +526,6 @@ Item {
   function shownFileRef(ref) {
     var r = String(ref || "")
     return /^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(r) ? "/" + r : r
-  }
-  function fileLabel(ref) {
-    var parts = String(ref || "").split("/")
-    return parts.length ? parts[parts.length - 1] : ""
   }
   function openFileRef(ref) {
     var r = String(ref || "")
@@ -1791,7 +1790,7 @@ Item {
       var it = groupedFeed[l]
       var edits = activityFileRefs(it)
       if (edits.length === 1) { openFileRef(edits[0]); return }
-      if (edits.length > 1) { openFilePicker(edits, "turn-" + (it.key || l)); return }
+      if (edits.length > 1) { startFileSelection(edits, "turn-" + (it.key || l)); return }
       var refs = cardFileRefs(it)
       if (refs.length === 1) { openFileRef(refs[0]); return }
     }
@@ -2003,7 +2002,7 @@ Item {
   Keys.onPressed: (e) => {
     _klog(e)
     if (keyGlobal(e)) { e.accepted = true; return }
-    if (filePickerOpen && keyFilePicker(e)) { e.accepted = true; return }
+    if (fileSelectOpen && keyFileSelection(e)) { e.accepted = true; return }
     // Insert: the focused input owns the keyboard — except a blocking confirm/
     // select ask, which hides the composer, so its keys must still land here.
     if (insert && (!pendingAsk || askDeferred || askWantsText)) return
@@ -2018,7 +2017,7 @@ Item {
 
   // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
-    if (filePickerOpen) closeFilePicker()
+    if (fileSelectOpen) closeFileSelection()
     if (hinting) cancelHints("cur-move")   // any cursor move invalidates the labeled row
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
@@ -3905,7 +3904,6 @@ Item {
   component InlinePicker: Rectangle {
     required property var entries
     required property int choice
-    property bool files: false
     signal picked(int index)
     width: Math.min(340, parent ? parent.width : 340)
     height: visible ? Math.min(pickerList.contentHeight + 8, 248) : 0
@@ -3928,7 +3926,7 @@ Item {
         required property var modelData
         required property int index
         readonly property bool sel: index === pickerList.currentIndex
-        readonly property bool isSkill: !files && String(modelData).indexOf("skill:") === 0
+        readonly property bool isSkill: String(modelData).indexOf("skill:") === 0
         width: pickerList.width; height: 32
         radius: 9
         color: sel ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
@@ -3941,14 +3939,14 @@ Item {
             width: 20; height: 20; anchors.verticalCenter: parent.verticalCenter
             Icon {
               anchors.centerIn: parent
-              name: files ? "file" : (pickerRow.isSkill ? "puzzle-piece" : "bolt-lightning")
+              name: pickerRow.isSkill ? "puzzle-piece" : "bolt-lightning"
               width: 14; height: 14
               color: pickerRow.sel ? Theme.fg : Theme.fg_muted
             }
           }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: files ? rail.fileLabel(modelData) : "/" + modelData
+            text: "/" + modelData
             color: pickerRow.sel ? Theme.fg : Theme.fg_secondary
             font.family: Theme.fontFamily; font.pixelSize: 14
             width: parent.width - 29; elide: Text.ElideMiddle
@@ -4090,15 +4088,9 @@ Item {
         Loader {
           width: actCol.width
           property var entry: actCol.editItems[index]
+          property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === ekey && rail.fileChoiceCur === index
           sourceComponent: editRow
         }
-      }
-      InlinePicker {
-        visible: rail.filePickerOpen && rail.fileChoiceKey === ekey
-        entries: rail.fileChoices
-        choice: rail.fileChoiceCur
-        files: true
-        onPicked: index => { rail.fileChoiceCur = index; rail.acceptFileChoice() }
       }
       Repeater {
         // Keep existing Bash delegates mounted when new activity arrives.
@@ -4386,13 +4378,20 @@ Item {
   }
   Component {
     id: editRow
-    RowLayout {
-      spacing: 8
-      Icon { name: "paintbrush"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
-      Text { text: entry.file; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.bold: true; elide: Text.ElideMiddle; Layout.fillWidth: true }
-      // Diff stats only when known (live edits); transcript edits carry none.
-      Text { visible: (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
-      Text { visible: (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+    Rectangle {
+      implicitHeight: 30
+      radius: 8
+      color: fileSelected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08) : "transparent"
+      border.width: fileSelected ? 1 : 0
+      border.color: Theme.hairline
+      RowLayout {
+        anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
+        spacing: 8
+        Icon { name: "paintbrush"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
+        Text { text: entry.file; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.bold: true; elide: Text.ElideMiddle; Layout.fillWidth: true }
+        Text { visible: (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+        Text { visible: (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+      }
       TapHandler { onTapped: rail.openFileRef(entry.path) }
     }
   }
