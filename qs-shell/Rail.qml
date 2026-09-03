@@ -273,6 +273,33 @@ Item {
   }
   property int slashCur: 0
   onCommandMatchesChanged: slashCur = 0
+  property var fileChoices: []
+  property int fileChoiceCur: 0
+  readonly property bool filePickerOpen: fileChoices.length > 0
+  function openFilePicker(paths) {
+    fileChoices = paths.slice()
+    fileChoiceCur = 0
+  }
+  function closeFilePicker() { fileChoices = [] }
+  function acceptFileChoice() {
+    var path = fileChoices[Math.max(0, Math.min(fileChoiceCur, fileChoices.length - 1))]
+    closeFilePicker()
+    if (path) openFileRef(path)
+  }
+  function keyFilePicker(e) {
+    var ctrl = e.modifiers & Qt.ControlModifier
+    if (e.key === Qt.Key_Escape) { closeFilePicker(); return true }
+    if (e.key === Qt.Key_J || e.key === Qt.Key_Down || (ctrl && e.key === Qt.Key_N)) {
+      fileChoiceCur = (fileChoiceCur + 1) % fileChoices.length; return true
+    }
+    if (e.key === Qt.Key_K || e.key === Qt.Key_Up || (ctrl && e.key === Qt.Key_P)) {
+      fileChoiceCur = (fileChoiceCur - 1 + fileChoices.length) % fileChoices.length; return true
+    }
+    if (e.key === Qt.Key_O || e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
+      acceptFileChoice(); return true
+    }
+    return true
+  }
   // Prefill the composer and take the keyboard: used by the header controls so a click
   // lands you in the same command you would have typed.
   function prefillComposer(text) {
@@ -1754,9 +1781,9 @@ Item {
       if (cf) openInNvim(cf.path)
     } else {
       var it = groupedFeed[l]
-      // A card naming exactly one file: Enter opens it, same as its `f` hint. With
-      // none (or several — aim with `f`), Enter keeps opening/closing the card's
-      // collapsed tool activity ("N bash · …").
+      var edits = activityFileRefs(it)
+      if (edits.length === 1) { openFileRef(edits[0]); return }
+      if (edits.length > 1) { openFilePicker(edits); return }
       var refs = cardFileRefs(it)
       if (refs.length === 1) { openFileRef(refs[0]); return }
       if (it) toggleGroupKey("turn-" + (it.key || l))
@@ -1959,6 +1986,7 @@ Item {
   Keys.onPressed: (e) => {
     _klog(e)
     if (keyGlobal(e)) { e.accepted = true; return }
+    if (filePickerOpen && keyFilePicker(e)) { e.accepted = true; return }
     // Insert: the focused input owns the keyboard — except a blocking confirm/
     // select ask, which hides the composer, so its keys must still land here.
     if (insert && (!pendingAsk || askDeferred || askWantsText)) return
@@ -3862,14 +3890,11 @@ Item {
     }
   }
 
-  // Slash-command palette. Same shape as the family's inline autocomplete
-  // (slk-gui-proto/Autocomplete.qml): a fixed-width card floating above the chin,
-  // bg_alt on a hairline, 32px rows, fg-tinted selection with a hairpin border —
-  // Theme.selection is near-invisible on the light popup ground.
+  // Slash commands and edit-file choices share one inline picker.
   Rectangle {
     id: slashPalette
     readonly property int w: 340
-    visible: rail.slashOpen
+    visible: rail.slashOpen || rail.filePickerOpen
     anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
     width: Math.min(w, parent.width - 40)
     height: visible ? Math.min(slashList.contentHeight + 8, 248) : 0
@@ -3881,8 +3906,10 @@ Item {
     ListView {
       id: slashList
       anchors.fill: parent; anchors.margins: 4; clip: true
-      model: rail.commandMatches
-      currentIndex: Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
+      model: rail.filePickerOpen ? rail.fileChoices : rail.commandMatches
+      currentIndex: rail.filePickerOpen
+        ? Math.max(0, Math.min(rail.fileChoiceCur, rail.fileChoices.length - 1))
+        : Math.max(0, Math.min(rail.slashCur, rail.commandMatches.length - 1))
       highlightFollowsCurrentItem: false
       interactive: contentHeight > height
       boundsBehavior: Flickable.StopAtBounds
@@ -3892,7 +3919,8 @@ Item {
         required property var modelData
         required property int index
         readonly property bool sel: index === slashList.currentIndex
-        readonly property bool isSkill: String(modelData).indexOf("skill:") === 0
+        readonly property bool isFile: rail.filePickerOpen
+        readonly property bool isSkill: !isFile && String(modelData).indexOf("skill:") === 0
         width: slashList.width; height: 32
         radius: 9
         color: sel ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08)
@@ -3905,20 +3933,26 @@ Item {
             width: 20; height: 20; anchors.verticalCenter: parent.verticalCenter
             Icon {
               anchors.centerIn: parent
-              name: slashRow.isSkill ? "puzzle-piece" : "bolt-lightning"
+              name: slashRow.isFile ? "file" : (slashRow.isSkill ? "puzzle-piece" : "bolt-lightning")
               width: 14; height: 14
               color: slashRow.sel ? Theme.fg : Theme.fg_muted
             }
           }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: "/" + modelData
+            text: slashRow.isFile ? rail.shownFileRef(modelData) : "/" + modelData
             color: slashRow.sel ? Theme.fg : Theme.fg_secondary
             font.family: Theme.fontFamily; font.pixelSize: 14
+            width: parent.width - 29; elide: Text.ElideMiddle
           }
         }
         HoverHandler { id: chov }
-        TapHandler { onTapped: { rail.slashCur = slashRow.index; rail.acceptSlash(); composerInput.forceActiveFocus() } }
+        TapHandler {
+          onTapped: {
+            if (slashRow.isFile) { rail.fileChoiceCur = slashRow.index; rail.acceptFileChoice() }
+            else { rail.slashCur = slashRow.index; rail.acceptSlash(); composerInput.forceActiveFocus() }
+          }
+        }
       }
     }
   }
