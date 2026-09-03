@@ -4,7 +4,7 @@
 #include <QPainterPath>
 #include <QKeyEvent>
 #include <QMouseEvent>
-#include <QSocketNotifier>
+#include <QWheelEvent>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QClipboard>
@@ -14,18 +14,17 @@
 #include <QString>
 #include <cmath>
 
-#include <pty.h>       // forkpty
-#include <signal.h>    // killpg on teardown
+#include <signal.h>    // killpg on teardown, SIGPIPE
 #include <sys/wait.h>
-#include <sys/ioctl.h> // TIOCSWINSZ
 #include <unistd.h>
 #include <poll.h>
 #include <fcntl.h>
+#include <time.h>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <unordered_map>
+#include <vector>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -36,57 +35,37 @@ static QByteArray cockpitEnv(const char *name) {
   return current.isEmpty() ? qgetenv((QByteArray("HEIDR_") + name).constData()) : current;
 }
 
-// Kitty graphics needs a PNG decoder installed process-wide. Decode via QImage
-// into tight RGBA, allocated through the library's allocator (it takes ownership
-// and frees with the same allocator).
-static bool cockpitDecodePng(void *, const GhosttyAllocator *alloc,
-                           const uint8_t *data, size_t len, GhosttySysImage *out) {
-  QImage img;
-  if (!img.loadFromData(data, (int)len, "PNG")) return false;
-  img = img.convertToFormat(QImage::Format_RGBA8888);
-  const size_t w = (size_t)img.width(), h = (size_t)img.height();
-  const size_t n = w * h * 4;
-  uint8_t *buf = ghostty_alloc(alloc, n);
-  if (!buf) return false;
-  for (size_t y = 0; y < h; y++)
-    memcpy(buf + y * w * 4, img.constScanLine((int)y), w * 4);
-  out->width = (uint32_t)w; out->height = (uint32_t)h;
-  out->data = buf; out->data_len = n;
-  return true;
+// librio's callbacks may fire on its PTY IO thread, which rio_surface_free does not
+// join — so a raw TermView* in userdata could dangle for a moment during teardown.
+// Callbacks carry an opaque id instead and resolve it here; the destructor unregisters
+// under the same lock, after which no callback can reach the dying object.
+namespace {
+std::mutex g_bridgeMtx;
+std::unordered_map<uintptr_t, TermView *> g_bridges;
+uintptr_t g_nextBridge = 1;
 }
 
-// Kitty unicode-placeholder row/column diacritics (kitty's canonical 297-entry
-// table). The Nth combining mark on a U+10EEEE placeholder cell encodes the
-// number N — 1st = image row, 2nd = image column, 3rd = high byte of image id.
-static const uint32_t kKittyDiacritics[] = {
-#include "kitty_diacritics.inc"
+// Default 16-color palette (xterm), overridden by the theme file in loadThemeColors.
+static const rio_rgb_s kDefaultAnsi[16] = {
+  {0x00, 0x00, 0x00}, {0xcd, 0x00, 0x00}, {0x00, 0xcd, 0x00}, {0xcd, 0xcd, 0x00},
+  {0x00, 0x00, 0xee}, {0xcd, 0x00, 0xcd}, {0x00, 0xcd, 0xcd}, {0xe5, 0xe5, 0xe5},
+  {0x7f, 0x7f, 0x7f}, {0xff, 0x00, 0x00}, {0x00, 0xff, 0x00}, {0xff, 0xff, 0x00},
+  {0x5c, 0x5c, 0xff}, {0xff, 0x00, 0xff}, {0x00, 0xff, 0xff}, {0xff, 0xff, 0xff},
 };
-static int kittyDiacriticIndex(uint32_t cp) {
-  for (size_t i = 0; i < sizeof(kKittyDiacritics) / sizeof(uint32_t); ++i)
-    if (kKittyDiacritics[i] == cp) return (int)i;
-  return -1;
-}
 
-// Borrowed kitty image pixels (RGBA/RGB, uncompressed) → a QImage view. Returns
-// a null image for anything we can't map. No copy: valid only within paint().
-static QImage kittyImageView(GhosttyKittyGraphicsImage im) {
-  uint32_t iw = 0, ih = 0;
-  GhosttyKittyImageFormat fmt = GHOSTTY_KITTY_IMAGE_FORMAT_RGBA;
-  GhosttyKittyImageCompression comp = GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE;
-  const uint8_t *pix = nullptr; size_t plen = 0;
-  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_WIDTH, &iw);
-  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_HEIGHT, &ih);
-  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_FORMAT, &fmt);
-  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_COMPRESSION, &comp);
-  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_DATA_PTR, &pix);
-  ghostty_kitty_graphics_image_get(im, GHOSTTY_KITTY_IMAGE_DATA_DATA_LEN, &plen);
-  if (!pix || !iw || !ih || comp != GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE) return QImage();
-  QImage::Format qfmt;
-  if (fmt == GHOSTTY_KITTY_IMAGE_FORMAT_RGBA) qfmt = QImage::Format_RGBA8888;
-  else if (fmt == GHOSTTY_KITTY_IMAGE_FORMAT_RGB) qfmt = QImage::Format_RGB888;
-  else return QImage();
-  return QImage(pix, (int)iw, (int)ih, qfmt);
-}
+static inline QColor toQ(const rio_rgb_s &c) { return QColor(c.r, c.g, c.b); }
+static inline QColor toQ(const rio_color_s &c) { return QColor(c.r, c.g, c.b); }
+
+// rio-vt StyleFlags (librio.h: rio_cell_s.style_flags bits 0..10).
+enum : uint16_t {
+  kStyleInverse   = 1u << 0,
+  kStyleBold      = 1u << 1,
+  kStyleItalic    = 1u << 2,
+  kStyleDim       = 1u << 3,
+  kStyleHidden    = 1u << 4,
+  kStyleStrikeout = 1u << 5,
+  kStyleUnderlineAny = (1u << 6) | (1u << 7) | (1u << 8) | (1u << 9) | (1u << 10),
+};
 
 TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setFlag(ItemHasContents, true);
@@ -160,47 +139,35 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setImplicitSize(cols_ * cellW_ + padL_ + padR_,
                   rows_ * cellH_ + padT_ + padB_);
 
-  // libghostty-vt terminal at the fixed spike size.
-  GhosttyResult r = ghostty_terminal_new(nullptr, &term_, cols_, rows_);
-  if (r != GHOSTTY_SUCCESS) qFatal("ghostty_terminal_new failed: %d", r);
+  // librio's wake pipes are written from signal handlers and expect EPIPE, so the
+  // host must not die on SIGPIPE (librio.h). Once per process.
+  static bool s_sigpipeIgnored = false;
+  if (!s_sigpipeIgnored) { ::signal(SIGPIPE, SIG_IGN); s_sigpipeIgnored = true; }
 
-  ghostty_render_state_new(nullptr, &renderState_);  // cursor shape (DECSCUSR) lives here
-  // Kitty graphics: install the PNG decoder once (process-wide) and give this
-  // terminal a storage budget so it accepts + stores images (dashboard banner, etc.).
-  static bool s_pngInstalled = false;
-  if (!s_pngInstalled) {
-    // Callback options take the function pointer BY VALUE (ghostty_sys_set casts the
-    // void* straight to the fn type), unlike the scalar terminal options, which take a
-    // pointer TO the value. Passing &localVariable stored the address of a stack slot
-    // and libghostty later jumped into stack garbage — a segfault on the first PNG.
-    ghostty_sys_set(GHOSTTY_SYS_OPT_DECODE_PNG, reinterpret_cast<void *>(&cockpitDecodePng));
-    s_pngInstalled = true;
+  // A self-pipe lets librio's IO thread (wakeup_cb) and the GUI thread break the
+  // worker's blocking poll(). Created BEFORE the surface: the child starts talking
+  // the moment it is spawned.
+  if (pipe(wakePipe_) != 0) qFatal("wake pipe failed");
+  for (int i = 0; i < 2; ++i) {
+    fcntl(wakePipe_[i], F_SETFL, fcntl(wakePipe_[i], F_GETFL) | O_NONBLOCK);
+    fcntl(wakePipe_[i], F_SETFD, fcntl(wakePipe_[i], F_GETFD) | FD_CLOEXEC);
   }
-  size_t kittyLimit = (size_t)320 * 1024 * 1024;
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &kittyLimit);
-  // Kitty's FILE and SHARED-MEMORY transmission mediums are opt-in — a terminal reading
-  // paths an application names is a real capability, so libghostty makes you ask. Without
-  // this, only inline base64 works, and snacks.image (the nvim dashboard masthead, and
-  // image.nvim generally) writes a PNG to a temp path and sends the PATH — so its images
-  // never landed and the placeholder cells rendered as coloured blocks instead, coloured
-  // by the image id encoded in their foreground.
+
   {
-    bool on = true;
-    ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_FILE, &on);
-    ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_SHARED_MEM, &on);
-    // Temp-file transmission is restricted to a directory, which is the point: the
-    // terminal will only read images out of the system temp dir.
-    const char *tmpdir = getenv("TMPDIR");
-    if (!tmpdir || !*tmpdir) tmpdir = "/tmp";
-    GhosttyString tdir{};
-    tdir.ptr = reinterpret_cast<const uint8_t *>(tmpdir);
-    tdir.len = strlen(tmpdir);
-    ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_MEDIUM_TEMP_FILE, &tdir);
+    std::lock_guard<std::mutex> lk(g_bridgeMtx);
+    bridgeId_ = g_nextBridge++;
+    g_bridges[bridgeId_] = this;
   }
+  rio_runtime_config_s rc{};
+  rc.userdata = reinterpret_cast<void *>(bridgeId_);
+  rc.wakeup_cb = &TermView::onWakeup;
+  rc.close_surface_cb = &TermView::onCloseSurface;
+  engine_ = rio_engine_new(&rc);
+  if (!engine_) qFatal("rio_engine_new failed");
+
+  // Colors are process-wide in librio (one theme resolves every surface's cells);
+  // this process hosts one terminal, so that is exactly the desktop theme.
   loadThemeColors();  // fg/bg/cursor + palette 0-15 for the current theme mode
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_USERDATA, this);
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_WRITE_PTY,
-                       reinterpret_cast<const void *>(&TermView::onWritePty));
   applyThemeColors();
 
   // Live light/dark flip: reload colors when ~/.config/theme_mode changes.
@@ -211,20 +178,15 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     themeWatcher_->addPath(tm);
     connect(themeWatcher_, &QFileSystemWatcher::fileChanged, this, [this, tm](const QString &) {
       { std::lock_guard<std::mutex> lk(cmdMtx_); themeReload_ = true; }
-      wakeWorker();   // colours (palette_/term_) are worker-owned → reload there
+      wakeWorker();   // colours are re-resolved on the worker's next snapshot
       if (!themeWatcher_->files().contains(tm)) themeWatcher_->addPath(tm);  // re-arm after rewrite
     });
   }
 
-  spawnPty();
+  createSurface();
 
-  // Worker thread owns the PTY read loop + ghostty + rasterization. A self-pipe
-  // lets the GUI thread break the worker's blocking poll() to deliver commands.
-  if (pipe(wakePipe_) != 0) qFatal("wake pipe failed");
-  for (int i = 0; i < 2; ++i) {
-    fcntl(wakePipe_[i], F_SETFL, fcntl(wakePipe_[i], F_GETFL) | O_NONBLOCK);
-    fcntl(wakePipe_[i], F_SETFD, fcntl(wakePipe_[i], F_GETFD) | FD_CLOEXEC);
-  }
+  // Worker thread owns the render snapshot + rasterization. librio's own IO thread
+  // pumps the PTY and pings wakeup_cb, which nudges the worker through the pipe.
   wViewW_ = (int)(cols_ * cellW_ + padL_ + padR_);
   wViewH_ = (int)(rows_ * cellH_ + padT_ + padB_);
   worker_ = std::thread(&TermView::workerLoop, this);
@@ -233,26 +195,48 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
 TermView::~TermView() {
   quit_.store(true);
   wakeWorker();
-  if (worker_.joinable()) worker_.join();
-  // Take the shell tree with us. forkpty's child is a SESSION LEADER, so its pgid is
-  // its pid and one killpg reaches fish and everything it started. Closing the master
-  // alone was not enough — nvim survived it, so every relaunch of the cockpit orphaned
-  // another editor (30 of them after an afternoon of restarts), and those orphans still
-  // hold the nvim server socket, which is what made live-follow land in the wrong place.
+  if (worker_.joinable()) worker_.join();   // frees the render state on its way out
+  {
+    std::lock_guard<std::mutex> lk(g_bridgeMtx);
+    g_bridges.erase(bridgeId_);   // no callback reaches this object past here
+  }
+  // Hang up the pty and SIGHUP the shell (librio does both), then take the whole
+  // tree with us. The child is a SESSION LEADER, so its pgid is its pid and one
+  // killpg reaches fish and everything it started. Hanging up alone was not enough —
+  // nvim survived it, so every relaunch of the cockpit orphaned another editor (30 of
+  // them after an afternoon of restarts), and those orphans still hold the nvim
+  // server socket, which is what made live-follow land in the wrong place.
+  if (surface_) { rio_surface_free(surface_); surface_ = nullptr; }
   if (child_ > 0) {
     ::killpg(child_, SIGHUP);
+    bool gone = false;
     for (int i = 0; i < 20; ++i) {                 // ~200ms for a clean exit
-      if (::waitpid(child_, nullptr, WNOHANG) == child_) { child_ = -1; break; }
+      const pid_t r = ::waitpid(child_, nullptr, WNOHANG);
+      if (r == child_ || (r < 0 && errno == ECHILD)) { gone = true; break; }  // ECHILD: librio reaped it
       struct timespec ts { 0, 10 * 1000 * 1000 };
       ::nanosleep(&ts, nullptr);
     }
-    if (child_ > 0) { ::killpg(child_, SIGKILL); ::waitpid(child_, nullptr, 0); }
+    if (!gone) { ::killpg(child_, SIGKILL); ::waitpid(child_, nullptr, 0); }
+    child_ = -1;
   }
+  if (engine_) { rio_engine_free(engine_); engine_ = nullptr; }
   if (wakePipe_[0] >= 0) ::close(wakePipe_[0]);
   if (wakePipe_[1] >= 0) ::close(wakePipe_[1]);
-  if (master_ >= 0) ::close(master_);
-  if (renderState_) ghostty_render_state_free(renderState_);
-  if (term_) ghostty_terminal_free(term_);
+}
+
+void TermView::onWakeup(void *userdata, rio_surface_id_t) {
+  // IO thread. Only flag/schedule here — never call back into rio_* (librio.h).
+  std::lock_guard<std::mutex> lk(g_bridgeMtx);
+  auto it = g_bridges.find(reinterpret_cast<uintptr_t>(userdata));
+  if (it != g_bridges.end()) it->second->wakeWorker();
+}
+
+void TermView::onCloseSurface(void *userdata, rio_surface_id_t) {
+  std::lock_guard<std::mutex> lk(g_bridgeMtx);
+  auto it = g_bridges.find(reinterpret_cast<uintptr_t>(userdata));
+  if (it == g_bridges.end()) return;
+  it->second->closed_.store(true);
+  it->second->wakeWorker();   // present the child's final frame, then stop
 }
 
 void TermView::setActive(bool a) {
@@ -263,7 +247,7 @@ void TermView::setActive(bool a) {
   wakeWorker();   // worker re-renders so the cursor shows/hides immediately
 }
 
-static bool parseHex(const std::string &s, GhosttyColorRgb &out) {
+static bool parseHex(const std::string &s, rio_rgb_s &out) {
   unsigned r, g, b;
   if (s.size() < 7 || s[0] != '#') return false;
   if (sscanf(s.c_str(), "#%2x%2x%2x", &r, &g, &b) != 3) return false;
@@ -272,6 +256,11 @@ static bool parseHex(const std::string &s, GhosttyColorRgb &out) {
 }
 
 void TermView::loadThemeColors() {
+  // Reset before overriding: defaults for anything the theme file leaves out.
+  for (int i = 0; i < 16; ++i) colors_.ansi[i] = kDefaultAnsi[i];
+  colors_.foreground = {0xdd, 0xdd, 0xdd};
+  colors_.background = {0x1e, 0x1e, 0x2e};
+  colors_.cursor     = {0xdd, 0xdd, 0xdd};
   const char *home = getenv("HOME");
   if (!home) return;
   // Current theme mode (light/dark) → the matching generated kitty palette.
@@ -286,7 +275,6 @@ void TermView::loadThemeColors() {
       if (m == "light" || m == "dark") mode = m;
     }
   }
-  ghostty_color_palette_default(palette_);  // reset before overriding 0-15
   std::ifstream f(std::string(home) + "/.config/kitty/" + mode + "-theme.auto.conf");
   if (!f) return;
   std::string line;
@@ -294,24 +282,135 @@ void TermView::loadThemeColors() {
     std::istringstream is(line);
     std::string key, val;
     if (!(is >> key >> val)) continue;
-    GhosttyColorRgb c;
+    rio_rgb_s c;
     if (!parseHex(val, c)) continue;
-    if (key == "background") defBg_ = c;
-    else if (key == "foreground") defFg_ = c;
-    else if (key == "cursor") defCursor_ = c;
+    if (key == "background") colors_.background = c;
+    else if (key == "foreground") colors_.foreground = c;
+    else if (key == "cursor") colors_.cursor = c;
     else if (key.rfind("color", 0) == 0) {
+      // librio takes the 16 ANSI slots; 16-255 are the fixed xterm cube it owns.
       int idx = atoi(key.c_str() + 5);
-      if (idx >= 0 && idx < 256) palette_[idx] = c;
+      if (idx >= 0 && idx < 16) colors_.ansi[idx] = c;
     }
   }
 }
 
 void TermView::applyThemeColors() {
-  if (!term_) return;
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &defFg_);
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &defBg_);
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &defCursor_);
-  ghostty_terminal_set(term_, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, palette_);
+  // Process-wide: cells re-resolve on the next snapshot read, no re-snapshot needed.
+  rio_set_colors(&colors_);
+}
+
+void TermView::createSurface() {
+  // librio spawns the child itself (inheriting this process's environment, plus TERM
+  // and COLORTERM which it sets: rio's terminfo when installed, else xterm-256color),
+  // so the cockpit's own variables are exported here before the spawn.
+  setenv("COCKPIT_COCKPIT", "1", 1);
+  setenv("HEIDR_COCKPIT", "1", 1);
+  // nvim RPC socket so the rail can open files in the running nvim (nvim-follow).
+  setenv("NVIM_LISTEN_ADDRESS", nvimSocket_.toUtf8().constData(), 1);
+
+  const char *sh = getenv("SHELL");
+  if (!sh || !*sh) sh = "/bin/bash";
+  // Auto-launch nvim in the pane; drop to a login shell when it exits.
+  // Override with COCKPIT_COCKPIT_CMD; the legacy HEIDR_ name still works.
+  // Never unlink before binding: nvim handles stale sockets, while the private path above
+  // prevents a live instance from being stolen.
+  const QByteArray cmdEnv = cockpitEnv("COCKPIT_CMD");
+  const char *cmd = cmdEnv.constData();
+  if (!cmd || !*cmd) cmd = "nvim --listen \"$NVIM_LISTEN_ADDRESS\" -c 'set shortmess+=I'; exec \"$SHELL\" -l";
+  // A named program is spawned as given (no login wrapper), so `-l -c` reproduces
+  // the login shell the cockpit always had.
+  const char *args[] = { "-l", "-c", cmd };
+
+  rio_surface_config_s sc{};
+  sc.shell = sh;
+  sc.working_dir = nullptr;   // inherit
+  sc.cols = (uint16_t)cols_;
+  sc.rows = (uint16_t)rows_;
+  // DEVICE cell sizes: kitty-graphics placements map pixels onto cells from these.
+  sc.pixel_width  = (uint16_t)(cols_ * cellWD_);
+  sc.pixel_height = (uint16_t)(rows_ * cellHD_);
+  sc.scrollback = 10000;
+  sc.args = args;
+  sc.args_len = 3;
+  surface_ = rio_surface_new(engine_, &sc);
+  if (!surface_) qFatal("rio_surface_new failed");
+  child_ = (pid_t)rio_surface_child_pid(surface_);   // remember it so teardown can take the shell tree with us
+}
+
+void TermView::wakeWorker() {
+  if (wakePipe_[1] >= 0) { char b = 1; ssize_t w = ::write(wakePipe_[1], &b, 1); (void)w; }
+}
+
+void TermView::workerLoop() {
+  // Render-state calls must all come from one thread (librio.h) — this one.
+  state_ = rio_render_state_new(surface_);
+  if (!state_) { qWarning("rio_render_state_new failed"); return; }
+  int lastCols = cols_, lastRows = rows_;
+  bool dirty = true;   // first frame
+
+  while (!quit_.load()) {
+    struct pollfd fd;
+    fd.fd = wakePipe_[0]; fd.events = POLLIN; fd.revents = 0;
+    // No wait on the first pass: present the initial frame before the child speaks.
+    int pr = ::poll(&fd, 1, dirty ? 0 : -1);
+    if (pr < 0) { if (errno == EINTR) continue; break; }
+    if (quit_.load()) break;
+
+    if (fd.revents & POLLIN) {
+      char drain[256]; while (::read(wakePipe_[0], drain, sizeof(drain)) > 0) {}
+      // librio coalesces one nvim redraw burst into one wakeup and buffers
+      // synchronized updates (mode 2026) inside the parser, so any wake is a frame
+      // worth presenting — no mid-burst half frames to gate here.
+      dirty = true;
+    }
+
+    bool doResize = false, doTheme = false, doRepaint = false;
+    decltype(resize_) rz{};
+    {
+      std::lock_guard<std::mutex> lk(cmdMtx_);
+      if (resize_.pending) { rz = resize_; resize_.pending = false; doResize = true; }
+      doTheme = themeReload_;   themeReload_ = false;
+      doRepaint = repaintReq_;  repaintReq_ = false;
+    }
+    if (doTheme)   { loadThemeColors(); applyThemeColors(); dirty = true; }
+    if (doResize) {
+      if (std::abs(rz.dpr - wDpr_) > 0.001) { wDpr_ = rz.dpr; applyMetrics(wDpr_); }
+      if (rz.cols != lastCols || rz.rows != lastRows) {
+        cols_ = rz.cols; rows_ = rz.rows;
+        // librio reflows the grid AND pushes TIOCSWINSZ (SIGWINCH → shell/nvim reflow).
+        // DEVICE pixel sizes: kitty-graphics placements compute pixel rects from these,
+        // and the worker paints in device pixels — logical here would blit images at
+        // 1/dpr scale.
+        rio_surface_resize(surface_, (uint16_t)cols_, (uint16_t)rows_,
+                           (uint16_t)(cols_ * cellWD_), (uint16_t)(rows_ * cellHD_));
+        lastCols = cols_; lastRows = rows_;
+      }
+      wViewW_ = rz.viewW; wViewH_ = rz.viewH;
+      dirty = true;
+    }
+    if (doRepaint) dirty = true;
+
+    if (!dirty) continue;
+
+    rio_render_state_update(state_);
+    QImage f = renderFrame();
+    rio_render_state_reset_dirty(state_);
+    { std::lock_guard<std::mutex> lk(frameMtx_); frame_ = f; }
+    dirty = false;
+    QMetaObject::invokeMethod(this, [this] { update(); }, Qt::QueuedConnection);
+
+    if (closed_.load()) break;   // child exited (shell/nvim): its final frame is up
+  }
+  rio_render_state_free(state_);
+  state_ = nullptr;
+}
+
+void TermView::pasteText(const QString &t) {
+  if (t.isEmpty() || !surface_) return;
+  const QByteArray u = t.toUtf8();
+  // Bracketed when the program enabled mode 2004; input entry points are thread-safe.
+  rio_surface_paste(surface_, u.constData(), (size_t)u.size());
 }
 
 // Snap the cell box + padding to whole DEVICE pixels for this ratio. Everything the
@@ -371,36 +470,6 @@ void TermView::applyMetrics(qreal dpr) {
   basePadT_ = padT_; basePadB_ = padB_;
 }
 
-void TermView::spawnPty() {
-  struct winsize ws = {};
-  ws.ws_col = cols_;
-  ws.ws_row = rows_;
-  pid_t pid = forkpty(&master_, nullptr, nullptr, &ws);
-  if (pid < 0) { qFatal("forkpty failed"); }
-  if (pid > 0) child_ = pid;   // remember it so teardown can take the shell tree with us
-  if (pid == 0) {
-    // child: exec the login shell
-    const char *sh = getenv("SHELL");
-    if (!sh || !*sh) sh = "/bin/bash";
-    setenv("TERM", "xterm-256color", 1);
-    setenv("COLORTERM", "truecolor", 1);  // let nvim enable termguicolors → full theme
-    setenv("COCKPIT_COCKPIT", "1", 1);
-    setenv("HEIDR_COCKPIT", "1", 1);
-    // nvim RPC socket so the rail can open files in the running nvim (nvim-follow).
-    setenv("NVIM_LISTEN_ADDRESS", nvimSocket_.toUtf8().constData(), 1);
-    // Auto-launch nvim in the pane; drop to a login shell when it exits.
-    // Override with COCKPIT_COCKPIT_CMD; the legacy HEIDR_ name still works.
-    // Never unlink before binding: nvim handles stale sockets, while the private path above
-    // prevents a live instance from being stolen.
-    const QByteArray cmdEnv = cockpitEnv("COCKPIT_CMD");
-    const char *cmd = cmdEnv.constData();
-    if (!cmd || !*cmd) cmd = "nvim --listen \"$NVIM_LISTEN_ADDRESS\" -c 'set shortmess+=I'; exec \"$SHELL\" -l";
-    execl(sh, sh, "-l", "-c", cmd, (char *)nullptr);
-    _exit(127);
-  }
-  // parent: the worker thread's poll() loop reads master_ (see workerLoop).
-}
-
 void TermView::geometryChange(const QRectF &n, const QRectF &o) {
   QQuickPaintedItem::geometryChange(n, o);
   if (n.size() == o.size()) return;
@@ -434,7 +503,7 @@ void TermView::relayoutGrid() {
     std::lock_guard<std::mutex> lk(cmdMtx_);
     resize_ = { true, c, r, (int)w, (int)h, dpr };
   }
-  wakeWorker();   // worker applies ghostty_terminal_resize + TIOCSWINSZ + re-renders
+  wakeWorker();   // worker applies rio_surface_resize (grid + TIOCSWINSZ) + re-renders
 }
 
 // Distribute the vertical remainder around the grid. basePad* is the design padding
@@ -463,147 +532,6 @@ void TermView::centerGrid(qreal viewH, int rows) {
   const qreal d = guiDpr_ > 0 ? guiDpr_ : 1.0;
   padTD_ = (int)std::round(padT_ * d);
   padBD_ = (int)std::round(padB_ * d);
-}
-
-void TermView::wakeWorker() {
-  if (wakePipe_[1] >= 0) { char b = 1; ssize_t w = ::write(wakePipe_[1], &b, 1); (void)w; }
-}
-
-void TermView::enqueuePty(const QByteArray &bytes) {
-  if (bytes.isEmpty()) return;
-  { std::lock_guard<std::mutex> lk(cmdMtx_); ptyOut_.push_back(bytes); }
-  wakeWorker();
-}
-
-void TermView::workerLoop() {
-  int lastCols = cols_, lastRows = rows_;
-  bool dirty = false;
-
-  while (!quit_.load()) {
-    struct pollfd fds[2];
-    fds[0].fd = master_;      fds[0].events = POLLIN; fds[0].revents = 0;
-    fds[1].fd = wakePipe_[0]; fds[1].events = POLLIN; fds[1].revents = 0;
-    int pr = ::poll(fds, 2, -1);
-    if (pr < 0) { if (errno == EINTR) continue; break; }
-    if (quit_.load()) break;
-
-    if (fds[1].revents & POLLIN) {
-      char drain[256]; while (::read(wakePipe_[0], drain, sizeof(drain)) > 0) {}
-    }
-
-    std::deque<QByteArray> outs;
-    bool doResize = false, doTheme = false, doRepaint = false;
-    decltype(resize_) rz{};
-    {
-      std::lock_guard<std::mutex> lk(cmdMtx_);
-      outs.swap(ptyOut_);
-      if (resize_.pending) { rz = resize_; resize_.pending = false; doResize = true; }
-      doTheme = themeReload_;   themeReload_ = false;
-      doRepaint = repaintReq_;  repaintReq_ = false;
-    }
-    for (auto &b : outs) writePty(b.constData(), b.size());
-    if (doTheme)   { loadThemeColors(); applyThemeColors(); dirty = true; }
-    if (doResize) {
-      if (rz.cols != lastCols || rz.rows != lastRows) {
-        cols_ = rz.cols; rows_ = rz.rows;
-        // DEVICE cell sizes: kitty-graphics placements compute pixel rects from these,
-        // and the worker now paints in device pixels — logical here would blit images
-        // at 1/dpr scale.
-        ghostty_terminal_resize(term_, (uint16_t)cols_, (uint16_t)rows_,
-                                (uint32_t)cellWD_, (uint32_t)cellHD_);
-        if (master_ >= 0) {
-          struct winsize ws = {};
-          ws.ws_col = (unsigned short)cols_;   ws.ws_row = (unsigned short)rows_;
-          ws.ws_xpixel = (unsigned short)(cols_ * cellWD_);
-          ws.ws_ypixel = (unsigned short)(rows_ * cellHD_);
-          ioctl(master_, TIOCSWINSZ, &ws);  // SIGWINCH → shell/nvim reflow
-        }
-        lastCols = cols_; lastRows = rows_;
-      }
-      wViewW_ = rz.viewW; wViewH_ = rz.viewH;
-      if (std::abs(rz.dpr - wDpr_) > 0.001) { wDpr_ = rz.dpr; applyMetrics(wDpr_); }
-      dirty = true;
-    }
-    if (doRepaint) dirty = true;
-
-    bool ptyClosed = false;
-    if (fds[0].revents & POLLIN) {
-      // Drain the whole burst before rendering — one nvim redraw can span many
-      // reads; rendering per-chunk would emit redundant mid-burst frames (the
-      // big-file-open stutter). Inner poll(0) gates extra reads on a blocking fd.
-      uint8_t buf[65536];
-      for (;;) {
-        ssize_t n = ::read(master_, buf, sizeof(buf));
-        if (n > 0) {
-          ghostty_terminal_vt_write(term_, buf, (size_t)n);
-          dirty = true;
-          struct pollfd more; more.fd = master_; more.events = POLLIN; more.revents = 0;
-          if (::poll(&more, 1, 0) > 0 && (more.revents & POLLIN)) continue;
-          break;
-        }
-        if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) ptyClosed = true;
-        break;
-      }
-      // Cursor visual shape (block/bar/underline) — nvim swaps it by mode.
-      if (dirty && renderState_ && ghostty_render_state_update(renderState_, term_) == GHOSTTY_SUCCESS) {
-        GhosttyRenderStateCursorVisualStyle sh = GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK;
-        if (ghostty_render_state_get(renderState_, GHOSTTY_RENDER_STATE_DATA_CURSOR_VISUAL_STYLE, &sh) == GHOSTTY_SUCCESS)
-          cursorShape_ = (int)sh;
-      }
-    }
-    if (ptyClosed || (fds[0].revents & (POLLHUP | POLLERR))) {
-      if (dirty) {  // present nvim's final frame before we tear down
-        QImage f = renderFrame();
-        { std::lock_guard<std::mutex> lk(frameMtx_); frame_ = f; }
-        QMetaObject::invokeMethod(this, [this] { update(); }, Qt::QueuedConnection);
-      }
-      break;  // PTY closed (shell/nvim exited)
-    }
-
-    if (!dirty) continue;
-
-    // Synchronized output (mode 2026): don't present a half-drawn frame. Stay
-    // dirty and render once nvim ends the sync (next data burst wakes us).
-    GhosttyTerminalModeConfig mc;
-    mc.mode = GHOSTTY_MODE_SYNC_OUTPUT; mc.value = false;
-    ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_MODE, &mc);
-    if (mc.value) continue;
-
-    QImage f = renderFrame();
-    { std::lock_guard<std::mutex> lk(frameMtx_); frame_ = f; }
-    dirty = false;
-    QMetaObject::invokeMethod(this, [this] { update(); }, Qt::QueuedConnection);
-  }
-}
-
-void TermView::writePty(const char *data, int len) {
-  if (master_ >= 0 && len > 0) { ssize_t w = ::write(master_, data, len); (void)w; }
-}
-
-void TermView::onWritePty(GhosttyTerminal, void *userdata,
-                          const uint8_t *data, size_t len) {
-  auto *self = static_cast<TermView *>(userdata);
-  if (self) self->writePty(reinterpret_cast<const char *>(data), (int)len);
-}
-
-void TermView::pasteText(const QString &t) {
-  if (t.isEmpty()) return;
-  enqueuePty(t.toUtf8());   // GUI thread → worker owns the PTY fd
-}
-
-static inline QColor toQ(const GhosttyColorRgb &c) { return QColor(c.r, c.g, c.b); }
-
-static QColor resolveStyleColor(const GhosttyStyleColor &sc,
-                                const GhosttyColorRgb *palette,
-                                const QColor &fallback) {
-  switch (sc.tag) {
-    case GHOSTTY_STYLE_COLOR_RGB:
-      return QColor(sc.value.rgb.r, sc.value.rgb.g, sc.value.rgb.b);
-    case GHOSTTY_STYLE_COLOR_PALETTE:
-      return toQ(palette[sc.value.palette]);
-    default:
-      return fallback;
-  }
 }
 
 bool TermView::drawBoxChar(QPainter *p, qreal x, qreal y, uint32_t cp, const QColor &fg) {
@@ -744,9 +672,29 @@ void TermView::paint(QPainter *outP) {
   }
   QImage f;
   { std::lock_guard<std::mutex> lk(frameMtx_); f = frame_; }
-  if (f.isNull()) { outP->fillRect(boundingRect(), toQ(defBg_)); return; }
+  if (f.isNull()) { outP->fillRect(boundingRect(), toQ(colors_.background)); return; }
   outP->setRenderHint(QPainter::SmoothPixmapTransform, false);
   outP->drawImage(QPointF(0, 0), f);
+}
+
+
+const QImage *TermView::kittyImage(uint32_t imageId) {
+  uint32_t w = 0, h = 0; uint64_t stamp = 0;
+  if (!rio_render_state_kitty_image_info(state_, imageId, &w, &h, &stamp) || !w || !h)
+    return nullptr;
+  auto it = kittyCache_.find(imageId);
+  if (it != kittyCache_.end() && it->second.stamp == stamp && !it->second.img.isNull())
+    return &it->second.img;
+  // Retransmitted (new stamp) or first sight: copy the pixels out once. RGBA8888 rows
+  // are w*4 bytes, already 4-aligned, so librio can fill the QImage buffer directly.
+  QImage img((int)w, (int)h, QImage::Format_RGBA8888);
+  if (img.isNull() || (size_t)img.bytesPerLine() != (size_t)w * 4) return nullptr;
+  const size_t got = rio_render_state_kitty_image_rgba(state_, imageId, img.bits(),
+                                                       (size_t)img.sizeInBytes());
+  if (got == 0) return nullptr;
+  KittyCached &c = kittyCache_[imageId];
+  c.stamp = stamp; c.img = std::move(img);
+  return &c.img;
 }
 
 QImage TermView::renderFrame() {
@@ -759,73 +707,48 @@ QImage TermView::renderFrame() {
              QImage::Format_RGB32);   // OPAQUE: alpha blending softens glyph edges
   // IDENTITY transform: the DPR tag is applied after painting ends. Painting through a
   // scale silently disables font hinting in Qt, which is the root of the softness.
-  img.fill(toQ(defBg_));   // the bg is repainted below; this seeds an opaque surface
+  img.fill(toQ(colors_.background));   // the bg is repainted below; this seeds an opaque surface
   QPainter localPainter(&img);
   QPainter *p = &localPainter;
 
-  // Effective defaults (an app may have OSC-overridden fg/bg/cursor).
-  GhosttyColorRgb fgD = defFg_, bgD = defBg_, curD = defCursor_;
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND, &fgD);
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND, &bgD);
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_COLOR_CURSOR, &curD);
+  // Effective defaults (an app may have OSC-overridden fg/bg/cursor). Cells already
+  // follow the override; this is for the pane ground and the cursor.
+  rio_rgb_s fgD = colors_.foreground, bgD = colors_.background, curD = colors_.cursor;
+  rio_render_state_dynamic_color(state_, 0, &fgD);
+  rio_render_state_dynamic_color(state_, 1, &bgD);
+  rio_render_state_dynamic_color(state_, 2, &curD);
   const QColor defFg = toQ(fgD), defBg = toQ(bgD), curColor = toQ(curD);
+  (void)defFg;
 
   p->fillRect(QRect(0, 0, img.width(), img.height()), defBg);
 
-  uint16_t cx = 0, cy = 0;
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_CURSOR_X, &cx);
-  ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_CURSOR_Y, &cy);
+  const int lines = std::min<int>(rows_, rio_render_state_lines(state_));
+  const int cols  = std::min<int>(cols_, rio_render_state_columns(state_));
+  const rio_cursor_s cur = rio_render_state_cursor(state_);
+  const uint8_t curShape = rio_render_state_cursor_shape(state_);
+  const int thin = std::max(1, (int)std::round(ratio));   // 1 logical px, in device px
 
   // Two passes: fill EVERY background first, then draw glyphs on top. A glyph
   // can overhang its cell (wide Nerd icons horizontally, descenders vertically);
   // if a neighbor's background were filled after the glyph, it would clip that
   // overhang. Separating the passes lets overhangs survive.
-  struct Glyph { qreal x, y; uint32_t cp; QColor fg; bool bold; };
+  struct Glyph { qreal x, y; uint32_t cp; QColor fg; uint16_t flags; QString cluster; };
   std::vector<Glyph> glyphs;
   // Run state for merged background fills (see the fill below).
   bool runActive = false; QColor runColor; int runRow = -1, runStartCol = 0, runEndCol = -1;
-  glyphs.reserve((size_t)rows_ * cols_);
+  glyphs.reserve((size_t)lines * cols);
 
-  for (uint16_t row = 0; row < rows_; ++row) {
-    for (uint16_t col = 0; col < cols_; ++col) {
-      GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
-      GhosttyPoint pt;
-      pt.tag = GHOSTTY_POINT_TAG_ACTIVE;
-      pt.value.coordinate.x = col;
-      pt.value.coordinate.y = row;
-      if (ghostty_terminal_grid_ref(term_, pt, &ref) != GHOSTTY_SUCCESS) continue;
-
-      GhosttyCell cell;
-      if (ghostty_grid_ref_cell(&ref, &cell) != GHOSTTY_SUCCESS) continue;
-
-      GhosttyStyle style = GHOSTTY_INIT_SIZED(GhosttyStyle);
-      ghostty_grid_ref_style(&ref, &style);
-
-      bool has = false;
-      ghostty_cell_get(cell, GHOSTTY_CELL_DATA_HAS_TEXT, &has);
-
-      QColor fg = resolveStyleColor(style.fg_color, palette_, defFg);
-      QColor bg = resolveStyleColor(style.bg_color, palette_, QColor());
-      if (!bg.isValid()) {  // text-less cells carry their bg on the cell itself
-        GhosttyCellContentTag ct;
-        if (ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CONTENT_TAG, &ct) == GHOSTTY_SUCCESS) {
-          if (ct == GHOSTTY_CELL_CONTENT_BG_COLOR_RGB) {
-            GhosttyColorRgb c;
-            ghostty_cell_get(cell, GHOSTTY_CELL_DATA_COLOR_RGB, &c);
-            bg = toQ(c);
-          } else if (ct == GHOSTTY_CELL_CONTENT_BG_COLOR_PALETTE) {
-            GhosttyColorPaletteIndex idx;
-            ghostty_cell_get(cell, GHOSTTY_CELL_DATA_COLOR_PALETTE, &idx);
-            bg = toQ(palette_[idx]);
-          }
-        }
-      }
-
-      QColor effBg = bg.isValid() ? bg : defBg;
-      if (style.inverse) std::swap(fg, effBg);
-      if (style.faint) fg = QColor((fg.red() + effBg.red()) / 2,
-                                   (fg.green() + effBg.green()) / 2,
-                                   (fg.blue() + effBg.blue()) / 2);
+  for (int row = 0; row < lines; ++row) {
+    for (int col = 0; col < cols; ++col) {
+      const rio_cell_s cell = rio_render_state_cell(state_, (uint16_t)row, (uint16_t)col);
+      // librio resolves every color (named, indexed, RGB) to r/g/b for us; only the
+      // attribute effects that depend on the pair stay host-side.
+      QColor fg = toQ(cell.fg);
+      QColor effBg = toQ(cell.bg);
+      if (cell.style_flags & kStyleInverse) std::swap(fg, effBg);
+      if (cell.style_flags & kStyleDim) fg = QColor((fg.red() + effBg.red()) / 2,
+                                                    (fg.green() + effBg.green()) / 2,
+                                                    (fg.blue() + effBg.blue()) / 2);
 
       const qreal x = padLD_ + col * cellWD_, y = padTD_ + row * cellHD_;
       // Backgrounds accumulate into RUNS instead of one rect per cell. Per-cell fills
@@ -848,16 +771,25 @@ QImage TermView::renderFrame() {
         runActive = false;
       }
 
-      if (has) {
-        uint32_t cp = 0;
-        ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CODEPOINT, &cp);
-        // U+10EEEE is a kitty image PLACEHOLDER, not text: the image blits over these
-        // cells later in this paint. Drawing it painted the cell's foreground — which
-        // encodes the image id — as a coloured block that then showed through every
-        // transparent pixel of the image (the nvim masthead came out hatched).
-        if (cp != 0x10EEEEu)
-          glyphs.push_back({x, y, cp, fg, (bool)style.bold});
+      if (cell.style_flags & kStyleHidden) continue;
+      const bool hasText = cell.codepoint > 0x20;   // blanks + wide-char spacers draw nothing
+      const bool decorated = cell.style_flags & (kStyleUnderlineAny | kStyleStrikeout);
+      if (!hasText && !decorated) continue;
+      // U+10EEEE is a kitty image PLACEHOLDER, not text: the image blits over these
+      // cells later in this paint. Drawing it painted the cell's foreground — which
+      // encodes the image id — as a coloured block that then showed through every
+      // transparent pixel of the image (the nvim masthead came out hatched).
+      if (cell.codepoint == 0x10EEEEu) continue;
+      Glyph g{x, y, hasText ? cell.codepoint : 0u, fg, cell.style_flags, QString()};
+      if (hasText && (cell.style_flags & RIO_CELL_HAS_CLUSTER)) {
+        // Combining marks / grapheme clusters: draw the whole cluster, not the base.
+        uint32_t buf[16];
+        const size_t n = rio_render_state_cell_cluster(state_, (uint16_t)row, (uint16_t)col, buf, 16);
+        if (n > 0)
+          g.cluster = QString::fromUcs4(reinterpret_cast<const char32_t *>(buf),
+                                        (int)std::min<size_t>(n, 16));
       }
+      glyphs.push_back(std::move(g));
     }
   }
 
@@ -866,186 +798,214 @@ QImage TermView::renderFrame() {
                 (runEndCol - runStartCol + 1) * cellWD_, cellHD_, runColor);
 
   for (const Glyph &g : glyphs) {
-    if (g.cp >= 0x2500 && g.cp <= 0x257F && drawBoxChar(p, g.x, g.y, g.cp, g.fg))
-      continue;  // procedural box-drawing fills the cell; skip the glyph
-    if (g.cp >= 0x2580 && g.cp <= 0x259F && drawBlockChar(p, g.x, g.y, g.cp, g.fg))
-      continue;  // procedural block elements fill the cell; skip the glyph
-    if (g.cp >= 0xE0B0 && g.cp <= 0xE0B7 && drawPowerline(p, g.x, g.y, g.cp, g.fg))
-      continue;  // procedural powerline separators (smooth, seamless)
-    // U+E000-U+E4FF = the QsIcons range (see the ctor); everything else uses the
-    // text face. Mirrors kitty's symbol_map so the rail's icons match the editor's.
-    const bool isIcon = g.cp >= 0xE000 && g.cp <= 0xE4FF;
-    QFont f = isIcon ? iconFontD_ : fontD_;
-    if (!isIcon) f.setBold(g.bold);
-    // Italics off entirely: the GeistMono italic face slants past the cell's
-    // right edge and gets clipped, so render italic-attributed cells upright.
-    p->setFont(f);
-    p->setPen(g.fg);
-    p->drawText(QPointF(g.x, g.y + ascD_),
-                QString::fromUcs4(reinterpret_cast<const char32_t *>(&g.cp), 1));
+    if (g.cp) {
+      if (g.cp >= 0x2500 && g.cp <= 0x257F && drawBoxChar(p, g.x, g.y, g.cp, g.fg))
+        continue;  // procedural box-drawing fills the cell; skip the glyph
+      if (g.cp >= 0x2580 && g.cp <= 0x259F && drawBlockChar(p, g.x, g.y, g.cp, g.fg))
+        continue;  // procedural block elements fill the cell; skip the glyph
+      if (g.cp >= 0xE0B0 && g.cp <= 0xE0B7 && drawPowerline(p, g.x, g.y, g.cp, g.fg))
+        continue;  // procedural powerline separators (smooth, seamless)
+      // U+E000-U+E4FF = the QsIcons range (see the ctor); everything else uses the
+      // text face. Mirrors kitty's symbol_map so the rail's icons match the editor's.
+      const bool isIcon = g.cp >= 0xE000 && g.cp <= 0xE4FF;
+      QFont f = isIcon ? iconFontD_ : fontD_;
+      if (!isIcon) f.setBold(g.flags & kStyleBold);
+      // Italics off entirely: the GeistMono italic face slants past the cell's
+      // right edge and gets clipped, so render italic-attributed cells upright.
+      p->setFont(f);
+      p->setPen(g.fg);
+      p->drawText(QPointF(g.x, g.y + ascD_),
+                  g.cluster.isEmpty()
+                    ? QString::fromUcs4(reinterpret_cast<const char32_t *>(&g.cp), 1)
+                    : g.cluster);
+    }
+    // Decorations: one style of underline (nvim's spell/diagnostic marks) and
+    // strikeout, both a logical pixel thick, kept inside the cell.
+    if (g.flags & kStyleUnderlineAny)
+      p->fillRect(QRectF(g.x, std::min<qreal>(g.y + ascD_ + thin, g.y + cellHD_ - thin), cellWD_, thin), g.fg);
+    if (g.flags & kStyleStrikeout)
+      p->fillRect(QRectF(g.x, g.y + std::round(ascD_ * 0.66), cellWD_, thin), g.fg);
   }
 
-  // Cursor: honor the app's requested shape (nvim swaps block/beam by mode).
-  if (active_.load() && cx < cols_ && cy < rows_) {   // hidden when the rail has focus
-    const qreal x = padLD_ + cx * cellWD_, y = padTD_ + cy * cellHD_;
-    switch (cursorShape_) {
-      case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BAR:
-        p->fillRect(x, y, std::max(1, (int)std::round(2 * ratio)), cellHD_, curColor);  // beam (insert mode)
+  // Cursor: honor the app's requested shape (nvim swaps block/beam by mode); librio
+  // reports HIDDEN for DECTCEM and while the view is scrolled into history.
+  if (active_.load() && curShape != RIO_CURSOR_HIDDEN &&
+      cur.column < cols && cur.line < lines) {   // hidden when the rail has focus
+    const qreal x = padLD_ + cur.column * cellWD_, y = padTD_ + cur.line * cellHD_;
+    const int bar = std::max(1, (int)std::round(2 * ratio));
+    switch (curShape) {
+      case RIO_CURSOR_BEAM:
+        p->fillRect(x, y, bar, cellHD_, curColor);  // beam (insert mode)
         break;
-      case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_UNDERLINE:
-        p->fillRect(x, y + cellHD_ - std::max(1, (int)std::round(2 * ratio)), cellWD_, std::max(1, (int)std::round(2 * ratio)), curColor);
-        break;
-      case GHOSTTY_RENDER_STATE_CURSOR_VISUAL_STYLE_BLOCK_HOLLOW:
-        p->setPen(curColor);
-        p->drawRect(x, y, cellWD_ - 1, cellHD_ - 1);
+      case RIO_CURSOR_UNDERLINE:
+        p->fillRect(x, y + cellHD_ - bar, cellWD_, bar, curColor);
         break;
       default: {  // BLOCK: fill, redraw the glyph under it in the bg color
         p->fillRect(x, y, cellWD_, cellHD_, curColor);
-        GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
-        GhosttyPoint pt;
-        pt.tag = GHOSTTY_POINT_TAG_ACTIVE;
-        pt.value.coordinate.x = cx;
-        pt.value.coordinate.y = cy;
-        if (ghostty_terminal_grid_ref(term_, pt, &ref) == GHOSTTY_SUCCESS) {
-          GhosttyCell cell;
-          bool has = false;
-          if (ghostty_grid_ref_cell(&ref, &cell) == GHOSTTY_SUCCESS) {
-            ghostty_cell_get(cell, GHOSTTY_CELL_DATA_HAS_TEXT, &has);
-            if (has) {
-              uint32_t cp = 0;
-              ghostty_cell_get(cell, GHOSTTY_CELL_DATA_CODEPOINT, &cp);
-              p->setFont(fontD_);
-              p->setPen(defBg);
-              p->drawText(QPointF(x, y + ascD_),
-                          QString::fromUcs4(reinterpret_cast<const char32_t *>(&cp), 1));
-            }
+        const rio_cell_s cell = rio_render_state_cell(state_, cur.line, cur.column);
+        if (cell.codepoint > 0x20 && cell.codepoint != 0x10EEEEu && !(cell.style_flags & kStyleHidden)) {
+          QString text;
+          if (cell.style_flags & RIO_CELL_HAS_CLUSTER) {
+            uint32_t buf[16];
+            const size_t n = rio_render_state_cell_cluster(state_, cur.line, cur.column, buf, 16);
+            if (n > 0) text = QString::fromUcs4(reinterpret_cast<const char32_t *>(buf),
+                                                (int)std::min<size_t>(n, 16));
           }
+          if (text.isEmpty())
+            text = QString::fromUcs4(reinterpret_cast<const char32_t *>(&cell.codepoint), 1);
+          p->setFont(fontD_);
+          p->setPen(defBg);
+          p->drawText(QPointF(x, y + ascD_), text);
         }
         break;
       }
     }
   }
 
-  // Kitty graphics: blit stored image placements over the cells (dashboard
-  // banner, image.nvim, etc.). Pixel data is borrowed from the terminal and
-  // valid until the next mutating call — safe to read here inside paint().
+  // Kitty graphics: blit image placements over the cells (dashboard banner,
+  // image.nvim, etc.). librio resolves both direct placements and unicode-placeholder
+  // (U+10EEEE) runs to pixel rects for our DEVICE cell size; z-ordered lowest first.
   {
-    GhosttyKittyGraphics kg = nullptr;
-    if (ghostty_terminal_get(term_, GHOSTTY_TERMINAL_DATA_KITTY_GRAPHICS, &kg) == GHOSTTY_SUCCESS && kg) {
-      // Virtual (unicode-placeholder) placements carry no viewport geometry —
-      // their cells live in the grid. Record imageId -> intended cell grid so
-      // the placeholder scan below can slice the image into per-cell tiles.
-      struct VGrid { uint32_t cols, rows; };
-      std::unordered_map<uint32_t, VGrid> virtualPl;
-
-      GhosttyKittyGraphicsPlacementIterator it = nullptr;
-      if (ghostty_kitty_graphics_placement_iterator_new(nullptr, &it) == GHOSTTY_SUCCESS && it) {
-        ghostty_kitty_graphics_get(kg, GHOSTTY_KITTY_GRAPHICS_DATA_PLACEMENT_ITERATOR, &it);
-        while (ghostty_kitty_graphics_placement_next(it)) {
-          uint32_t imgId = 0;
-          ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IMAGE_ID, &imgId);
-          GhosttyKittyGraphicsImage im = ghostty_kitty_graphics_image(kg, imgId);
-          if (!im) continue;
-
-          bool virt = false;
-          ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_IS_VIRTUAL, &virt);
-          if (virt) {
-            uint32_t vc = 0, vr = 0;
-            ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_COLUMNS, &vc);
-            ghostty_kitty_graphics_placement_get(it, GHOSTTY_KITTY_GRAPHICS_PLACEMENT_DATA_ROWS, &vr);
-            if (!vc || !vr)
-              ghostty_kitty_graphics_placement_grid_size(it, im, term_, &vc, &vr);
-            if (vc && vr) virtualPl[imgId] = {vc, vr};
-            continue;
-          }
-
-          GhosttyKittyGraphicsPlacementRenderInfo ri = GHOSTTY_INIT_SIZED(GhosttyKittyGraphicsPlacementRenderInfo);
-          if (ghostty_kitty_graphics_placement_render_info(it, im, term_, &ri) != GHOSTTY_SUCCESS) continue;
-          if (!ri.viewport_visible) continue;
-          QImage srcImg = kittyImageView(im);
-          if (srcImg.isNull()) continue;
-          QRectF srcR(ri.source_x, ri.source_y, ri.source_width, ri.source_height);
-          QRectF dstR(padLD_ + (qreal)ri.viewport_col * cellWD_,
-                      padTD_ + (qreal)ri.viewport_row * cellHD_,
-                      ri.pixel_width, ri.pixel_height);
-          p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-          p->drawImage(dstR, srcImg, srcR);
-        }
-        ghostty_kitty_graphics_placement_iterator_free(it);
-      }
-
-      static const bool kittyDbg = !cockpitEnv("KITTY_DEBUG").isEmpty();
-      if (kittyDbg) {
-        fprintf(stderr, "[kitty] virtualPl=%zu", virtualPl.size());
-        for (auto &kv : virtualPl) fprintf(stderr, " id=%u(%ux%u)", kv.first, kv.second.cols, kv.second.rows);
-        fprintf(stderr, "\n");
-      }
-      int dbgPh = 0, dbgBlit = 0;
-
-      // Unicode placeholders (snacks banner, image.nvim): scan the visible grid
-      // for U+10EEEE cells, decode the image cell (row,col) from the combining
-      // diacritics and the image id from the fg colour, blit the matching tile.
-      if (!virtualPl.empty()) {
-        p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-        for (uint16_t row = 0; row < rows_; ++row) {
-          int prevRow = 0, prevCol = -1;   // kitty auto-increment, reset per grid row
-          for (uint16_t col = 0; col < cols_; ++col) {
-            GhosttyGridRef ref = GHOSTTY_INIT_SIZED(GhosttyGridRef);
-            GhosttyPoint pt; pt.tag = GHOSTTY_POINT_TAG_ACTIVE;
-            pt.value.coordinate.x = col; pt.value.coordinate.y = row;
-            if (ghostty_terminal_grid_ref(term_, pt, &ref) != GHOSTTY_SUCCESS) { prevCol = -1; continue; }
-
-            uint32_t g[16]; size_t gn = 0;
-            if (ghostty_grid_ref_graphemes(&ref, g, 16, &gn) != GHOSTTY_SUCCESS || gn == 0 ||
-                g[0] != 0x10EEEEu) { prevCol = -1; continue; }
-            dbgPh++;
-
-            int imgRow = -1, imgCol = -1, idHigh = -1, di = 0;
-            for (size_t k = 1; k < gn; ++k) {
-              int v = kittyDiacriticIndex(g[k]);
-              if (v < 0) continue;
-              if (di == 0) imgRow = v; else if (di == 1) imgCol = v; else if (di == 2) idHigh = v;
-              di++;
-            }
-            if (imgRow < 0) imgRow = prevRow;
-            if (imgCol < 0) imgCol = prevCol + 1;
-            prevRow = imgRow; prevCol = imgCol;
-
-            GhosttyStyle st = GHOSTTY_INIT_SIZED(GhosttyStyle);
-            ghostty_grid_ref_style(&ref, &st);
-            uint32_t id = 0;
-            if (st.fg_color.tag == GHOSTTY_STYLE_COLOR_RGB)
-              id = ((uint32_t)st.fg_color.value.rgb.r << 16) |
-                   ((uint32_t)st.fg_color.value.rgb.g << 8) |
-                    (uint32_t)st.fg_color.value.rgb.b;
-            else if (st.fg_color.tag == GHOSTTY_STYLE_COLOR_PALETTE)
-              id = st.fg_color.value.palette;
-            if (idHigh > 0) id |= ((uint32_t)idHigh << 24);
-
-            auto vit = virtualPl.find(id);
-            if (vit == virtualPl.end()) continue;
-            GhosttyKittyGraphicsImage im = ghostty_kitty_graphics_image(kg, id);
-            if (!im) continue;
-            QImage srcImg = kittyImageView(im);
-            if (srcImg.isNull()) continue;
-            const uint32_t nc = vit->second.cols, nr = vit->second.rows;
-            if (!nc || !nr || (uint32_t)imgCol >= nc || (uint32_t)imgRow >= nr) continue;
-            const qreal sw = (qreal)srcImg.width() / nc, sh = (qreal)srcImg.height() / nr;
-            QRectF srcR(imgCol * sw, imgRow * sh, sw, sh);
-            QRectF dstR(padLD_ + (qreal)col * cellWD_, padTD_ + (qreal)row * cellHD_, cellWD_, cellHD_);
-            p->drawImage(dstR, srcImg, srcR);
-            dbgBlit++;
-          }
-        }
-      }
-      if (kittyDbg && (dbgPh || !virtualPl.empty()))
-        fprintf(stderr, "[kitty] placeholders=%d blitted=%d\n", dbgPh, dbgBlit);
+    static const bool kittyDbg = !cockpitEnv("KITTY_DEBUG").isEmpty();
+    const size_t n = rio_render_state_kitty_count(state_);
+    size_t blitted = 0;
+    std::vector<uint32_t> seen;
+    if (n) p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    for (size_t i = 0; i < n; ++i) {
+      rio_kitty_placement_s pl{};
+      if (!rio_render_state_kitty_placement(state_, i, (float)cellWD_, (float)cellHD_, &pl)) continue;
+      const QImage *src = kittyImage(pl.image_id);
+      if (!src) continue;
+      seen.push_back(pl.image_id);
+      QRectF srcR(pl.src_x * src->width(), pl.src_y * src->height(),
+                  pl.src_w * src->width(), pl.src_h * src->height());
+      QRectF dstR(padLD_ + (qreal)pl.x, padTD_ + (qreal)pl.y, pl.width, pl.height);
+      p->drawImage(dstR, *src, srcR);
+      blitted++;
     }
+    // Drop cached pixels for images no longer on screen; a reappearance re-copies.
+    for (auto it = kittyCache_.begin(); it != kittyCache_.end();) {
+      if (std::find(seen.begin(), seen.end(), it->first) == seen.end()) it = kittyCache_.erase(it);
+      else ++it;
+    }
+    if (kittyDbg && n)
+      fprintf(stderr, "[kitty] placements=%zu blitted=%zu cached=%zu\n", n, blitted, kittyCache_.size());
   }
 
   localPainter.end();
   img.setDevicePixelRatio(ratio);   // paint() blits this 1:1 onto the item texture
   return img;
+}
+
+// Report the key as the platform delivered it; librio decides what the terminal
+// receives (application cursor mode, kitty keyboard flags, modifyOtherKeys live there).
+bool TermView::sendKey(QKeyEvent *e, uint32_t action) {
+  if (!surface_) return false;
+  rio_key_event_s ev{};
+  ev.action = action;
+  const Qt::KeyboardModifiers m = e->modifiers();
+  if (m & Qt::ShiftModifier)   ev.mods |= RIO_MOD_SHIFT;
+  if (m & Qt::ControlModifier) ev.mods |= RIO_MOD_CTRL;
+  if (m & Qt::AltModifier)     ev.mods |= RIO_MOD_ALT;
+  if (m & Qt::MetaModifier)    ev.mods |= RIO_MOD_SUPER;
+
+  const QByteArray text = e->text().toUtf8();
+  const int k = e->key();
+  switch (k) {
+    case Qt::Key_Return:
+    case Qt::Key_Enter:     ev.tag = RIO_KEY_ENTER; break;
+    case Qt::Key_Tab:       ev.tag = RIO_KEY_TAB; break;
+    case Qt::Key_Backtab:   ev.tag = RIO_KEY_TAB; ev.mods |= RIO_MOD_SHIFT; break;
+    case Qt::Key_Backspace: ev.tag = RIO_KEY_BACKSPACE; break;
+    case Qt::Key_Escape:    ev.tag = RIO_KEY_ESCAPE; break;
+    case Qt::Key_Up:        ev.tag = RIO_KEY_UP; break;
+    case Qt::Key_Down:      ev.tag = RIO_KEY_DOWN; break;
+    case Qt::Key_Left:      ev.tag = RIO_KEY_LEFT; break;
+    case Qt::Key_Right:     ev.tag = RIO_KEY_RIGHT; break;
+    case Qt::Key_Home:      ev.tag = RIO_KEY_HOME; break;
+    case Qt::Key_End:       ev.tag = RIO_KEY_END; break;
+    case Qt::Key_PageUp:    ev.tag = RIO_KEY_PAGE_UP; break;
+    case Qt::Key_PageDown:  ev.tag = RIO_KEY_PAGE_DOWN; break;
+    case Qt::Key_Insert:    ev.tag = RIO_KEY_INSERT; break;
+    case Qt::Key_Delete:    ev.tag = RIO_KEY_DELETE; break;
+    case Qt::Key_CapsLock:  ev.tag = RIO_KEY_CAPS_LOCK; break;
+    case Qt::Key_Shift:     ev.tag = RIO_KEY_SHIFT_LEFT; break;     // Qt does not tell left from right
+    case Qt::Key_Control:   ev.tag = RIO_KEY_CONTROL_LEFT; break;
+    case Qt::Key_Alt:       ev.tag = RIO_KEY_ALT_LEFT; break;
+    case Qt::Key_Meta:      ev.tag = RIO_KEY_SUPER_LEFT; break;
+    default:
+      if (k >= Qt::Key_F1 && k <= Qt::Key_F12) {
+        ev.tag = RIO_KEY_F;
+        ev.function_key = (uint8_t)(k - Qt::Key_F1 + 1);
+      } else if (k > 0 && k < 0x01000000) {
+        // A character key. Qt reports the shifted symbol as an UPPERCASE Latin-1 code
+        // (Key_A for both a and A); librio wants the unshifted name and the produced
+        // text separately, with shift marked as already spent on that text.
+        ev.tag = RIO_KEY_CHAR;
+        ev.codepoint = k <= 0xFFFF ? (uint32_t)QChar((ushort)k).toLower().unicode() : (uint32_t)k;
+        if (!text.isEmpty() && (ev.mods & RIO_MOD_SHIFT)) ev.consumed_mods |= RIO_MOD_SHIFT;
+      } else if (!text.isEmpty()) {
+        ev.tag = RIO_KEY_NONE;   // text-only event (input method commit, dead-key result)
+      } else {
+        return false;
+      }
+  }
+  if (!text.isEmpty()) { ev.text = text.constData(); ev.text_len = (size_t)text.size(); }
+  return rio_surface_key(surface_, &ev);
+}
+
+void TermView::keyPressEvent(QKeyEvent *e) {
+  const bool ctrl = e->modifiers() & Qt::ControlModifier;
+  const bool shift = e->modifiers() & Qt::ShiftModifier;
+  // Ctrl+Shift+V / Shift+Insert → paste clipboard (before any key encoding).
+  if ((ctrl && shift && e->key() == Qt::Key_V) ||
+      (shift && e->key() == Qt::Key_Insert)) {
+    pasteText(QGuiApplication::clipboard()->text(QClipboard::Clipboard));
+    return;
+  }
+  if (sendKey(e, e->isAutoRepeat() ? RIO_KEY_ACTION_REPEAT : RIO_KEY_ACTION_PRESS)) e->accept();
+  else QQuickPaintedItem::keyPressEvent(e);
+}
+
+void TermView::keyReleaseEvent(QKeyEvent *e) {
+  // Dropped by librio unless the program asked for key release events (kitty protocol).
+  if (sendKey(e, RIO_KEY_ACTION_RELEASE)) e->accept();
+  else QQuickPaintedItem::keyReleaseEvent(e);
+}
+
+void TermView::mousePressEvent(QMouseEvent *e) {
+  forceActiveFocus();
+  if (e->button() == Qt::MiddleButton) {
+    auto *cb = QGuiApplication::clipboard();
+    QString t = cb->supportsSelection() ? cb->text(QClipboard::Selection)
+                                        : cb->text(QClipboard::Clipboard);
+    pasteText(t);
+    return;
+  }
+  QQuickPaintedItem::mousePressEvent(e);
+}
+
+void TermView::wheelEvent(QWheelEvent *e) {
+  if (!surface_) { QQuickPaintedItem::wheelEvent(e); return; }
+  // Wheel notches are 120 units = 3 lines; touchpads deliver fractions, so carry the
+  // remainder across events instead of dropping small deltas.
+  wheelAccum_ += e->angleDelta().y();
+  const int lines = wheelAccum_ / 40;
+  if (lines == 0) { e->accept(); return; }
+  wheelAccum_ -= lines * 40;
+  const QPointF pos = e->position();
+  const int col = std::clamp((int)((pos.x() - padL_) / std::max<qreal>(1, cellW_)), 0, std::max(0, cols_ - 1));
+  const int row = std::clamp((int)((pos.y() - padT_) / std::max<qreal>(1, cellH_)), 0, std::max(0, rows_ - 1));
+  uint8_t mods = 0;
+  if (e->modifiers() & Qt::ShiftModifier)   mods |= RIO_MOD_SHIFT;
+  if (e->modifiers() & Qt::ControlModifier) mods |= RIO_MOD_CTRL;
+  if (e->modifiers() & Qt::AltModifier)     mods |= RIO_MOD_ALT;
+  // librio dispatches: a mouse report when the program asked for it (nvim does), cursor
+  // keys on the alternate screen with alternate-scroll, else the scrollback view.
+  rio_surface_scroll_wheel(surface_, lines, (uint16_t)col, (uint16_t)row, mods);
+  { std::lock_guard<std::mutex> lk(cmdMtx_); repaintReq_ = true; }
+  wakeWorker();
+  e->accept();
 }
 
 void TermView::itemChange(ItemChange change, const ItemChangeData &data) {
@@ -1066,49 +1026,4 @@ void TermView::itemChange(ItemChange change, const ItemChangeData &data) {
   // the size has to re-snap for the mapping to stay 1:1.
   connect(data.window, &QQuickWindow::screenChanged, this, publish);
   connect(data.window, &QWindow::screenChanged, this, publish);
-}
-
-void TermView::keyPressEvent(QKeyEvent *e) {
-  const bool ctrl = e->modifiers() & Qt::ControlModifier;
-  const bool shift = e->modifiers() & Qt::ShiftModifier;
-  // Ctrl+Shift+V / Shift+Insert → paste clipboard (before ctrl-char encoding).
-  if ((ctrl && shift && e->key() == Qt::Key_V) ||
-      (shift && e->key() == Qt::Key_Insert)) {
-    pasteText(QGuiApplication::clipboard()->text(QClipboard::Clipboard));
-    return;
-  }
-
-  QByteArray out;
-  switch (e->key()) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:     out = "\r"; break;
-    case Qt::Key_Backspace: out = "\x7f"; break;
-    case Qt::Key_Tab:       out = "\t"; break;
-    case Qt::Key_Escape:    out = "\x1b"; break;
-    case Qt::Key_Up:        out = "\x1b[A"; break;
-    case Qt::Key_Down:      out = "\x1b[B"; break;
-    case Qt::Key_Right:     out = "\x1b[C"; break;
-    case Qt::Key_Left:      out = "\x1b[D"; break;
-    default:
-      if (e->modifiers() & Qt::ControlModifier) {
-        QString t = e->text();
-        if (!t.isEmpty()) { char c = t.at(0).toLatin1(); out.append(char(c & 0x1f)); }
-      } else {
-        out = e->text().toUtf8();
-      }
-  }
-  if (!out.isEmpty()) enqueuePty(out);
-  else QQuickPaintedItem::keyPressEvent(e);
-}
-
-void TermView::mousePressEvent(QMouseEvent *e) {
-  forceActiveFocus();
-  if (e->button() == Qt::MiddleButton) {
-    auto *cb = QGuiApplication::clipboard();
-    QString t = cb->supportsSelection() ? cb->text(QClipboard::Selection)
-                                        : cb->text(QClipboard::Clipboard);
-    pasteText(t);
-    return;
-  }
-  QQuickPaintedItem::mousePressEvent(e);
 }

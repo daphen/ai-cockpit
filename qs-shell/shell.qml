@@ -4,7 +4,7 @@ import Quickshell.Io
 import QsLib
 import Heidr
 
-// Cockpit: nvim (libghostty terminal) left, the agent rail right.
+// Cockpit: nvim (librio terminal) left, the agent rail right.
 // Super+h/l focus moves nvim <-> rail via the IpcHandler below (niri calls it,
 // falling back to window-focus at the edges — the "smart-splits" bridge).
 ShellRoot {
