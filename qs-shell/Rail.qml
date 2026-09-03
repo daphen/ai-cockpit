@@ -1885,7 +1885,7 @@ Item {
     var pm = pendingAsk.method
     if (e.key === Qt.Key_Escape) { answerAsk({ cancelled: true }); return true }
     if (e.key === Qt.Key_T && !(e.modifiers & Qt.ControlModifier)) {
-      answerAsk({ cancelled: true })
+      answerAsk({ cancelled: true, discussing: true })
       Qt.callLater(rail.enterInsert)
       return true
     }

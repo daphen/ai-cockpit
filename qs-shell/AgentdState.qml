@@ -208,6 +208,7 @@ Item {
 
   property var asks: ({})
   property var _answerEchoes: ({})
+  property var _answerIntents: ({})
   property int askGen: 0
   // A session stopped on a question — fired once per ask id, so the UI can badge
   // the roster and raise a desktop notification for NON-selected sessions (a
@@ -222,7 +223,17 @@ Item {
   }
   function answerAsk(sid, payload) {
     if (!asks[sid]) return
-    send({ type: "answer", session: sid, response: payload })
+    var response = Object.assign({}, payload)
+    var intents = _answerIntents
+    if (response.discussing) {
+      intents[sid] = "discussing"
+      delete response.discussing
+      _answerIntents = intents
+    }
+    if (!send({ type: "answer", session: sid, response: response })) {
+      delete intents[sid]
+      _answerIntents = intents
+    }
   }
 
   // Per-session changed-files (from the daemon's `changes` diff broadcast).
@@ -847,7 +858,9 @@ Item {
       return
     }
     if (t === "ask_answered") {
-      var label = m.cancelled ? "cancelled"
+      var intent = _answerIntents[sid] || ""
+      var intents = _answerIntents; delete intents[sid]; _answerIntents = intents
+      var label = m.cancelled ? (intent === "discussing" ? "discussing instead" : "cancelled")
                 : (m.confirmed !== undefined ? (m.confirmed ? "approved" : "declined")
                 : (m.value !== undefined ? String(m.value) : ""))
       var asked = asks[sid]
