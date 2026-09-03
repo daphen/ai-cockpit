@@ -4127,10 +4127,12 @@ Item {
         color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter
       }
       Text {
-        text: entry.text || entry.command || ""
+        text: entry.command
+          ? "bash " + String(entry.command).replace(/\s+/g, " ").trim()
+          : (entry.text || "")
         color: Theme.fg_secondary
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-        elide: Text.ElideRight; Layout.fillWidth: true
+        elide: Text.ElideRight; maximumLineCount: 1; Layout.fillWidth: true
       }
     }
   }
