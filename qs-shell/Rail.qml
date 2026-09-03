@@ -281,9 +281,6 @@ Item {
     fileChoices = paths.slice()
     fileChoiceCur = 0
     fileChoiceKey = key
-    Qt.callLater(function() {
-      if (cur >= rSize) feedView.positionViewAtIndex(cur - rSize, ListView.End)
-    })
   }
   function closeFilePicker() { fileChoices = []; fileChoiceKey = "" }
   function acceptFileChoice() {
