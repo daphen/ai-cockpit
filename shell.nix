@@ -7,7 +7,8 @@ pkgs.mkShell {
   nativeBuildInputs = [
     pkgs.cmake
     pkgs.ninja
-    pkgs.zig            # libghostty-vt is built via `zig build -Demit-lib-vt`
+    pkgs.cargo          # librio is built via `cargo build -p librio` (see CMakeLists)
+    pkgs.rustc
     pkgs.pkg-config
     pkgs.qt6.wrapQtAppsHook
   ];

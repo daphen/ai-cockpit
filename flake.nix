@@ -8,17 +8,45 @@
     url = "github:quickshell-mirror/quickshell/v0.3.0";
     inputs.nixpkgs.follows = "nixpkgs";
   };
+  # rio, for librio (the terminal core the plugin links). Source only: its own
+  # flake inputs are not needed to cargo-build one crate.
+  inputs.rio = {
+    url = "github:raphamorim/rio";
+    flake = false;
+  };
 
-  outputs = { self, nixpkgs, quickshell }:
+  outputs = { self, nixpkgs, quickshell, rio }:
     let
       system = "x86_64-linux";
       pkgs = import nixpkgs { inherit system; overlays = [ quickshell.overlays.default ]; };
       qt = pkgs.qt6;
 
-      # The C++ QML plugin (the libghostty terminal). Built against the vendored
-      # libghostty-vt so the nix build stays offline/reproducible. The legacy Heidr QML ABI
-      # module, its impl lib, and the native lib all land in one dir with an
-      # $ORIGIN rpath so they resolve each other at runtime.
+      # librio: rio's embeddable terminal core (PTY, VT state, pulled render snapshot)
+      # as a static C-ABI library, built from the pinned rio source. Pure Rust with no
+      # -sys crates, so nixpkgs' rustPlatform plus rio's Cargo.lock is an offline,
+      # reproducible build. Needs the two ABI entry points added for the cockpit
+      # (rio_render_state_cursor_shape, rio_surface_child_pid) to be in that source.
+      rioVersion = (builtins.fromTOML (builtins.readFile "${rio}/Cargo.toml")).workspace.package.version;
+      librio = pkgs.rustPlatform.buildRustPackage {
+        pname = "librio";
+        version = rioVersion;
+        src = rio;
+        cargoLock.lockFile = "${rio}/Cargo.lock";
+        cargoBuildFlags = [ "-p" "librio" ];
+        doCheck = false;
+        # buildRustPackage installs binaries; this is a staticlib + header.
+        installPhase = ''
+          runHook preInstall
+          mkdir -p $out/lib $out/include
+          cp "$(find target -path '*/release/liblibrio.a' | head -n1)" $out/lib/liblibrio.a
+          cp librio/include/librio.h $out/include/
+          runHook postInstall
+        '';
+      };
+
+      # The C++ QML plugin (the librio terminal). librio is linked in statically, so
+      # the legacy Heidr QML ABI module and its impl lib are all that land in the
+      # module dir, with an $ORIGIN rpath so they resolve each other at runtime.
       plugin = pkgs.stdenv.mkDerivation {
         pname = "cockpit-termplugin";
         version = "0.1.0";
@@ -33,9 +61,13 @@
         nativeBuildInputs = [ pkgs.cmake pkgs.ninja qt.wrapQtAppsHook qt.qtdeclarative pkgs.patchelf ];
         buildInputs = [ qt.qtbase qt.qtdeclarative qt.qtwayland ];
         dontWrapQtApps = true;   # we ship a .so module, not an executable
-        cmakeFlags = [ "-DHEIDR_VENDORED_GHOSTTY=ON" "-DCMAKE_BUILD_TYPE=Release" ];
-        # CMake install() rules (guarded by the vendored flag) place the module +
-        # libs in $out/qml/Heidr with an $ORIGIN rpath and copy qs-shell.
+        cmakeFlags = [
+          "-DRIO_LIBRARY=${librio}/lib/liblibrio.a"
+          "-DRIO_INCLUDE_DIR=${librio}/include"
+          "-DCMAKE_BUILD_TYPE=Release"
+        ];
+        # CMake install() rules place the module + impl lib in $out/qml/Heidr with an
+        # $ORIGIN rpath and copy qs-shell.
       };
 
       cockpit = pkgs.writeShellApplication {
@@ -140,7 +172,7 @@
         '';
       };
     in {
-      packages.${system} = { inherit plugin; cockpit-qs = cockpit; heidr-qs = cockpit; default = cockpit; };
+      packages.${system} = { inherit plugin librio; cockpit-qs = cockpit; heidr-qs = cockpit; default = cockpit; };
       apps.${system}.default = { type = "app"; program = "${cockpit}/bin/cockpit-qs"; };
       devShells.${system}.default = import ./shell.nix { inherit pkgs; };
     };
