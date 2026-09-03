@@ -191,6 +191,38 @@ Item {
     }
   }
   property string activeRaw: ""
+  property var recentSelections: []
+  function rememberRecent(name) {
+    if (!name) return
+    var next = [name]
+    for (var i = 0; i < recentSelections.length; i++)
+      if (recentSelections[i] !== name) next.push(recentSelections[i])
+    recentSelections = next.slice(0, 20)
+  }
+  function recentFallback(excluding) {
+    for (var i = 0; i < recentSelections.length; i++) {
+      var name = recentSelections[i]
+      if (name === excluding) continue
+      for (var j = 0; j < liveSessions.length; j++)
+        if (liveSessions[j].name === name) return name
+    }
+    for (var k = 0; k < liveSessions.length; k++)
+      if (liveSessions[k].name !== excluding && !liveSessions[k].parent) return liveSessions[k].name
+    for (var n = 0; n < liveSessions.length; n++)
+      if (liveSessions[n].name !== excluding) return liveSessions[n].name
+    return ""
+  }
+  function stopSession(name) {
+    var target = String(name || "")
+    if (!target || !agentd) return
+    if (target === selectedRaw) {
+      var fallback = recentFallback(target)
+      activeRaw = fallback
+      defaultRaw = fallback
+    }
+    recentSelections = recentSelections.filter(x => x !== target)
+    agentd.stop(target)
+  }
   // Roster starts expanded and stays however you leave it — Ctrl+t toggles the
   // full list vs the single-row glance, and the choice persists across focus
   // changes (no auto-collapse on blur).
@@ -1093,6 +1125,7 @@ Item {
   onScopeModeChanged: {
     activeRaw = ""
     defaultRaw = ""
+    recentSelections = []
     savedRaw = ""
     rosterOverride = false
     Qt.callLater(function() { selectionFile.reload(); rail._recomputeDefault() })
@@ -1532,6 +1565,7 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
+    rememberRecent(selectedRaw)
     rememberSelection(selectedRaw)
     _ensureChanges()
     if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
@@ -1907,11 +1941,13 @@ Item {
       if (shift) { rail.openPlanBinding(); return true }
       break
     case Qt.Key_X:
-      // x kills the session under the ROSTER cursor and does nothing anywhere
-      // else: interrupting a turn is Esc, and a kill should require aiming.
+      // In the roster x kills the aimed row; in the feed it kills the selected session
+      // and returns to the most recently visited surviving one. Esc interrupts a turn.
       if (rail.curSection() === "roster") {
         var row = rail.rosterList[rail.curLocal()]
-        if (row && rail.agentd) rail.agentd.stop(row.rawName || row.name)
+        if (row) rail.stopSession(row.rawName || row.name)
+      } else {
+        rail.stopSession(rail.selectedRaw)
       }
       return true
     case Qt.Key_O: case Qt.Key_Return: case Qt.Key_Enter:
@@ -1995,7 +2031,9 @@ Item {
     else if (k === "x") {
       if (curSection() === "roster") {
         var row = rosterList[curLocal()]
-        if (row && agentd) agentd.stop(row.rawName || row.name)
+        if (row) stopSession(row.rawName || row.name)
+      } else {
+        stopSession(selectedRaw)
       }
     }
     else if (k === "hint") startHints()

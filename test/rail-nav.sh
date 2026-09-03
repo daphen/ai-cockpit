@@ -243,27 +243,38 @@ fake answer_in_transcript 1
 fake grow                              # refresh: transcript now shows the answer
 check "notice self-healed" "$(field "$(st)" stale)" "False"
 
-say "13. interrupt vs kill: Esc/x abort the TURN, roster-x kills the SESSION"
-# x used to send the daemon's stop from anywhere — session killed, roster row gone, on
-# one unconfirmed keypress. Now: Esc in the composer (and x outside the roster) sends
-# pi's turn-abort and the session SURVIVES; x on a roster row keeps the kill semantics.
+say "13. interrupt vs kill: Esc aborts; feed-x kills current + selects recent; roster-x kills aimed"
+# Esc remains the safe turn interrupt. x now has two explicit session targets: the
+# selected session from its feed, or the aimed row while browsing the roster.
 rm -f "$SOCK.answers"
+before_abort_size=$(field "$(st)" rSize)
 fake stream_on
 key G                                # cursor in the feed
 key i                                # composer focused, insert on
 key esc; sleep 2                     # Esc while streaming = interrupt
 ab=$(grep -c '"type": "abort"' "$SOCK.answers" 2>/dev/null)
 check "Esc sent the abort"          "${ab:-0}" "1"
-check "session survived interrupt"  "$(field "$(st)" rSize)" "3"
+check "session survived interrupt"  "$(field "$(st)" rSize)" "$before_abort_size"
 key esc                              # now idle: Esc = plain leave-insert
 check "second Esc left insert"      "$(field "$(st)" ins)" "False"
-key G; key x; sleep 1                # x outside the roster must do NOTHING now
-check "feed-x is inert (roster intact)" "$(field "$(st)" rSize)" "3"
-key g; key j; key j                  # roster cursor onto zulu-9999
-key x; sleep 2                       # roster-x = kill THAT session
-kl=$(grep -c '"type": "stop", "session": "zulu-9999"' "$SOCK.answers" 2>/dev/null)
-check "roster-x killed the row's session" "${kl:-0}" "1"
-check "roster shrank" "$(field "$(st)" rSize)" "2"
+select_session alpha-1000; sleep .5
+select_session every-9001; sleep .5
+# The previous selection is now unambiguous: deleting every-9001 must return to alpha.
+doomed=$(field "$(st)" sel)
+key G; key x; sleep 1                # feed-x kills the selected session directly
+kl=$(grep -c "\"type\": \"stop\", \"session\": \"$doomed\"" "$SOCK.answers" 2>/dev/null)
+check "feed-x killed the selected session" "${kl:-0}" "1"
+after_kill=$(field "$(st)" sel)
+check "feed-x selected the most recent surviving session" "$after_kill" "alpha-1000"
+fake insert 1                         # restore fixture before testing aimed roster kill
+key g; key j
+row_key=$(field "$(st)" key); aimed=${row_key#r:}
+before_aimed=$(grep -c "\"type\": \"stop\", \"session\": \"$aimed\"" "$SOCK.answers" 2>/dev/null)
+key x; sleep 2
+after_aimed=$(grep -c "\"type\": \"stop\", \"session\": \"$aimed\"" "$SOCK.answers" 2>/dev/null)
+check "roster-x killed the aimed session" "$((after_aimed - before_aimed))" "1"
+fake insert 1                         # downstream sections expect the full fixture
+select_session every-9001; sleep 1
 
 say "14. enter steers a live turn; ctrl+enter queues; abort flushes the queue"
 # The Claude Code model: steering redirects the running turn (default), a queued message
