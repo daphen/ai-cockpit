@@ -527,6 +527,10 @@ Item {
     var r = String(ref || "")
     return /^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(r) ? "/" + r : r
   }
+  function fileLabel(ref) {
+    var parts = String(ref || "").split("/")
+    return parts.length ? parts[parts.length - 1] : ""
+  }
   function openFileRef(ref) {
     var r = String(ref || "")
     var line = r.match(/:(\d+)$/)
@@ -956,6 +960,8 @@ Item {
   function turnActivityItems(items) {
     return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && x.kind !== "userbash" && !(x.kind === "cmd" && x.tool === "info"))
   }
+  function turnEditItems(items) { return turnActivityItems(items).filter(x => x.kind === "edit") }
+  function turnBashItems(items) { return turnActivityItems(items).filter(x => x.tool === "bash") }
   function turnInfos(items) {
     return (items || []).filter(x => x.kind === "cmd" && x.tool === "info").map(x => String(x.text || ""))
   }
@@ -1791,8 +1797,13 @@ Item {
       if (edits.length > 1) { openFilePicker(edits, "turn-" + (it.key || l)); return }
       var refs = cardFileRefs(it)
       if (refs.length === 1) { openFileRef(refs[0]); return }
-      if (it) toggleGroupKey("turn-" + (it.key || l))
     }
+  }
+  function toggleCurBash() {
+    if (view !== "chat" || cur < rSize) return
+    var l = curLocal(), it = groupedFeed[l]
+    if (it && turnBashItems(it.items).length)
+      toggleGroupKey("turn-" + (it.key || l))
   }
   // Is the cursor'd feed card at least partly in the viewport?
   // j/k only move the cursor. ListView keeps it on screen via its native highlight
@@ -1936,6 +1947,10 @@ Item {
   function keyNormal(e) {
     var ctrl = (e.modifiers & Qt.ControlModifier)
     var shift = (e.modifiers & Qt.ShiftModifier)
+    if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
+      toggleCurBash()
+      return true
+    }
     // Ctrl+j → jump into the main view; Ctrl+k → back to the roster top.
     if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); return true }
     if (ctrl && e.key === Qt.Key_K) { cur = 0; return true }
@@ -2599,7 +2614,7 @@ Item {
               }
             }
 
-            // Compact activity summary — "4 bash · 6 read · edited 3", expandable.
+            // Compact counts, always-visible edited files, and optional Bash details.
             Loader {
               active: !turnDel.isUser && rail.turnActivitySummary(turnDel.turn.items).length > 0
               visible: active
@@ -2610,13 +2625,7 @@ Item {
               // Keyed on the row's stable identity, not its index: a group you expanded
               // otherwise collapsed (and its neighbour opened) as the window slid.
               property string ekey: "turn-" + (turnDel.turn.key || turnDel.rowIndex)
-              // The turn that is CURRENTLY working expands by default, so you can watch
-              // which tools it's reaching for; finished turns stay condensed to the
-              // one-line summary. An explicit tap always wins over the default.
-              property bool liveTurn: turnDel.rowIndex >= rail.fSize - 1 && rail.featuredStreaming
-              property bool expanded: (ekey in rail.expandedGroups)
-                                      ? rail.expandedGroups[ekey] === true
-                                      : liveTurn
+              property bool expanded: rail.expandedGroups[ekey] === true
             }
 
             // Chunked mid-turn cut: say the turn continues, so a header-less next
@@ -3942,7 +3951,7 @@ Item {
           }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: files ? rail.shownFileRef(modelData) : "/" + modelData
+            text: files ? rail.fileLabel(modelData) : "/" + modelData
             color: pickerRow.sel ? Theme.fg : Theme.fg_secondary
             font.family: Theme.fontFamily; font.pixelSize: 14
             width: parent.width - 29; elide: Text.ElideMiddle
@@ -4059,24 +4068,32 @@ Item {
   }
   Component {
     id: activityRow
-    // Collapsed one-liner of a turn's tool activity; tap to expand the full list.
+    // Edited files stay visible; Ctrl+Enter toggles only the Bash calls.
     Column {
       id: actCol
       width: parent ? parent.width : 400
       spacing: 9
-      readonly property bool directEdit: items.length === 1 && items[0].kind === "edit"
+      readonly property var editItems: rail.turnEditItems(items)
+      readonly property var bashItems: rail.turnBashItems(items)
       Row {
         spacing: 7
-        Icon { visible: !actCol.directEdit; name: expanded ? "chevron-down" : "chevron-right"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
-        Icon { visible: actCol.directEdit; name: "paintbrush"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+        Icon {
+          visible: actCol.bashItems.length > 0
+          name: expanded ? "chevron-down" : "chevron-right"
+          width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter
+        }
         Text {
-          text: summary; color: actCol.directEdit ? Theme.fg : Theme.fg_muted
+          text: summary; color: Theme.fg_muted
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-          font.bold: actCol.directEdit
           anchors.verticalCenter: parent.verticalCenter
         }
-        TapHandler {
-          onTapped: actCol.directEdit ? rail.openFileRef(items[0].path) : rail.toggleGroupKey(ekey)
+      }
+      Repeater {
+        model: actCol.editItems.length
+        Loader {
+          width: actCol.width
+          property var entry: actCol.editItems[index]
+          sourceComponent: editRow
         }
       }
       InlinePicker {
@@ -4087,15 +4104,12 @@ Item {
         onPicked: index => { rail.fileChoiceCur = index; rail.acceptFileChoice() }
       }
       Repeater {
-        // An INT model, not the array: an array-model Repeater destroys and recreates
-        // EVERY row when the array identity changes — which is every stream update on
-        // the auto-expanded live turn, i.e. the chat "blinking". With a count model,
-        // growth instantiates only the new indexes and existing rows rebind in place.
-        model: !actCol.directEdit && expanded ? items.length : 0
+        // Keep existing Bash delegates mounted when new activity arrives.
+        model: expanded ? actCol.bashItems.length : 0
         Loader {
           width: actCol.width
           Component.onCompleted: rail.probeActCreates++
-          property var entry: items[index]
+          property var entry: actCol.bashItems[index]
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
           sourceComponent: {
