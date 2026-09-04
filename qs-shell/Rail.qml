@@ -917,7 +917,10 @@ Item {
       p = repoPath
     }
     p = rail._localPath(p)
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote", p])
+    var quoted = JSON.stringify(p)
+    var expr = 'filereadable(' + quoted + ') ? execute("edit " . fnameescape(' + quoted + '))'
+             + ' : execute("echohl WarningMsg | echomsg " . string("file no longer exists: " . ' + quoted + ') . " | echohl None")'
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", expr])
     rail.focusNvim()
   }
   // Prose blocks of an agent turn (the headline answer).
