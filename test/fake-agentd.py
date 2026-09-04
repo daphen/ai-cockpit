@@ -247,6 +247,13 @@ def driver():
                 broadcast({"type": "tool_execution_start", "session": "every-9001",
                            "toolName": "bash", "toolCallId": f"tc-{state['tooln']}",
                            "args": {"command": f"echo live-tool-{state['tooln']} && sleep 1"}})
+            elif c == "plan_metadata":
+                for i, path in enumerate(("EVERY-1.progress.json", "EVERY-1.review.json", "src/visible.ts")):
+                    broadcast({"type": "tool_execution_start", "session": "every-9001",
+                               "toolName": "edit", "toolCallId": f"meta-{i}",
+                               "args": {"path": path, "oldText": "old", "newText": "new"}})
+                    broadcast({"type": "tool_execution_end", "session": "every-9001",
+                               "toolCallId": f"meta-{i}", "result": {}})
             elif c == "retry":
                 broadcast({"type": "auto_retry_start", "session": "every-9001",
                            "attempt": 1, "maxAttempts": 3, "errorMessage": "529 overloaded_error: Overloaded"})

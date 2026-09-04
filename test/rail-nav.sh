@@ -246,6 +246,14 @@ sleep 6
 check "live tool survives six seconds" "$(case "$(tailfeed)" in *"live-tool-1"*) echo 1;; *) echo 0;; esac)" "1"
 fake stream_off 1
 
+say "11d. plan bookkeeping stays out of chat activity"
+fake plan_metadata 1
+key G
+metadata=$(prose)
+check "production edit remains visible" "$(case "$metadata" in *"visible.ts"*) echo 1;; *) echo 0;; esac)" "1"
+check "progress metadata is hidden" "$(case "$metadata" in *"progress.json"*) echo 1;; *) echo 0;; esac)" "0"
+check "review metadata is hidden" "$(case "$metadata" in *"review.json"*) echo 1;; *) echo 0;; esac)" "0"
+
 say "12. the stale notice: never over a streaming session, and self-heals"
 # The ghost this pins: answering a live ask raced the transcript refresh — pi resumed but
 # its toolResult wasn't written yet, so the recovery published 'send your answer to

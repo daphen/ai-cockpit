@@ -948,13 +948,18 @@ Item {
   // Thinking blocks — shown inline (the visible thought-process trail).
   function turnThinks(items) { return (items || []).filter(x => x.kind === "think") }
   function turnUserBash(items) { return (items || []).filter(x => x.kind === "userbash") }
+  function isPlanMetadataEdit(item) {
+    if (!item || item.kind !== "edit") return false
+    var path = String(item.path || item.file || "")
+    return /\.(progress|review)\.json$/.test(path)
+  }
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
   // counted): "4 bash · 6 read · edited file.ts".
   function turnActivitySummary(items) {
     var counts = {}, editFiles = [], interrupts = 0, errors = 0
     for (var i = 0; i < (items || []).length; i++) {
       var it = items[i]
-      if (it.kind === "text" || it.kind === "think" || it.kind === "userbash") continue
+      if (it.kind === "text" || it.kind === "think" || it.kind === "userbash" || isPlanMetadataEdit(it)) continue
       else if (it.kind === "edit") {
         var file = String(it.file || it.path || "")
         if (file && editFiles.indexOf(file) < 0) editFiles.push(file)
@@ -979,7 +984,8 @@ Item {
     return parts.join("  ·  ")
   }
   function turnActivityItems(items) {
-    return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && x.kind !== "userbash" && !(x.kind === "cmd" && x.tool === "info"))
+    return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && x.kind !== "userbash"
+      && !isPlanMetadataEdit(x) && !(x.kind === "cmd" && x.tool === "info"))
   }
   function turnEditItems(items) { return turnActivityItems(items).filter(x => x.kind === "edit") }
   function turnBashItems(items) {
