@@ -1,12 +1,13 @@
 import { AnimatePresence, animate, useMotionValue, useTransform } from "motion/react"
 import * as m from "motion/react-m"
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import type { Session } from "./agentd"
 import { Orb, orbTone } from "./Orb"
 import { fadeSwap, iconSwap, panelSwap } from "./motion"
 
 interface Props {
   sessionName: string
+  activeKey: string
   currentTool?: string
   fleet: Session[]
   busy: boolean
@@ -24,6 +25,52 @@ interface Props {
   roster: ReactNode
 }
 
+interface SessionRoot {
+  key: string
+  name: string
+  scope: string
+  status: Session["status"]
+  ask: boolean
+  tones: Array<ReturnType<typeof orbTone>>
+  memberKeys: string[]
+}
+
+function sessionRoots(sessions: Session[]) {
+  const byKey = new Map(sessions.map(session => [`${session.scope}/${session.name}`, session]))
+  const groups = new Map<string, { root: Session; members: Session[] }>()
+  for (const session of sessions) {
+    let root = session
+    const seen = new Set<string>()
+    while (root.parent) {
+      const parentKey = `${root.scope}/${root.parent}`
+      if (seen.has(parentKey)) break
+      seen.add(parentKey)
+      const parent = byKey.get(parentKey)
+      if (!parent) break
+      root = parent
+    }
+    const key = `${root.scope}/${root.name}`
+    const group = groups.get(key)
+    if (group) group.members.push(session)
+    else groups.set(key, { root, members: [session] })
+  }
+  return [...groups.entries()].map<SessionRoot>(([key, { root, members }]) => {
+    const working = members.filter(session => session.status === "streaming")
+    const status = working.length ? "streaming"
+      : members.some(session => session.status === "error") ? "error"
+      : root.status
+    return {
+      key,
+      name: root.name,
+      scope: root.scope,
+      status,
+      ask: members.some(session => Boolean(session.ask)),
+      tones: working.map(session => orbTone(session.currentTool)),
+      memberKeys: members.map(session => `${session.scope}/${session.name}`),
+    }
+  })
+}
+
 interface PendingImage {
   id: string
   name: string
@@ -32,7 +79,7 @@ interface PendingImage {
   error?: string
 }
 
-export function Composer({ sessionName, currentTool, fleet, busy, queue, disabled, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterFeatured, rosterHeader, roster }: Props) {
+export function Composer({ sessionName, activeKey, currentTool, fleet, busy, queue, disabled, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterFeatured, rosterHeader, roster }: Props) {
   const [text, setText] = useState("")
   const [images, setImages] = useState<PendingImage[]>([])
   const [confirmInterrupt, setConfirmInterrupt] = useState(false)
@@ -55,6 +102,9 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
   const fleetOpacity = useTransform(rosterProgress, [0, 0.6], [1, 0])
   const swipeStart = useRef<{ x: number; y: number; progress: number } | null>(null)
   const suppressRosterToggle = useRef(false)
+  const collapsedRoots = useMemo(() => sessionRoots(fleet)
+    .filter(root => root.scope !== "chat" && (!busy || !root.memberKeys.includes(activeKey)))
+    .slice(0, 8), [activeKey, busy, fleet])
 
   const toggleRoster = () => {
     if (suppressRosterToggle.current) {
@@ -233,10 +283,10 @@ export function Composer({ sessionName, currentTool, fleet, busy, queue, disable
           style={{ touchAction: "pan-x" }}
         >
           <span className="composer-session"><strong>{sessionName.toUpperCase()}</strong></span>
-          <m.span className="composer-dot-row" aria-label="Other session statuses" style={{ opacity: fleetOpacity }}>
-            {fleet.slice(0, 8).map(session => (
-              <span className="composer-dot-slot" key={`${session.scope}/${session.name}`}>
-                {session.ask ? <span className="status-dot needs-input-dot" /> : session.status === "streaming" ? <Orb seedKey={session.name} size={16} tone={orbTone(session.currentTool)} /> : <span className={`status-dot ${session.status}`} />}
+          <m.span className="composer-dot-row" aria-label="Session statuses" style={{ opacity: fleetOpacity }}>
+            {collapsedRoots.map(root => (
+              <span className="composer-dot-slot" key={root.key}>
+                {root.ask ? <span className="status-dot needs-input-dot" /> : root.status === "streaming" ? <Orb seedKey={root.key} size={16} tones={root.tones} /> : <span className={`status-dot ${root.status}`} />}
               </span>
             ))}
           </m.span>

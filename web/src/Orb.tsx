@@ -4,7 +4,8 @@ interface Props {
   seedKey: string
   size: 16 | 20 | 44
   running?: boolean
-  tone?: "green" | "orange" | "sky"
+  tone?: OrbTone
+  tones?: OrbTone[]
   className?: string
 }
 
@@ -49,22 +50,23 @@ interface RenderEntry {
   context: CanvasRenderingContext2D
   size: 16 | 20 | 44
   seed: number
-  tone: OrbTone
+  tones: OrbTone[]
   fail: () => void
 }
 
 let sharedRenderer: SharedOrbRenderer | null | undefined
 
-export function Orb({ seedKey, size, running = true, tone = "sky", className = "" }: Props) {
+export function Orb({ seedKey, size, running = true, tone = "sky", tones, className = "" }: Props) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const [fallback, setFallback] = useState(false)
+  const toneKey = (tones?.length ? tones : [tone]).join(",")
 
   useEffect(() => {
     if (!running || !canvas.current) return
     if (sharedRenderer === undefined) sharedRenderer = SharedOrbRenderer.create()
     if (!sharedRenderer) { setFallback(true); return }
-    return sharedRenderer.add(canvas.current, size, fnvSeed(seedKey), tone, () => setFallback(true))
-  }, [running, seedKey, size, tone])
+    return sharedRenderer.add(canvas.current, size, fnvSeed(seedKey), toneKey.split(",") as OrbTone[], () => setFallback(true))
+  }, [running, seedKey, size, toneKey])
 
   if (!running) return null
   if (fallback) return <span className={`orb-fallback ${className}`} aria-hidden="true" />
@@ -124,13 +126,13 @@ class SharedOrbRenderer {
     document.addEventListener("visibilitychange", this.visibilityChanged)
   }
 
-  add(node: HTMLCanvasElement, size: 16 | 20 | 44, seed: number, tone: OrbTone, fail: () => void) {
+  add(node: HTMLCanvasElement, size: 16 | 20 | 44, seed: number, tones: OrbTone[], fail: () => void) {
     const context = node.getContext("2d")
     if (!context || this.lost) { fail(); return }
     const dpr = Math.min(devicePixelRatio || 1, 2)
     node.width = size * dpr
     node.height = size * dpr
-    this.entries.set(node, { node, context, size, seed, tone, fail })
+    this.entries.set(node, { node, context, size, seed, tones, fail })
     this.redraw()
     return () => {
       this.entries.delete(node)
@@ -158,12 +160,13 @@ class SharedOrbRenderer {
   private draw = () => {
     this.frame = 0
     if (document.hidden || this.lost || !this.entries.size) return
-    const palettes = new Map<OrbTone, ReturnType<typeof orbPalette>>()
+    const palettes = new Map<string, ReturnType<typeof orbPalette>>()
     for (const entry of this.entries.values()) {
-      let palette = palettes.get(entry.tone)
+      const key = entry.tones.join(",")
+      let palette = palettes.get(key)
       if (!palette) {
-        palette = orbPalette(cssRgb(`--${entry.tone}`), this.light.matches)
-        palettes.set(entry.tone, palette)
+        palette = combinedPalette(entry.tones, this.light.matches)
+        palettes.set(key, palette)
       }
       this.drawEntry(entry, palette)
     }
@@ -212,7 +215,7 @@ function makeProgram(gl: WebGL2RenderingContext) {
 
 export function orbTone(tool?: string): "green" | "orange" | "sky" {
   if (["edit", "write", "create", "str_replace", "bash-write"].includes(tool ?? "")) return "green"
-  if (["bash", "shell"].includes(tool ?? "")) return "orange"
+  if (["bash", "shell", "request_user_bash"].includes(tool ?? "")) return "orange"
   return "sky"
 }
 
@@ -230,6 +233,26 @@ function cssRgb(token: string): [number, number, number] {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(token).trim()
   const value = Number.parseInt(raw.slice(1), 16)
   return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255]
+}
+
+function combinedPalette(tones: OrbTone[], light: boolean) {
+  const colors = (tones.length ? tones : ["sky"]).map(tone => cssRgb(`--${tone}`))
+  if (colors.length === 1) return orbPalette(colors[0], light)
+  const bucket = (index: number) => {
+    const members = colors.filter((_, colorIndex) => colorIndex % 3 === index)
+    const values = members.length ? members : [colors[index % colors.length]]
+    return values.reduce<[number, number, number]>((sum, color) => [sum[0] + color[0], sum[1] + color[1], sum[2] + color[2]], [0, 0, 0]).map(value => value / values.length) as [number, number, number]
+  }
+  const tint = (rgb: [number, number, number], shift: number) => {
+    const [hue, saturation, lightness] = rgbToHsl(rgb)
+    return hsl(hue, Math.max(.65, saturation), Math.max(.18, Math.min(.82, lightness + shift)))
+  }
+  return {
+    a: tint(bucket(0), -.16),
+    b: tint(bucket(1), 0),
+    c: tint(bucket(2), .18),
+    ring: orbPalette(colors[0], light).ring,
+  }
 }
 
 function orbPalette(rgb: [number, number, number], light: boolean) {

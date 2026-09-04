@@ -231,8 +231,9 @@ export default function App() {
                     </AnimatePresence>
                     <Composer
                       sessionName={active.displayName ?? active.name}
+                      activeKey={selected}
                       currentTool={active.currentTool}
-                      fleet={visibleSessions.filter(session => session.scope !== "chat" && sessionKey(session.scope, session.name) !== selected)}
+                      fleet={visibleSessions}
                       busy={active.status === "streaming"}
                       queue={state.queues[selected] ?? []}
                       disabled={Boolean(ask)}

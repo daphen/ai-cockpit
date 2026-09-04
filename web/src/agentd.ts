@@ -532,7 +532,7 @@ export class AgentdStore {
         scope,
         hostId: state.host.id,
         displayName: scope === "chat" ? this.chatLabels[session.name] : session.displayName,
-        currentTool: this.currentTools[sessionKey(scope, session.name)],
+        currentTool: session.currentTool || undefined,
         lastActivity: session.lastActivity ?? now,
       }))
       this.publish()
