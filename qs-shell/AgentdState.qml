@@ -125,6 +125,12 @@ Item {
   property var feeds: ({})
   property int feedGen: 0
   readonly property int feedCap: 200
+  property var _availableModels: new Map()
+  property int availableModelsGen: 0
+  function modelsFor(sid) {
+    availableModelsGen
+    return _availableModels.get(sid) || []
+  }
 
   // Pending ask_user questions (extension_ui_request): sid -> request obj
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
@@ -824,6 +830,11 @@ Item {
       return
     }
     if (t === "response" && m.command === "get_entries") { onEntries(m); return }
+    if (t === "response" && m.command === "get_available_models" && m.session) {
+      _availableModels.set(m.session, (m.data && m.data.models) || [])
+      availableModelsGen++
+      return
+    }
     const sid = m.session
     if (!sid) return
     // Recency: any session-tagged event is activity. Silent (no gen bump) — the

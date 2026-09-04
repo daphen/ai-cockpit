@@ -25,6 +25,11 @@ Item {
     context: Qt.ApplicationShortcut
     onActivated: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
   }
+  Shortcut {
+    sequence: "Ctrl+M"
+    context: Qt.ApplicationShortcut
+    onActivated: rail.toggleModelPicker()
+  }
   // Set by shell.qml from TermView.nvimSocket — the socket THIS instance's nvim listens
   // on. Never rebuild this path here: a guessed shared name is how the rail ended up
   // talking to a socket a newer Cockpit had already unlinked.
@@ -1131,6 +1136,22 @@ Item {
   readonly property color activeRing: Theme.mode === "light"
     ? Theme.ink
     : Qt.hsla(0.583, 0.29, 0.90, 1)
+  // A light-mode gray fill either disappeared or read disabled, so focus moves to a cool outline.
+  readonly property color selectedTurnSurface: Theme.mode === "light"
+    ? Theme.bg
+    : Theme.surface
+  readonly property color selectedTurnBorder: Theme.mode === "light"
+    ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.42)
+    : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
+  readonly property color rosterHoverSurface: Theme.mode === "light"
+    ? Qt.lighter(Theme.bgDim, 1.008)
+    : Theme.surface
+  readonly property color rosterSelectedSurface: Theme.mode === "light"
+    ? Theme.bgDim
+    : Theme.surface1
+  readonly property color rosterCursorSurface: Theme.mode === "light"
+    ? Qt.darker(Theme.bgDim, 1.018)
+    : Theme.selection
   // One colour vocabulary for BOTH roster states: the collapsed dots and the expanded
   // rows now read identically, so "what is this session doing" is the same glance either
   // way. Working is the orb, never a dot.
@@ -1212,8 +1233,44 @@ Item {
   Connections {
     target: rail.agentd
     function onSettledChanged() { rail._recomputeDefault() }
+    function onAvailableModelsGenChanged() { rail.refreshModelEntries() }
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
+  readonly property string selectedModelId: {
+    for (var mi = 0; mi < liveSessions.length; mi++)
+      if (liveSessions[mi].name === selectedRaw) return String(liveSessions[mi].model || "")
+    return ""
+  }
+  readonly property string selectedModelLabel: {
+    var id = selectedModelId.split("/").pop()
+    return id.toUpperCase().replace(/-/g, " ")
+  }
+  property bool modelOpen: false
+  property var modelEntries: []
+  property int modelCur: 0
+  function refreshModelEntries() {
+    if (!agentd || !selectedRaw) { modelEntries = []; modelCur = 0; return }
+    modelEntries = agentd.modelsFor(selectedRaw).filter(function(m) { return m && m.id && m.provider })
+    modelCur = Math.max(0, modelEntries.findIndex(function(m) {
+      return String(m.provider) + "/" + String(m.id) === selectedModelId
+        || String(m.id) === selectedModelId
+    }))
+  }
+  function toggleModelPicker() {
+    modelOpen = !modelOpen
+    if (!modelOpen) return
+    exitInsert()
+    requestFocus()
+    refreshModelEntries()
+    if (agentd && selectedRaw) agentd.send({ type: "get_available_models", session: selectedRaw })
+  }
+  function chooseModel(index) {
+    var model = modelEntries[index]
+    if (!model || !agentd || !selectedRaw) return
+    agentd.send({ type: "set_model", session: selectedRaw,
+                  provider: String(model.provider), modelId: String(model.id) })
+    modelOpen = false
+  }
   readonly property string selectedGoal: {
     for (var gi = 0; gi < liveSessions.length; gi++)
       if (liveSessions[gi].name === selectedRaw) return String(liveSessions[gi].goal || "")
@@ -1333,17 +1390,44 @@ Item {
   // switch away and back. Cheap: the align exits immediately when nothing moved.
   onFeaturedStreamingChanged: if (!featuredStreaming && selectedRaw) _alignMirror(selectedRaw)
 
-  // The ONE bool the thinking pill + orb depend on. Being a bool, its binding only
-  // notifies consumers when it actually flips (stream start/stop) — decoupled from
-  // `featured`, which allocates a fresh object on every roster tick.
-  // Includes optimistically-pending sends (agentd's roster lags the prompt by up to
-  // tens of seconds over the tunnel), so the pill appears the moment you hit enter
-  // instead of leaving a live session looking dead.
+  // The selected session and every descendant it spawned. The collapsed header is
+  // their shared home, so its large orb represents this fleet rather than only the root.
+  readonly property var featuredFleet: {
+    if (!selectedRaw) return []
+    var names = new Set([selectedRaw]), changed = true
+    while (changed) {
+      changed = false
+      for (var i = 0; i < liveSessions.length; i++) {
+        var session = liveSessions[i]
+        if (session.parent && names.has(session.parent) && !names.has(session.name)) {
+          names.add(session.name)
+          changed = true
+        }
+      }
+    }
+    return liveSessions.filter(session => names.has(session.name))
+  }
+  readonly property var featuredActivityColors: {
+    agentd ? agentd.curToolGen : 0
+    var colors = []
+    for (var i = 0; i < featuredFleet.length; i++) {
+      var session = featuredFleet[i]
+      if (session.status === "streaming" || (agentd && agentd.isBusy(session.name)))
+        colors.push(actionGlow(session.name))
+    }
+    return colors
+  }
+  readonly property bool featuredFleetStreaming: {
+    if (!live) return mockFeatured.status === "streaming"
+    return featuredActivityColors.length > 0
+  }
+  // Keep command routing tied to the selected session itself. A busy child colors
+  // the shared orb, but Esc must not interrupt an idle parent on the child's behalf.
   readonly property bool featuredStreaming: {
     if (agentd && agentd.pendingGen >= 0 && agentd.isBusy(selectedRaw)) return true
     if (!live) return mockFeatured.status === "streaming"
-    var arr = liveSessions
-    for (var i = 0; i < arr.length; i++) if (arr[i].name === selectedRaw) return arr[i].status === "streaming"
+    for (var i = 0; i < liveSessions.length; i++)
+      if (liveSessions[i].name === selectedRaw) return liveSessions[i].status === "streaming"
     return false
   }
   // Depth-ordered roster: children (spawned subagents) nest under their parent
@@ -1895,6 +1979,7 @@ Item {
       requestScopeMode(scopeMode === "work" ? "personal" : "work")
       return true
     }
+    if (ctrl && e.key === Qt.Key_M) { toggleModelPicker(); return true }
     // Ctrl+T = the in-app Super+T: open the roster and park on the active row;
     // pressed again while parked, put it away and return to the composer.
     if (ctrl && e.key === Qt.Key_T) {
@@ -1912,6 +1997,18 @@ Item {
   // Hint/yank mode: a label letter acts, Esc cancels, a lone modifier is NOT a
   // choice (a reflexive Ctrl used to kill the mode before the labels were seen);
   // any other key cancels and falls through to do its normal thing.
+  function keyModelPicker(e) {
+    if (e.key === Qt.Key_Escape) { modelOpen = false; return true }
+    if (e.key === Qt.Key_Down || e.key === Qt.Key_J) {
+      modelCur = Math.min(Math.max(0, modelEntries.length - 1), modelCur + 1); return true
+    }
+    if (e.key === Qt.Key_Up || e.key === Qt.Key_K) {
+      modelCur = Math.max(0, modelCur - 1); return true
+    }
+    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) { chooseModel(modelCur); return true }
+    return true
+  }
+
   function keyHint(e) {
     if (e.key === Qt.Key_Escape) { cancelHints("esc"); return true }
     if (e.text && /^[a-z]$/.test(e.text)) { hintKey(e.text); return true }
@@ -2045,6 +2142,7 @@ Item {
   Keys.onPressed: (e) => {
     _klog(e)
     if (keyGlobal(e)) { e.accepted = true; return }
+    if (modelOpen && keyModelPicker(e)) { e.accepted = true; return }
     if (fileSelectOpen && keyFileSelection(e)) { e.accepted = true; return }
     // Insert: the focused input owns the keyboard — except a blocking confirm/
     // select ask, which hides the composer, so its keys must still land here.
@@ -2505,9 +2603,9 @@ Item {
           // Fill-only separation, verified against the reference UI by sampling it:
           // ground 10,10,10 → card 23,23,23 → inner element 31,31,31, and NO borders
           // anywhere. The step sizes carry it; an added hairline just muddies them.
-          color: turnDel.cursor ? Theme.surface : Theme.bg
-          border.width: (turnDel.cursor || Theme.mode === "light") ? 1 : 0
-          border.color: turnDel.cursor ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45) : Theme.hairline
+          color: turnDel.cursor ? rail.selectedTurnSurface : Theme.bg
+          border.width: turnDel.cursor ? 2 : (Theme.mode === "light" ? 1 : 0)
+          border.color: turnDel.cursor ? rail.selectedTurnBorder : Theme.hairline
           HoverHandler { id: fhov }
           TapHandler { onTapped: rail.clickAt(rail.rSize + turnDel.rowIndex) }
 
@@ -2790,7 +2888,7 @@ Item {
             count++
           }
           if (rank < 0) return width
-          var rightMargin = rail.featuredStreaming ? 44 : 32
+          var rightMargin = rail.featuredFleetStreaming ? 44 : 32
           return width - rightMargin - (count * 16 + Math.max(0, count - 1) * 12) + rank * 28
         }
 
@@ -2968,7 +3066,7 @@ Item {
               // dots + gap + the 20px column. The gap carries the orb's 12px overhang
               // ONLY while the orb is drawn; idle it closes to the dots' own 12px rhythm.
               width: (rail.rosterExpanded ? 0
-                     : glanceDots.width + (rail.featuredStreaming ? 24 : 12)) + 20
+                     : glanceDots.width + (rail.featuredFleetStreaming ? 24 : 12)) + 20
               Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
               Item {
                 // One mounted slot crossfades working↔idle without restarting the orb on roster toggles.
@@ -2977,16 +3075,17 @@ Item {
                 Crossfade {
                   anchors.centerIn: parent
                   width: 44; height: 44
-                  showSecond: !rail.featuredStreaming
+                  showSecond: !rail.featuredFleetStreaming
                   enterDuration: 250
                   exitDuration: 250
                   shift: 0
                   inactiveScale: 0.25
                   first: ThinkingOrb {
                     anchors.fill: parent
-                    running: rail.featuredStreaming
+                    running: rail.featuredFleetStreaming
                     nodes: 16
-                    glow: rail.actionGlow(rail.selectedRaw)
+                    activityColors: rail.featuredActivityColors
+                    glow: activityColors.length ? activityColors[0] : rail.actionGlow(rail.selectedRaw)
                     seedKey: rail.selectedRaw
                   }
                   second: Rectangle {
@@ -2999,7 +3098,7 @@ Item {
               Row {
               id: glanceDots
               anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-              anchors.rightMargin: rail.featuredStreaming ? 44 : 32
+              anchors.rightMargin: rail.featuredFleetStreaming ? 44 : 32
               Behavior on anchors.rightMargin {
                 NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
               }
@@ -3062,9 +3161,9 @@ Item {
               // The theme's surface ladder, so cursor vs selected stay two clear
               // steps apart in both modes: hover < selected (surface1) <
               // cursor (selection). fg-alpha washes collapsed into one grey.
-              color: cursor ? Theme.selection
-                   : selected ? Theme.surface1
-                   : hov.hovered ? Theme.surface : "transparent"
+              color: cursor ? rail.rosterCursorSurface
+                   : selected ? rail.rosterSelectedSurface
+                   : hov.hovered ? rail.rosterHoverSurface : "transparent"
               HoverHandler { id: hov }
               // Collapsed: index doesn't map to the full list → just focus/expand.
               TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
@@ -3952,6 +4051,41 @@ Item {
           }
         }
 
+        Rectangle {
+          id: modelPill
+          Layout.alignment: Qt.AlignVCenter
+          Layout.leftMargin: -4
+          visible: rail.selectedModelLabel.length > 0
+          readonly property color tint: Theme.fg_muted
+          implicitWidth: modelRow.implicitWidth + 12
+          implicitHeight: 22
+          radius: 11
+          color: modelHover.hovered || rail.modelOpen ? Qt.alpha(tint, 0.14) : "transparent"
+          border.width: 1
+          border.color: Qt.alpha(tint, modelHover.hovered || rail.modelOpen ? 0.9 : 0.0)
+          Behavior on color { ColorAnimation { duration: 140 } }
+          Behavior on border.color { ColorAnimation { duration: 140 } }
+          Row {
+            id: modelRow
+            anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+            spacing: 5
+            Icon {
+              anchors.verticalCenter: parent.verticalCenter
+              width: 16; height: 16
+              name: "bolt-lightning"
+              color: modelPill.tint
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: rail.selectedModelLabel
+              color: modelPill.tint
+              font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+            }
+          }
+          HoverHandler { id: modelHover }
+          TapHandler { onTapped: rail.toggleModelPicker() }
+        }
+
         Item { Layout.fillWidth: true }   // push hint chips to the right
         Repeater {
           model: {
@@ -3993,9 +4127,11 @@ Item {
   component InlinePicker: Rectangle {
     required property var entries
     required property int choice
+    property string prefix: "/"
+    property string rowIcon: "bolt-lightning"
     signal picked(int index)
     width: Math.min(340, parent ? parent.width : 340)
-    height: visible ? Math.min(pickerList.contentHeight + 8, 248) : 0
+    height: visible ? Math.min(entries.length * 32 + 8, 248) : 0
     color: Theme.bg_alt
     radius: Theme.radius !== undefined ? Theme.radius : 10
     border.color: Theme.hairline
@@ -4028,14 +4164,14 @@ Item {
             width: 20; height: 20; anchors.verticalCenter: parent.verticalCenter
             Icon {
               anchors.centerIn: parent
-              name: pickerRow.isSkill ? "puzzle-piece" : "bolt-lightning"
+              name: pickerRow.isSkill ? "puzzle-piece" : rowIcon
               width: 14; height: 14
               color: pickerRow.sel ? Theme.fg : Theme.fg_muted
             }
           }
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: "/" + modelData
+            text: prefix + modelData
             color: pickerRow.sel ? Theme.fg : Theme.fg_secondary
             font.family: Theme.fontFamily; font.pixelSize: 14
             width: parent.width - 29; elide: Text.ElideMiddle
@@ -4045,6 +4181,17 @@ Item {
         TapHandler { onTapped: picked(pickerRow.index) }
       }
     }
+  }
+
+  InlinePicker {
+    id: modelPalette
+    visible: rail.modelOpen
+    anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
+    width: Math.min(340, parent.width - 40)
+    entries: rail.modelEntries.map(function(m) { return String(m.id) })
+    choice: rail.modelCur
+    prefix: ""
+    onPicked: index => rail.chooseModel(index)
   }
 
   InlinePicker {
