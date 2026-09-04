@@ -80,8 +80,13 @@ public:
       if (::getppid() == 1) _exit(1);
       ::setsid();
       ::unsetenv("NVIM");
-      ::unsetenv("NVIM_LISTEN_ADDRESS");
+      ::setenv("TERM", "xterm-256color", 1);
+      ::setenv("COLORTERM", "truecolor", 1);
+      ::setenv("COCKPIT_COCKPIT", "1", 1);
+      ::setenv("HEIDR_COCKPIT", "1", 1);
+      ::setenv("NVIM_LISTEN_ADDRESS", path.constData(), 1);
       ::execlp("nvim-013", "nvim-013", "--headless", "--listen", path.constData(),
+               "--cmd", "let $NVIM_LISTEN_ADDRESS = v:servername",
                "-c", "set shortmess+=I", (char *)nullptr);
       _exit(127);
     }

@@ -72,6 +72,8 @@ for _ in $(seq 1 100); do
 done
 version=$(remote 'luaeval("vim.version().minor")')
 pid_before=$(remote 'getpid()')
+embedded_mode=$(remote 'luaeval("vim.env.COCKPIT_COCKPIT or _A", "")')
+listen_env=$(remote 'luaeval("vim.env.NVIM_LISTEN_ADDRESS or _A", "")')
 test_file=/home/daphen/personal/newtab/src/popup/main.tsx
 remote "execute(\"cd /home/daphen/personal/newtab | edit $test_file\")" >/dev/null
 test_buffer=$(remote "bufnr('$test_file')")
@@ -114,6 +116,8 @@ line_after_undo=$(remote "getbufline($test_buffer, 1)[0]")
 
 say "reload keeps one editor"
 check "Neovim 0.13" "$version" "13"
+check "embedded Cockpit mode" "$embedded_mode" "1"
+check "server socket environment" "$listen_env" "$editor_socket"
 check "stable socket" "$socket_after" "$editor_socket"
 check "same server PID" "$pid_after" "$pid_before"
 check "unsaved text" "$line_after" "$line_before"
