@@ -445,6 +445,18 @@ Item {
     for (var i = 0; i < hintTargets.length; i++) if (hintTargets[i].key === key) return hintTargets[i]
     return null
   }
+  function firstUrl(text) {
+    var units = _scanUnits(text, 0, "hint", 0)
+    for (var i = 0; i < units.length; i++) if (units[i].kind === "url") return units[i].value
+    return ""
+  }
+  function openPendingAskUrl() {
+    if (!pendingAsk) return false
+    var url = firstUrl(String(pendingAsk.title || "") + "\n" + String(pendingAsk.message || pendingAsk.placeholder || ""))
+    if (!url.length) return false
+    Quickshell.execDetached(["xdg-open", url])
+    return true
+  }
   // Qt IGNORES Text.linkColor for MarkdownText (links stay the default dark blue,
   // invisible on the dark card), so colour the link's visible text inline instead.
   // Underline is left to the anchor, so links still read as links.
@@ -1860,6 +1872,7 @@ Item {
     // The stale-ask notice advertises C-d while the composer is focused — its
     // whole point is "type your answer instead", so it must work in insert.
     if (ctrl && e.key === Qt.Key_D && staleAsk) { dismissStaleAsk(); return true }
+    if (ctrl && e.key === Qt.Key_O && openPendingAskUrl()) return true
     if (ctrl && e.key === Qt.Key_S) {
       requestScopeMode(scopeMode === "work" ? "personal" : "work")
       return true
@@ -3335,8 +3348,10 @@ Item {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
           text: askCard.userBash
               ? (String(askCard.userBash.reason || "") + "\n" + String(askCard.userBash.host || "") + ":" + String(askCard.userBash.cwd || ""))
-              : askCard.prompt
+              : rail.colorizeLinks(askCard.prompt)
+          textFormat: askCard.userBash ? Text.PlainText : Text.MarkdownText
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          onLinkActivated: (url) => Quickshell.execDetached(["xdg-open", url])
         }
         // An ask with NO title and NO message is unanswerable as posed — say so
         // instead of presenting a bare box (the payload is journaled by agentd).
@@ -3425,10 +3440,11 @@ Item {
         }
 
         Text {
-          text: rail.askDeferred ? "finish typing · esc to answer"
+          readonly property bool hasUrl: askCard.ask && rail.firstUrl(String(askCard.ask.title || "") + "\n" + askCard.prompt).length > 0
+          text: (hasUrl ? "ctrl+o opens link · " : "") + (rail.askDeferred ? "finish typing · esc to answer"
               : askCard.userBash ? "click Run · y runs · n declines · esc cancels"
               : (askCard.ask && askCard.ask.method === "select")
-                ? "press a number · t to talk · esc cancels" : "t to talk · esc cancels"
+                ? "press a number · t to talk · esc cancels" : "t to talk · esc cancels")
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
       }
