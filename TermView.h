@@ -24,6 +24,7 @@
 class QSocketNotifier;
 class QKeyEvent;
 class QMouseEvent;
+class QWheelEvent;
 class QFileSystemWatcher;
 
 // Minimal terminal view: a real shell via forkpty → libghostty-vt → QPainter cells.
@@ -71,6 +72,7 @@ protected:
   void itemChange(ItemChange change, const ItemChangeData &data) override;
   void keyPressEvent(QKeyEvent *e) override;
   void mousePressEvent(QMouseEvent *e) override;
+  void wheelEvent(QWheelEvent *e) override;
   void geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry) override;
 
 private:
@@ -149,6 +151,8 @@ private:
   std::deque<QByteArray> ptyOut_;     // input bytes bound for the PTY
   bool themeReload_ = false;          // theme_mode changed → reload colours on the worker
   bool repaintReq_ = false;           // active/focus toggled → re-render with no new data
+  int wheelAngleRemainder_ = 0;
+  qreal wheelPixelRemainder_ = 0;
   struct { bool pending = false; int cols, rows, viewW, viewH; qreal dpr; } resize_;
   std::mutex frameMtx_;               // guards frame_ (worker publishes, paint blits)
   QImage frame_;

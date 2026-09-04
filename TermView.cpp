@@ -4,6 +4,7 @@
 #include <QPainterPath>
 #include <QKeyEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QSocketNotifier>
 #include <QFontMetrics>
 #include <QGuiApplication>
@@ -1187,4 +1188,36 @@ void TermView::mousePressEvent(QMouseEvent *e) {
     return;
   }
   QQuickPaintedItem::mousePressEvent(e);
+}
+
+void TermView::wheelEvent(QWheelEvent *e) {
+  const auto p = e->position();
+  const int col = std::clamp((int)std::floor((p.x() - padL_) / cellW_) + 1, 1, cols_);
+  const int row = std::clamp((int)std::floor((p.y() - padT_) / cellH_) + 1, 1, rows_);
+  int steps = 0;
+  if (!e->angleDelta().isNull()) {
+    wheelAngleRemainder_ += e->angleDelta().y();
+    steps = wheelAngleRemainder_ / 120;
+    wheelAngleRemainder_ %= 120;
+  } else if (!e->pixelDelta().isNull()) {
+    wheelPixelRemainder_ += e->pixelDelta().y();
+    const qreal threshold = std::max<qreal>(cellH_, 1);
+    steps = (int)(wheelPixelRemainder_ / threshold);
+    wheelPixelRemainder_ -= steps * threshold;
+  }
+  steps = std::clamp(steps, -6, 6);
+  if (steps == 0) {
+    e->accept();
+    return;
+  }
+  int modifiers = 0;
+  if (e->modifiers() & Qt::ShiftModifier) modifiers += 4;
+  if (e->modifiers() & Qt::AltModifier) modifiers += 8;
+  if (e->modifiers() & Qt::ControlModifier) modifiers += 16;
+  QByteArray input;
+  const int button = (steps > 0 ? 64 : 65) + modifiers;
+  for (int i = 0; i < std::abs(steps); ++i)
+    input += QString("\x1b[<%1;%2;%3M").arg(button).arg(col).arg(row).toUtf8();
+  enqueuePty(input);
+  e->accept();
 }
