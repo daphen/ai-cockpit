@@ -233,7 +233,8 @@ check "full paste starts folded" "$(case "$collapsed" in *"First line keeps"*) e
 key enter; sleep 1
 expanded=$(prose)
 check "enter reveals full paste" "$(case "$expanded" in *"First line keeps"*) echo 1;; *) echo 0;; esac)" "1"
-check "image uses attachment badge" "$(case "$expanded" in *"Image · img7.png"*) echo 1;; *) echo 0;; esac)" "1"
+check "images use numbered inline badges" "$(case "$expanded" in *"Image 1"*"Image 2"*) echo 1;; *) echo 0;; esac)" "1"
+check "image filenames stay hidden" "$(case "$expanded" in *"img7.png"*|*"img8.png"*) echo 1;; *) echo 0;; esac)" "0"
 check "paperclip emoji removed" "$(case "$expanded" in *"📎"*) echo 1;; *) echo 0;; esac)" "0"
 
 say "12. the stale notice: never over a streaming session, and self-heals"

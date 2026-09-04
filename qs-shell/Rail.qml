@@ -581,8 +581,7 @@ Item {
     return out
   }
   function markdownBlocks(text, entryIndex, baseOffset) {
-    var source = String(text || "")
-    var re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```|@?[\w~./-]*heidr-pastes\/([^\s"']+)/g
+    var source = String(text || ""), re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```/g
     var out = [], m, pos = 0, base = baseOffset || 0
     while ((m = re.exec(source)) !== null) {
       if (m.index > pos) {
@@ -590,12 +589,8 @@ Item {
         out.push({ kind: "markdown", text: prose, start: base + pos,
                    units: _scanUnits(prose, entryIndex, "yank", base + pos) })
       }
-      if (m[3] !== undefined) {
-        out.push({ kind: "attachment", file: m[3], start: base + m.index })
-      } else {
-        out.push({ kind: "fence", lang: m[1], code: m[2], start: base + m.index,
-                   key: "e" + entryIndex + ":p" + (base + m.index), runnable: _shellLanguage(m[1]) })
-      }
+      out.push({ kind: "fence", lang: m[1], code: m[2], start: base + m.index,
+                 key: "e" + entryIndex + ":p" + (base + m.index), runnable: _shellLanguage(m[1]) })
       pos = re.lastIndex
     }
     if (pos < source.length) {
@@ -624,16 +619,18 @@ Item {
     return source
   }
   // Pasted-image references ride the prompt as @.heidr-pastes/<file> but should
-  // read as attachments, not paths. Markdown strips style attrs (see _hintBadge),
-  // so the badge is a colored bold token, numbered per message in paste order —
-  // matching the composer chips.
+  // read as numbered inline attachments, not host-local paths.
   function badgeAttachments(t) {
     var n = 0
-    // Both ref shapes: remote worktree-relative (@.heidr-pastes/…) and local
-    // cache-absolute (@/home/…/.cache/heidr-pastes/…).
-    return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/([^\s"']+)/g, function (all, file) {
-      var stem = String(file).replace(/\.[a-z]+$/, "")
-      return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>" + stem + "</b></font>"
+    var color = rail._hex(Theme.electric)
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">'
+      + '<path d="M13.194 8.384a2.75 2.75 0 0 0-3.889 0l-6.109 6.11a1.99 1.99 0 0 0 1.554.756h8.5a2 2 0 0 0 2-2v-2.811z" fill="' + color + '"/>'
+      + '<circle cx="6.25" cy="7.25" r="1.25" fill="' + color + '"/>'
+      + '<path d="M13.25 16h-8.5A2.753 2.753 0 0 1 2 13.25v-8.5A2.753 2.753 0 0 1 4.75 2h8.5A2.753 2.753 0 0 1 16 4.75v8.5A2.753 2.753 0 0 1 13.25 16ZM4.75 3.5A1.25 1.25 0 0 0 3.5 4.75v8.5a1.25 1.25 0 0 0 1.25 1.25h8.5a1.25 1.25 0 0 0 1.25-1.25v-8.5a1.25 1.25 0 0 0-1.25-1.25z" fill="' + color + '"/></svg>'
+    var icon = "data:image/svg+xml," + encodeURIComponent(svg)
+    return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/[^\s"']+/g, function () {
+      n++
+      return '![](' + icon + ') `Image ' + n + '`'
     })
   }
   function _hex(c) {
@@ -2576,19 +2573,19 @@ Item {
 
             Rectangle {
               visible: turnDel.compactUser
-              width: Math.min(cardCol.width, pastedTextRow.implicitWidth + 22)
-              implicitHeight: 36
-              radius: 9
+              width: Math.min(cardCol.width, pastedTextRow.implicitWidth + 16)
+              implicitHeight: 26
+              radius: 7
               color: Theme.surface0
               border.width: 1
               border.color: Theme.hairline
               Row {
                 id: pastedTextRow
-                anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 11 }
-                spacing: 8
+                anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
+                spacing: 6
                 Icon {
                   name: "file-content"
-                  width: 16; height: 16; color: Theme.orange
+                  width: 13; height: 13; color: Theme.orange
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
@@ -2599,7 +2596,7 @@ Item {
                 }
                 Icon {
                   name: turnDel.userExpanded ? "chevron-down" : "chevron-right"
-                  width: 13; height: 13; color: Theme.fg_muted
+                  width: 11; height: 11; color: Theme.fg_muted
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -4309,39 +4306,7 @@ Item {
           property int rowIndex: markdownRoot.parent.rowIndex
           property color bodyColor: markdownRoot.parent.bodyColor
           property bool agentAuthored: markdownRoot.parent.agentAuthored
-          sourceComponent: block.kind === "fence" ? fencedCodeBlock
-                         : block.kind === "attachment" ? attachmentChip : markdownTextBlock
-        }
-      }
-    }
-  }
-  Component {
-    id: attachmentChip
-    Item {
-      width: parent ? parent.width : 400
-      implicitHeight: 36
-      Rectangle {
-        width: Math.min(parent.width, attachmentRow.implicitWidth + 22)
-        height: 36
-        radius: 9
-        color: Theme.surface0
-        border.width: 1
-        border.color: Theme.hairline
-        Row {
-          id: attachmentRow
-          anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 11 }
-          spacing: 8
-          Icon {
-            name: "image"
-            width: 16; height: 16; color: Theme.electric
-            anchors.verticalCenter: parent.verticalCenter
-          }
-          Text {
-            text: "Image · " + String(block.file || "")
-            color: Theme.fg_muted
-            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-            anchors.verticalCenter: parent.verticalCenter
-          }
+          sourceComponent: block.kind === "fence" ? fencedCodeBlock : markdownTextBlock
         }
       }
     }

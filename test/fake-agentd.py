@@ -213,7 +213,7 @@ def driver():
                     "Fifth line preserves the existing authorization check.",
                     "Sixth line keeps the test at the public boundary.",
                     "Seventh line avoids adding another protocol.",
-                    "Screenshot: @.heidr-pastes/img7.png",
+                    "Screenshots: @.heidr-pastes/img7.png and @.heidr-pastes/img8.png",
                 ])
                 broadcast({"type": "prompt_accepted", "session": "every-9001", "message": text})
             elif c == "ask":
