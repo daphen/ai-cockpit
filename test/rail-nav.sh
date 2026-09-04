@@ -50,9 +50,14 @@ cleanup() {
     [ -f "$f" ] || continue
     pid=$(cat "$f" 2>/dev/null)
     if [ -n "${pid:-}" ]; then
+      reglink="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/quickshell/by-pid/$pid"
+      regtarget=$(readlink "$reglink" 2>/dev/null || true)
       kill "$pid" 2>/dev/null
       for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 0.3; done
       kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null || true
+      rm -f -- "$reglink"
+      case "$regtarget" in */quickshell/by-id/*) rm -rf -- "$regtarget";; esac
     fi
     rm -f "$f"
   done
