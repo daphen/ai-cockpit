@@ -7,6 +7,7 @@
 #include <QSocketNotifier>
 #include <QFontMetrics>
 #include <QGuiApplication>
+#include <QCoreApplication>
 #include <QClipboard>
 #include <QFileSystemWatcher>
 #include <QLocalSocket>
@@ -18,6 +19,7 @@
 #include <signal.h>    // killpg on teardown
 #include <sys/wait.h>
 #include <sys/ioctl.h> // TIOCSWINSZ
+#include <sys/prctl.h>
 #include <unistd.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -34,6 +36,103 @@
 static QByteArray cockpitEnv(const char *name) {
   const QByteArray current = qgetenv((QByteArray("COCKPIT_") + name).constData());
   return current.isEmpty() ? qgetenv((QByteArray("HEIDR_") + name).constData()) : current;
+}
+
+namespace {
+
+bool liveNvimSocket(const QString &path) {
+  QLocalSocket probe;
+  probe.connectToServer(path);
+  const bool live = probe.waitForConnected(150);
+  probe.abort();
+  return live;
+}
+
+QString nvimSocketForInstance() {
+  QByteArray instance = qgetenv("COCKPIT_INSTANCE");
+  if (instance.isEmpty()) instance = QByteArray("pid-") + QByteArray::number(::getpid());
+  for (char &c : instance)
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.')) c = '_';
+  instance = instance.left(48);
+  const QByteArray runtime = qgetenv("XDG_RUNTIME_DIR");
+  const QString base = runtime.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(runtime);
+  return base + QStringLiteral("/cockpit-nvim-") + QString::fromUtf8(instance) + QStringLiteral(".sock");
+}
+
+class NvimOwner {
+public:
+  bool ensure(const QString &socket) {
+    if (pid_ > 0) {
+      int status = 0;
+      if (::waitpid(pid_, &status, WNOHANG) == 0)
+        return socket_ == socket && liveNvimSocket(socket);
+      pid_ = -1;
+    }
+    if (liveNvimSocket(socket)) return false;
+    const QByteArray path = socket.toUtf8();
+    ::unlink(path.constData());
+
+    pid_ = ::fork();
+    if (pid_ < 0) return false;
+    if (pid_ == 0) {
+      ::prctl(PR_SET_PDEATHSIG, SIGTERM);
+      if (::getppid() == 1) _exit(1);
+      ::setsid();
+      ::unsetenv("NVIM");
+      ::unsetenv("NVIM_LISTEN_ADDRESS");
+      ::execlp("nvim-013", "nvim-013", "--headless", "--listen", path.constData(),
+               "-c", "set shortmess+=I", (char *)nullptr);
+      _exit(127);
+    }
+    socket_ = socket;
+    if (!shutdownHook_) {
+      QObject::connect(QCoreApplication::instance(), &QCoreApplication::aboutToQuit,
+                       [this] { shutdown(); });
+      shutdownHook_ = true;
+    }
+    for (int i = 0; i < 60; ++i) {
+      if (liveNvimSocket(socket_)) return true;
+      int status = 0;
+      if (::waitpid(pid_, &status, WNOHANG) == pid_) {
+        pid_ = -1;
+        break;
+      }
+      struct timespec ts { 0, 50 * 1000 * 1000 };
+      ::nanosleep(&ts, nullptr);
+    }
+    shutdown();
+    return false;
+  }
+
+  void shutdown() {
+    if (pid_ > 0) {
+      ::killpg(pid_, SIGTERM);
+      for (int i = 0; i < 50; ++i) {
+        if (::waitpid(pid_, nullptr, WNOHANG) == pid_) { pid_ = -1; break; }
+        struct timespec ts { 0, 10 * 1000 * 1000 };
+        ::nanosleep(&ts, nullptr);
+      }
+      if (pid_ > 0) {
+        ::killpg(pid_, SIGKILL);
+        ::waitpid(pid_, nullptr, 0);
+        pid_ = -1;
+      }
+    }
+    if (!socket_.isEmpty()) ::unlink(socket_.toUtf8().constData());
+  }
+
+private:
+  pid_t pid_ = -1;
+  QString socket_;
+  bool shutdownHook_ = false;
+};
+
+NvimOwner &nvimOwner() {
+  static NvimOwner owner;
+  return owner;
+}
+
 }
 
 // Kitty graphics needs a PNG decoder installed process-wide. Decode via QImage
@@ -93,35 +192,9 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   setAcceptedMouseButtons(Qt::AllButtons);
   setFocus(true);
 
-  // The child and rail share a private pid + nonce socket path decided before the pty fork;
-  // a live collision advances the nonce rather than stealing another instance's nvim.
-  {
-    const QByteArray rt = qgetenv("XDG_RUNTIME_DIR");
-    const QString base = rt.isEmpty() ? QStringLiteral("/tmp") : QString::fromUtf8(rt);
-    // NO shared/stable name — ever. The old walk preferred a stable socket, and two
-    // instances relaunching in any order raced onto it: the loser's nvim died at a
-    // shell ("address already in use") and the winner's editor received the OTHER
-    // instance's landings and live-follows (work dashboards in the private Cockpit,
-    // personal follows in the work Cockpit). Identity is pid + a per-item nonce
-    // (hot-reload recreates this item inside the SAME process), probed for liveness
-    // only to survive nonce collisions across reloads.
-    const auto live = [](const QString &p) {
-      QLocalSocket probe;
-      probe.connectToServer(p);
-      const bool up = probe.waitForConnected(150);
-      probe.abort();
-      return up;
-    };
-    static int itemSeq = 0;
-    ++itemSeq;
-    QStringList cands;
-    for (int i = 0; i <= 9; ++i)
-      cands << base + QStringLiteral("/cockpit-nvim-%1-%2.sock")
-                 .arg(static_cast<qint64>(::getpid())).arg(itemSeq + i);
-    nvimSocket_ = cands.last();
-    for (const QString &c : cands)
-      if (!live(c)) { nvimSocket_ = c; break; }
-  }
+  nvimSocket_ = nvimSocketForInstance();
+  if (cockpitEnv("COCKPIT_CMD").isEmpty() && !nvimOwner().ensure(nvimSocket_))
+    qFatal("TermView refused live or unavailable nvim socket: %s", qPrintable(nvimSocket_));
 
   // Match the RAIL's text rendering so the two panes look like one app: same family,
   // sized in PIXELS like QsLib does (Theme.fontSize + n), and the DEFAULT hinting
@@ -234,11 +307,8 @@ TermView::~TermView() {
   quit_.store(true);
   wakeWorker();
   if (worker_.joinable()) worker_.join();
-  // Take the shell tree with us. forkpty's child is a SESSION LEADER, so its pgid is
-  // its pid and one killpg reaches fish and everything it started. Closing the master
-  // alone was not enough — nvim survived it, so every relaunch of the cockpit orphaned
-  // another editor (30 of them after an afternoon of restarts), and those orphans still
-  // hold the nvim server socket, which is what made live-follow land in the wrong place.
+  // The PTY owns only this terminal's UI client. The process-owned editor is stopped by
+  // the application quit hook, not by a QML item reload.
   if (child_ > 0) {
     ::killpg(child_, SIGHUP);
     for (int i = 0; i < 20; ++i) {                 // ~200ms for a clean exit
@@ -394,7 +464,8 @@ void TermView::spawnPty() {
     // prevents a live instance from being stolen.
     const QByteArray cmdEnv = cockpitEnv("COCKPIT_CMD");
     const char *cmd = cmdEnv.constData();
-    if (!cmd || !*cmd) cmd = "nvim --listen \"$NVIM_LISTEN_ADDRESS\" -c 'set shortmess+=I'; exec \"$SHELL\" -l";
+    if (!cmd || !*cmd)
+      cmd = "nvim-013 --server \"$NVIM_LISTEN_ADDRESS\" --remote-ui; exec \"$SHELL\" -l";
     execl(sh, sh, "-l", "-c", cmd, (char *)nullptr);
     _exit(127);
   }

@@ -43,8 +43,7 @@ public:
   Q_PROPERTY(qreal dpr READ dpr NOTIFY dprChanged)
   // Grid geometry probe (debug/IPC): what the terminal believes about its layout.
   Q_PROPERTY(QString gridInfo READ gridInfo NOTIFY dprChanged)
-  // The nvim RPC socket THIS instance's nvim listens on. Per-instance, so the rail
-  // never talks to a path a different Cockpit may have unlinked.
+  // Stable for this COCKPIT_INSTANCE so a recreated terminal reconnects to its editor.
   Q_PROPERTY(QString nvimSocket READ nvimSocket CONSTANT)
   qreal dpr() const { return guiDpr_ > 0 ? guiDpr_ : 1.0; }
   QString gridInfo() const {
@@ -108,7 +107,7 @@ private:
   GhosttyRenderState renderState_ = nullptr;  // for the cursor's visual shape (DECSCUSR)
   int cursorShape_ = 1;          // GhosttyRenderStateCursorVisualStyle; 1 = BLOCK
   int master_ = -1;              // PTY master fd (worker-thread owner)
-  pid_t child_ = -1;             // forkpty child (session leader) — killed on teardown
+  pid_t child_ = -1;             // forkpty UI client (session leader) — killed on item teardown
   QFileSystemWatcher *themeWatcher_ = nullptr;  // ~/.config/theme_mode → live light/dark flip
   QFont font_;
   QFont iconFont_;   // QsIcons, for the U+E000-U+E4FF icon range
