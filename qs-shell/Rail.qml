@@ -1731,8 +1731,10 @@ Item {
       var lcwd = rail._localPath(cwd)
       var p = rail._localPath(String(path))
       if (p.charAt(0) !== "/") p = lcwd + "/" + p
+      rail.agentd.refreshChanges(sid, lcwd)
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'])
+        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'
+        + ' . execute("HunkSignsRefresh")'])
     }
     function onEditSeen(sid, path, needleB64) {
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
