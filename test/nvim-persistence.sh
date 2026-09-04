@@ -113,6 +113,16 @@ clients_after=$(remote "luaeval(\"table.concat(vim.tbl_map(function(c) return c.
 remote "luaeval(\"vim.api.nvim_set_current_buf(_A)\", $test_buffer)" >/dev/null
 remote 'execute("undo")' >/dev/null
 line_after_undo=$(remote "getbufline($test_buffer, 1)[0]")
+remote "setbufvar($test_buffer, '&modified', 0)" >/dev/null
+follow_file="$T/follow-target.txt"
+printf 'one\ntwo\nthree\nexplicit hunk\nfive\nsnippet target\nseven\n' >"$follow_file"
+remote "v:lua.require('cockpit').follow_remote('$T', '$follow_file', v:true, 4)" >/dev/null
+follow_buffer=$(remote "bufnr('$follow_file')")
+follow_path=$(remote "fnamemodify(bufname($follow_buffer), ':p')")
+follow_hunk_line=$(remote "getcurpos(win_findbuf($follow_buffer)[0])[1]")
+needle_b64=$(printf 'snippet target' | base64 -w0)
+remote "v:lua.require('cockpit').follow_remote('$T', '$follow_file', v:true, v:null, '$needle_b64')" >/dev/null
+follow_snippet_line=$(remote "getcurpos(win_findbuf($follow_buffer)[0])[1]")
 
 say "reload keeps one editor"
 check "Neovim 0.13" "$version" "13"
@@ -126,6 +136,9 @@ check "two-window layout" "$windows_after" "2"
 check "undo history" "$line_after_undo" "spike-one"
 check "LSP clients" "$clients_after" "$clients_before"
 check "LSP attached" "$([ -n "$clients_after" ] && echo yes || echo no)" "yes"
+check "live-follow file" "$follow_path" "$follow_file"
+check "live-follow hunk" "$follow_hunk_line" "4"
+check "live-follow snippet" "$follow_snippet_line" "6"
 
 kill "$qs_pid" 2>/dev/null
 for _ in $(seq 1 100); do kill -0 "$qs_pid" 2>/dev/null || break; sleep .1; done
