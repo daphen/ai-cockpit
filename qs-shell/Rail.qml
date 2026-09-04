@@ -621,26 +621,18 @@ Item {
   function hasImageAttachments(text) {
     return /@?[\w~./-]*heidr-pastes\/[^\s"']+/.test(String(text || ""))
   }
-  function imageBadgeData(n) {
-    var digits = String(n).length, width = 75 + (digits - 1) * 7
-    var electric = rail._hex(Theme.electric), foreground = rail._hex(Theme.fg)
-    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + (width * 4) + '" height="88" viewBox="0 0 ' + width + ' 22">'
-      + '<rect x=".5" y=".5" width="' + (width - 1) + '" height="21" rx="7" fill="' + rail._hex(Theme.surface0) + '" stroke="' + rail._hex(Theme.hairline) + '"/>'
-      + '<g transform="translate(6 5) scale(.667)" fill="' + electric + '"><path d="M13.194 8.384a2.75 2.75 0 0 0-3.889 0l-6.109 6.11a1.99 1.99 0 0 0 1.554.756h8.5a2 2 0 0 0 2-2v-2.811z"/><circle cx="6.25" cy="7.25" r="1.25"/><path d="M13.25 16h-8.5A2.753 2.753 0 0 1 2 13.25v-8.5A2.753 2.753 0 0 1 4.75 2h8.5A2.753 2.753 0 0 1 16 4.75v8.5A2.753 2.753 0 0 1 13.25 16ZM4.75 3.5A1.25 1.25 0 0 0 3.5 4.75v8.5a1.25 1.25 0 0 0 1.25 1.25h8.5a1.25 1.25 0 0 0 1.25-1.25v-8.5a1.25 1.25 0 0 0-1.25-1.25z"/></g>'
-      + '<text x="24" y="14.5" fill="' + foreground + '" font-family="Berkeley Mono,monospace" font-size="11">Image ' + n + '</text></svg>'
-    return "data:image/svg+xml," + encodeURIComponent(svg)
-  }
-  function richUserAttachments(text) {
-    var html = String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>")
-    var n = 0
-    html = html.replace(/@?[\w~./-]*heidr-pastes\/[^\s"']+/g, function () {
-      n++
-      return '<img src="' + imageBadgeData(n) + '" width="' + (75 + (String(n).length - 1) * 7)
-        + '" height="22" alt="Image ' + n + '" style="vertical-align:middle">'
+  function inlineAttachmentLines(text) {
+    var number = 0
+    return String(text || "").split("\n").map(function (line) {
+      var tokens = [], re = /@?[\w~./-]*heidr-pastes\/[^\s"']+[ \t]*|[^\s]+[ \t]*/g, match
+      while ((match = re.exec(line)) !== null) {
+        var raw = match[0], attachment = hasImageAttachments(raw)
+        if (attachment) number++
+        tokens.push({ kind: attachment ? "attachment" : "text",
+                      text: raw, number: number, trailing: /[ \t]$/.test(raw) })
+      }
+      return tokens
     })
-    html = html.replace(/\n/g, "<br>")
-    return html
   }
   function badgeAttachments(t) {
     var n = 0
@@ -2102,7 +2094,7 @@ Item {
       var out = []
       ;(function walk(o) {
         if (!o) return
-        if (o.text !== undefined && String(o.text).length > 10) out.push(String(o.text))
+        if (o.text !== undefined && String(o.text).length > 0) out.push(String(o.text))
         var ch = o.children || []
         for (var j = 0; j < ch.length; j++) walk(ch[j])
       })(c[i])
@@ -2622,7 +2614,7 @@ Item {
               active: turnDel.isUser && (!turnDel.compactUser || turnDel.userExpanded)
               visible: active
               width: cardCol.width
-              sourceComponent: markdownContent
+              sourceComponent: rail.hasImageAttachments(sourceText) ? inlineAttachmentContent : markdownContent
               property string sourceText: turnDel.isUser ? String(turnDel.turn.text || "") : ""
               property int sourceEntry: 0
               property int sourceOffset: 0
@@ -4308,6 +4300,73 @@ Item {
     }
   }
   Component {
+    id: inlineAttachmentContent
+    Column {
+      id: attachmentLines
+      width: parent ? parent.width : 400
+      spacing: 2
+      readonly property var lines: rail.inlineAttachmentLines(sourceText)
+      Repeater {
+        model: attachmentLines.lines
+        Flow {
+          id: attachmentLine
+          readonly property var tokens: modelData
+          width: attachmentLines.width
+          height: Math.max(24, childrenRect.height)
+          Repeater {
+            model: attachmentLine.tokens
+            Loader {
+              property var token: modelData
+              sourceComponent: token.kind === "attachment" ? inlineAttachmentChip : inlineAttachmentText
+            }
+          }
+        }
+      }
+    }
+  }
+  Component {
+    id: inlineAttachmentText
+    Item {
+      width: attachmentWord.implicitWidth
+      height: 24
+      Text {
+        id: attachmentWord
+        anchors.verticalCenter: parent.verticalCenter
+        text: token.text
+        color: Theme.fg
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+      }
+    }
+  }
+  Component {
+    id: inlineAttachmentChip
+    Item {
+      width: imagePill.width + (token.trailing ? 7 : 0)
+      height: 24
+      Rectangle {
+        id: imagePill
+        width: imagePillRow.implicitWidth + 16
+        height: 24
+        radius: 7
+        color: Theme.surface0
+        border.width: 1
+        border.color: Theme.hairline
+        Row {
+          id: imagePillRow
+          anchors.centerIn: parent
+          spacing: 6
+          Icon { name: "image"; width: 12; height: 12; color: Theme.electric; anchors.verticalCenter: parent.verticalCenter }
+          Text {
+            text: "Image " + token.number
+            color: Theme.fg
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+      }
+    }
+  }
+  Component {
     id: markdownContent
     Column {
       id: markdownRoot
@@ -4335,18 +4394,16 @@ Item {
       implicitHeight: markdownText.implicitHeight
       TextEdit {
         id: markdownText
-        readonly property bool inlineAttachments: !agentAuthored && rail.hasImageAttachments(block.text)
         width: parent.width
         height: implicitHeight
         readOnly: true
         selectByMouse: true
         activeFocusOnPress: false
-        text: inlineAttachments ? rail.richUserAttachments(block.text)
-                                : rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
+        text: rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
         color: bodyColor
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: TextEdit.WordWrap
-        textFormat: inlineAttachments ? TextEdit.RichText : TextEdit.MarkdownText
+        textFormat: TextEdit.MarkdownText
         onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
       }
       Repeater {
