@@ -618,19 +618,35 @@ Item {
     }
     return source
   }
-  // Pasted-image references ride the prompt as @.heidr-pastes/<file> but should
-  // read as numbered inline attachments, not host-local paths.
+  function hasImageAttachments(text) {
+    return /@?[\w~./-]*heidr-pastes\/[^\s"']+/.test(String(text || ""))
+  }
+  function imageBadgeData(n) {
+    var digits = String(n).length, width = 75 + (digits - 1) * 7
+    var electric = rail._hex(Theme.electric), muted = rail._hex(Theme.fg_muted)
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + (width * 4) + '" height="88" viewBox="0 0 ' + width + ' 22">'
+      + '<rect x=".5" y=".5" width="' + (width - 1) + '" height="21" rx="7" fill="' + rail._hex(Theme.surface0) + '" stroke="' + rail._hex(Theme.hairline) + '"/>'
+      + '<g transform="translate(6 5) scale(.667)" fill="' + electric + '"><path d="M13.194 8.384a2.75 2.75 0 0 0-3.889 0l-6.109 6.11a1.99 1.99 0 0 0 1.554.756h8.5a2 2 0 0 0 2-2v-2.811z"/><circle cx="6.25" cy="7.25" r="1.25"/><path d="M13.25 16h-8.5A2.753 2.753 0 0 1 2 13.25v-8.5A2.753 2.753 0 0 1 4.75 2h8.5A2.753 2.753 0 0 1 16 4.75v8.5A2.753 2.753 0 0 1 13.25 16ZM4.75 3.5A1.25 1.25 0 0 0 3.5 4.75v8.5a1.25 1.25 0 0 0 1.25 1.25h8.5a1.25 1.25 0 0 0 1.25-1.25v-8.5a1.25 1.25 0 0 0-1.25-1.25z"/></g>'
+      + '<text x="24" y="14.5" fill="' + muted + '" font-family="Berkeley Mono,monospace" font-size="11">Image ' + n + '</text></svg>'
+    return "data:image/svg+xml," + encodeURIComponent(svg)
+  }
+  function richUserAttachments(text) {
+    var html = String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    html = html.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>")
+    var n = 0
+    html = html.replace(/@?[\w~./-]*heidr-pastes\/[^\s"']+/g, function () {
+      n++
+      return '<img src="' + imageBadgeData(n) + '" width="' + (75 + (String(n).length - 1) * 7)
+        + '" height="22" alt="Image ' + n + '">'
+    })
+    html = html.replace(/\n/g, "<br>")
+    return html
+  }
   function badgeAttachments(t) {
     var n = 0
-    var color = rail._hex(Theme.electric)
-    var svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">'
-      + '<path d="M13.194 8.384a2.75 2.75 0 0 0-3.889 0l-6.109 6.11a1.99 1.99 0 0 0 1.554.756h8.5a2 2 0 0 0 2-2v-2.811z" fill="' + color + '"/>'
-      + '<circle cx="6.25" cy="7.25" r="1.25" fill="' + color + '"/>'
-      + '<path d="M13.25 16h-8.5A2.753 2.753 0 0 1 2 13.25v-8.5A2.753 2.753 0 0 1 4.75 2h8.5A2.753 2.753 0 0 1 16 4.75v8.5A2.753 2.753 0 0 1 13.25 16ZM4.75 3.5A1.25 1.25 0 0 0 3.5 4.75v8.5a1.25 1.25 0 0 0 1.25 1.25h8.5a1.25 1.25 0 0 0 1.25-1.25v-8.5a1.25 1.25 0 0 0-1.25-1.25z" fill="' + color + '"/></svg>'
-    var icon = "data:image/svg+xml," + encodeURIComponent(svg)
     return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/[^\s"']+/g, function () {
       n++
-      return '![](' + icon + ') `Image ' + n + '`'
+      return "**Image " + n + "**"
     })
   }
   function _hex(c) {
@@ -4319,16 +4335,18 @@ Item {
       implicitHeight: markdownText.implicitHeight
       TextEdit {
         id: markdownText
+        readonly property bool inlineAttachments: !agentAuthored && rail.hasImageAttachments(block.text)
         width: parent.width
         height: implicitHeight
         readOnly: true
         selectByMouse: true
         activeFocusOnPress: false
-        text: rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
+        text: inlineAttachments ? rail.richUserAttachments(block.text)
+                                : rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
         color: bodyColor
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         wrapMode: TextEdit.WordWrap
-        textFormat: TextEdit.MarkdownText
+        textFormat: inlineAttachments ? TextEdit.RichText : TextEdit.MarkdownText
         onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
       }
       Repeater {
