@@ -85,7 +85,7 @@ public:
       ::setenv("COCKPIT_COCKPIT", "1", 1);
       ::setenv("HEIDR_COCKPIT", "1", 1);
       ::setenv("NVIM_LISTEN_ADDRESS", path.constData(), 1);
-      ::execlp("nvim-013", "nvim-013", "--headless", "--listen", path.constData(),
+      ::execlp("nvim", "nvim", "--headless", "--listen", path.constData(),
                "--cmd", "let $NVIM_LISTEN_ADDRESS = v:servername",
                "-c", "set shortmess+=I", (char *)nullptr);
       _exit(127);
@@ -470,7 +470,7 @@ void TermView::spawnPty() {
     const QByteArray cmdEnv = cockpitEnv("COCKPIT_CMD");
     const char *cmd = cmdEnv.constData();
     if (!cmd || !*cmd)
-      cmd = "nvim-013 --server \"$NVIM_LISTEN_ADDRESS\" --remote-ui; exec \"$SHELL\" -l";
+      cmd = "nvim --server \"$NVIM_LISTEN_ADDRESS\" --remote-ui; exec \"$SHELL\" -l";
     execl(sh, sh, "-l", "-c", cmd, (char *)nullptr);
     _exit(127);
   }

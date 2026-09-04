@@ -37,7 +37,7 @@ trap cleanup EXIT
 rm -rf "$T"
 mkdir -p "$T/qs-shell" "$T/bin" "$T/state" "$T/cache"
 cp -a qs-shell/. "$T/qs-shell/"
-ln -s "$NVIM_013_BIN" "$T/bin/nvim-013"
+ln -s "$NVIM_013_BIN" "$T/bin/nvim"
 
 python3 test/fake-agentd.py "$SOCK" >"$T/fake.log" 2>&1 &
 fake_pid=$!
@@ -83,7 +83,7 @@ for _ in $(seq 1 50); do
   [[ "$clients_before" == *tailwindcss* && "$clients_before" == *ts_ls* ]] && break
   sleep .1
 done
-remote "execute(\"buffer $test_buffer | call setline(1, 'spike-one')\")" >/dev/null
+remote "execute(\"buffer $test_buffer | call setline(1, 'spike-one') | undo | redo\")" >/dev/null
 remote "execute(\"buffer $test_buffer | call setline(1, 'spike-two') | only | vsplit\")" >/dev/null
 windows_before=$(remote "luaeval(\"#vim.fn.win_findbuf(_A)\", $test_buffer)")
 for _ in $(seq 1 20); do
