@@ -280,6 +280,16 @@ Item {
   function _echoTrack(sid, text) {
     var m = _localEcho; (m[sid] = m[sid] || []).push({ text: text, at: Date.now() }); _localEcho = m
   }
+  function _settleEcho(sid, text) {
+    var list = _localEcho[sid] || []
+    for (var i = list.length - 1; i >= 0; i--) {
+      if (list[i].text === text && !list[i].settled) {
+        list[i] = Object.assign({}, list[i], { settled: true })
+        var echoes = _localEcho; echoes[sid] = list; _localEcho = echoes
+        return
+      }
+    }
+  }
   function _sessionStatus(sid) {
     for (var i = 0; i < sessions.length; i++)
       if (sessions[i].id === sid || sessions[i].name === sid) return sessions[i].status || ""
@@ -835,6 +845,8 @@ Item {
       delete _steerPending[sid]
       if (sp && (Date.now() - sp.at) < steerGraceMs)
         send({ type: "prompt", session: sid, message: sp.text })
+      else if (sp)
+        _settleEcho(sid, sp.text)
     }
 
     if (t === "prompt_accepted") {
@@ -1060,8 +1072,8 @@ Item {
       if (Date.now() - trs[tk].at > trs[tk].ttl) { _clearTransient(esid, tk); continue }
       feeds[esid].push({ kind: "cmd", tool: trs[tk].tool, text: trs[tk].text })
     }
-    // Re-append local echoes the transcript has not caught up with, dropping the ones it
-    // has (containment, not equality: pi may wrap a steered message when recording it).
+    // Keep local echoes the transcript has not caught up with. Consumed steers that pi
+    // never records stay anchored before their response instead of following the bottom.
     var q = _localEcho[esid] || []
     if (q.length) {
       var corpus = []
@@ -1074,6 +1086,14 @@ Item {
       var joined = corpus.join("\n\u0000")
       var left = []
       var idle = _sessionStatus(esid) !== "streaming"
+      var settledAnchor = feeds[esid].length, settledMid = ""
+      for (var au = feeds[esid].length - 1; au >= 0; au--) {
+        if (feeds[esid][au].kind !== "user") continue
+        settledAnchor = Math.min(au + 1, feeds[esid].length)
+        if (settledAnchor < feeds[esid].length)
+          settledMid = String(feeds[esid][settledAnchor].mid || "")
+        break
+      }
       for (var qi = 0; qi < q.length; qi++) {
         var qe = q[qi], qt = qe.text !== undefined ? qe.text : String(qe)
         if (joined.indexOf(qt) >= 0) continue             // transcript caught up
@@ -1090,8 +1110,20 @@ Item {
                              text: "✗ not delivered — the agent never received: “" + qt.slice(0, 80) + "”. Resend it." })
           continue                                        // dropped from the queue
         }
+        var insertAt = feeds[esid].length
+        if (qe.beforeMid) {
+          for (var bi = 0; bi < feeds[esid].length; bi++)
+            if (feeds[esid][bi].mid === qe.beforeMid) { insertAt = bi; break }
+        } else if (qe.settled) {
+          insertAt = settledAnchor
+          if (settledMid) {
+            qe = Object.assign({}, qe, { beforeMid: settledMid })
+            for (var si = 0; si < feeds[esid].length; si++)
+              if (feeds[esid][si].mid === settledMid) { insertAt = si; break }
+          }
+        }
         left.push(qe)
-        feeds[esid].push({ kind: "user", text: qt })      // keep it on screen
+        feeds[esid].splice(insertAt, 0, { kind: "user", text: qt })
       }
       var le = _localEcho
       if (left.length) le[esid] = left; else delete le[esid]

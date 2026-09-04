@@ -329,11 +329,13 @@ say "15. a steered message stays visible until the transcript catches up"
 # while. The optimistic row used to be wiped by the next rebuild — sends silently
 # vanished, then all appeared at once when pi consumed the queue.
 fake stream_on
-ipc_send railSend "steer me visible"; sleep 1
+ipc_send railSend "steer me visible"; sleep 5
 fake grow                              # turn_end → full transcript rebuild, steer NOT in it
 vis=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railGeom >/dev/null 2>&1; st)
-key G
-check "echo survived the rebuild" "$(field "$(st)" row | grep -c "steer me visible")" "1"
+check "echo survived the rebuild" "$(case "$(tailfeed)" in *"steer me visible"*) echo 1;; *) echo 0;; esac)" "1"
+fake grow
+anchored=$(tailfeed | python3 -c 'import json,sys; a=json.load(sys.stdin); p=[i for i,x in enumerate(a) if "steer me visible" in x]; print(int(len(p)==1 and p[0] < len(a)-1))')
+check "consumed steer stays anchored" "$anchored" "1"
 say "16. turn outcomes render: retry, retry-exhausted, compaction, tool failure"
 fake retry 1
 live=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null | tail -1)
