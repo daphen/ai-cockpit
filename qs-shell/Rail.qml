@@ -2576,28 +2576,31 @@ Item {
 
             Rectangle {
               visible: turnDel.compactUser
-              width: cardCol.width
+              width: Math.min(cardCol.width, pastedTextRow.implicitWidth + 22)
               implicitHeight: 36
               radius: 9
               color: Theme.surface0
               border.width: 1
               border.color: Theme.hairline
-              RowLayout {
-                anchors { fill: parent; leftMargin: 11; rightMargin: 11 }
+              Row {
+                id: pastedTextRow
+                anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 11 }
                 spacing: 8
                 Icon {
                   name: "file-content"
                   width: 16; height: 16; color: Theme.orange
+                  anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                   text: "Pasted text · " + turnDel.userStats.lines + " lines · " + turnDel.userStats.chars + " chars"
                   color: Theme.fg_muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                  Layout.fillWidth: true
+                  anchors.verticalCenter: parent.verticalCenter
                 }
                 Icon {
                   name: turnDel.userExpanded ? "chevron-down" : "chevron-right"
                   width: 13; height: 13; color: Theme.fg_muted
+                  anchors.verticalCenter: parent.verticalCenter
                 }
               }
             }
@@ -4314,28 +4317,31 @@ Item {
   }
   Component {
     id: attachmentChip
-    Rectangle {
-      implicitWidth: Math.min(parent ? parent.width : 400, attachmentRow.implicitWidth + 22)
-      width: implicitWidth
+    Item {
+      width: parent ? parent.width : 400
       implicitHeight: 36
-      radius: 9
-      color: Theme.surface0
-      border.width: 1
-      border.color: Theme.hairline
-      Row {
-        id: attachmentRow
-        anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 11 }
-        spacing: 8
-        Icon {
-          name: "image"
-          width: 16; height: 16; color: Theme.electric
-          anchors.verticalCenter: parent.verticalCenter
-        }
-        Text {
-          text: "Image · " + String(block.file || "")
-          color: Theme.fg_muted
-          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-          anchors.verticalCenter: parent.verticalCenter
+      Rectangle {
+        width: Math.min(parent.width, attachmentRow.implicitWidth + 22)
+        height: 36
+        radius: 9
+        color: Theme.surface0
+        border.width: 1
+        border.color: Theme.hairline
+        Row {
+          id: attachmentRow
+          anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 11 }
+          spacing: 8
+          Icon {
+            name: "image"
+            width: 16; height: 16; color: Theme.electric
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Text {
+            text: "Image · " + String(block.file || "")
+            color: Theme.fg_muted
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            anchors.verticalCenter: parent.verticalCenter
+          }
         }
       }
     }
