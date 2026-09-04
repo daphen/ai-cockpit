@@ -952,6 +952,8 @@ Item {
     if (!item || item.kind !== "edit") return false
     var path = String(item.path || item.file || "")
     return /\.(progress|review)\.json$/.test(path)
+      || /(^|\/)\.plans\/[^/]+\.md$/.test(path)
+      || /\/notes\/storage\/plans\/[^/]+\.md$/.test(path)
   }
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
   // counted): "4 bash · 6 read · edited file.ts".

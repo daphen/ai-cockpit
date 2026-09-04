@@ -253,6 +253,7 @@ metadata=$(prose)
 check "production edit remains visible" "$(case "$metadata" in *"visible.ts"*) echo 1;; *) echo 0;; esac)" "1"
 check "progress metadata is hidden" "$(case "$metadata" in *"progress.json"*) echo 1;; *) echo 0;; esac)" "0"
 check "review metadata is hidden" "$(case "$metadata" in *"review.json"*) echo 1;; *) echo 0;; esac)" "0"
+check "plan artifact is hidden" "$(case "$metadata" in *"EVERY-1.md"*) echo 1;; *) echo 0;; esac)" "0"
 
 say "12. the stale notice: never over a streaming session, and self-heals"
 # The ghost this pins: answering a live ask raced the transcript refresh — pi resumed but

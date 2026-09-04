@@ -248,7 +248,7 @@ def driver():
                            "toolName": "bash", "toolCallId": f"tc-{state['tooln']}",
                            "args": {"command": f"echo live-tool-{state['tooln']} && sleep 1"}})
             elif c == "plan_metadata":
-                for i, path in enumerate(("EVERY-1.progress.json", "EVERY-1.review.json", "src/visible.ts")):
+                for i, path in enumerate(("EVERY-1.progress.json", "EVERY-1.review.json", ".plans/EVERY-1.md", "src/visible.ts")):
                     broadcast({"type": "tool_execution_start", "session": "every-9001",
                                "toolName": "edit", "toolCallId": f"meta-{i}",
                                "args": {"path": path, "oldText": "old", "newText": "new"}})
