@@ -1746,16 +1746,6 @@ Item {
     }
   }
 
-  // While the selected session is mid-turn, re-pull its transcript on a timer. Without
-  // this the chat is frozen from whenever the rail last fetched — most visibly when you
-  // open Cockpit while an agent is already working, which reads as "nothing is happening".
-  Timer {
-    interval: 5000
-    repeat: true
-    running: rail.live && rail.featuredStreaming && rail.selectedRaw !== ""
-    onTriggered: if (rail.agentd) rail.agentd.refreshEntries(rail.selectedRaw)
-  }
-
   // Changed files for the selected session (agentd working-tree diff).
   readonly property var changesList:
     !live ? mockChanges

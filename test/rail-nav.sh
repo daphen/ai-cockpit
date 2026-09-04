@@ -29,6 +29,7 @@ say()  { printf '\033[36m[rail-test]\033[0m %s\n' "$*"; }
 st()   { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railState 2>/dev/null | tail -1; }
 key()    { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railKey "$1" >/dev/null 2>&1; }
 prose()  { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railProse 2>/dev/null; }
+tailfeed() { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null; }
 select_session() { timeout 10 qs -p "$T/qs-shell" ipc call cockpit selectSession "$1" >/dev/null 2>&1; }
 fake()   { echo "$1" >> "$CMD"; sleep "${2:-2.5}"; }
 
@@ -236,6 +237,14 @@ check "enter reveals full paste" "$(case "$expanded" in *"First line keeps"*) ec
 check "images use numbered inline badges" "$(case "$expanded" in *"Image 1"*"Image 2"*) echo 1;; *) echo 0;; esac)" "1"
 check "image filenames stay hidden" "$(case "$expanded" in *"img7.png"*|*"img8.png"*) echo 1;; *) echo 0;; esac)" "0"
 check "paperclip emoji removed" "$(case "$expanded" in *"📎"*) echo 1;; *) echo 0;; esac)" "0"
+
+say "11c. a stale transcript response cannot erase live tool activity"
+fake stream_on 1
+fake tool 1
+check "live tool arrives" "$(case "$(tailfeed)" in *"live-tool-1"*) echo 1;; *) echo 0;; esac)" "1"
+sleep 6
+check "live tool survives six seconds" "$(case "$(tailfeed)" in *"live-tool-1"*) echo 1;; *) echo 0;; esac)" "1"
+fake stream_off 1
 
 say "12. the stale notice: never over a streaming session, and self-heals"
 # The ghost this pins: answering a live ask raced the transcript refresh — pi resumed but
