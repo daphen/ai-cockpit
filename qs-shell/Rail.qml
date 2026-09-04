@@ -1733,8 +1733,8 @@ Item {
       if (p.charAt(0) !== "/") p = lcwd + "/" + p
       rail.agentd.refreshChanges(sid, lcwd)
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, ' + line + ')'
-        + ' . execute("HunkSignsRefresh")'])
+        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", '
+        + (rail.focused ? 'v:true' : 'v:false') + ', ' + line + ') . execute("HunkSignsRefresh")'])
     }
     function onEditSeen(sid, path, needleB64) {
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
@@ -1744,7 +1744,8 @@ Item {
       var p = rail._localPath(String(path))
       if (p.charAt(0) !== "/") p = lcwd + "/" + p     // pi may report worktree-relative
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", v:false, v:null, "' + String(needleB64 || "") + '")'])
+        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", '
+        + (rail.focused ? 'v:true' : 'v:false') + ', v:null, "' + String(needleB64 || "") + '")'])
     }
   }
 
