@@ -203,6 +203,19 @@ def driver():
                 state["streaming"] = "every-9001"
             elif c == "stream_off":
                 state["streaming"] = None
+            elif c == "long_user":
+                text = "\n".join([
+                    "Pasted review notes for the implementation:",
+                    "First line keeps the existing public behavior.",
+                    "Second line removes the duplicate state path.",
+                    "Third line verifies the current production caller.",
+                    "Fourth line covers the failed response branch.",
+                    "Fifth line preserves the existing authorization check.",
+                    "Sixth line keeps the test at the public boundary.",
+                    "Seventh line avoids adding another protocol.",
+                    "Screenshot: @.heidr-pastes/img7.png",
+                ])
+                broadcast({"type": "prompt_accepted", "session": "every-9001", "message": text})
             elif c == "ask":
                 state["live_ask"] = {"title": "T-live: proceed?", "method": "confirm"}
                 push_roster()

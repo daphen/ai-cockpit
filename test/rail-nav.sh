@@ -28,6 +28,7 @@ pass=0 fail=0
 say()  { printf '\033[36m[rail-test]\033[0m %s\n' "$*"; }
 st()   { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railState 2>/dev/null | tail -1; }
 key()    { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railKey "$1" >/dev/null 2>&1; }
+prose()  { timeout 10 qs -p "$T/qs-shell" ipc call cockpit railProse 2>/dev/null; }
 select_session() { timeout 10 qs -p "$T/qs-shell" ipc call cockpit selectSession "$1" >/dev/null 2>&1; }
 fake()   { echo "$1" >> "$CMD"; sleep "${2:-2.5}"; }
 
@@ -222,6 +223,18 @@ key y; sleep 2
 ans=$(grep -c '"type": "answer".*"confirmed": true' "$SOCK.answers" 2>/dev/null || true)
 check "question answer reached the daemon" "${ans:-0}" "1"
 check "card cleared"                  "$(field "$(st)" ask)" "False"
+
+say "11b. long pasted messages and image references render as compact badges"
+fake long_user 1
+key G
+collapsed=$(prose)
+check "pasted text is a badge" "$(case "$collapsed" in *"Pasted text · 9 lines"*) echo 1;; *) echo 0;; esac)" "1"
+check "full paste starts folded" "$(case "$collapsed" in *"First line keeps"*) echo 1;; *) echo 0;; esac)" "0"
+key enter; sleep 1
+expanded=$(prose)
+check "enter reveals full paste" "$(case "$expanded" in *"First line keeps"*) echo 1;; *) echo 0;; esac)" "1"
+check "image uses attachment badge" "$(case "$expanded" in *"Image · img7.png"*) echo 1;; *) echo 0;; esac)" "1"
+check "paperclip emoji removed" "$(case "$expanded" in *"📎"*) echo 1;; *) echo 0;; esac)" "0"
 
 say "12. the stale notice: never over a streaming session, and self-heals"
 # The ghost this pins: answering a live ask raced the transcript refresh — pi resumed but

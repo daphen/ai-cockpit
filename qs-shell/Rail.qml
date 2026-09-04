@@ -581,7 +581,8 @@ Item {
     return out
   }
   function markdownBlocks(text, entryIndex, baseOffset) {
-    var source = String(text || ""), re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```/g
+    var source = String(text || "")
+    var re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```|@?[\w~./-]*heidr-pastes\/([^\s"']+)/g
     var out = [], m, pos = 0, base = baseOffset || 0
     while ((m = re.exec(source)) !== null) {
       if (m.index > pos) {
@@ -589,8 +590,12 @@ Item {
         out.push({ kind: "markdown", text: prose, start: base + pos,
                    units: _scanUnits(prose, entryIndex, "yank", base + pos) })
       }
-      out.push({ kind: "fence", lang: m[1], code: m[2], start: base + m.index,
-                 key: "e" + entryIndex + ":p" + (base + m.index), runnable: _shellLanguage(m[1]) })
+      if (m[3] !== undefined) {
+        out.push({ kind: "attachment", file: m[3], start: base + m.index })
+      } else {
+        out.push({ kind: "fence", lang: m[1], code: m[2], start: base + m.index,
+                   key: "e" + entryIndex + ":p" + (base + m.index), runnable: _shellLanguage(m[1]) })
+      }
       pos = re.lastIndex
     }
     if (pos < source.length) {
@@ -628,7 +633,7 @@ Item {
     // cache-absolute (@/home/…/.cache/heidr-pastes/…).
     return String(t || "").replace(/@?[\w~./-]*heidr-pastes\/([^\s"']+)/g, function (all, file) {
       var stem = String(file).replace(/\.[a-z]+$/, "")
-      return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>&#128206;&#8201;" + stem + "</b></font>"
+      return "<font color=\"" + rail._hex(Theme.electric) + "\"><b>" + stem + "</b></font>"
     })
   }
   function _hex(c) {
@@ -1815,6 +1820,10 @@ Item {
       if (cf) openInNvim(cf.path)
     } else {
       var it = groupedFeed[l]
+      if (it && it.kind === "user" && compactUserMessage(it.text)) {
+        toggleGroupKey("user-" + (it.key || l))
+        return
+      }
       var edits = activityFileRefs(it)
       if (edits.length === 1) { openFileRef(edits[0]); return }
       if (edits.length > 1) { startFileSelection(edits, "turn-" + (it.key || l)); return }
@@ -2080,7 +2089,7 @@ Item {
       var out = []
       ;(function walk(o) {
         if (!o) return
-        if (o.text !== undefined && String(o.text).length > 40) out.push(String(o.text))
+        if (o.text !== undefined && String(o.text).length > 10) out.push(String(o.text))
         var ch = o.children || []
         for (var j = 0; j < ch.length; j++) walk(ch[j])
       })(c[i])
@@ -2258,6 +2267,14 @@ Item {
   // gives a sequence instead, and since only the newest card auto-expands, the older
   // chunks read as one-line activity summaries.
   readonly property int turnChunk: 12
+  function userMessageStats(text) {
+    var source = String(text || "")
+    return { lines: source.length ? source.split("\n").length : 0, chars: source.length }
+  }
+  function compactUserMessage(text) {
+    var stats = userMessageStats(text)
+    return stats.lines >= 8 || stats.chars >= 800
+  }
   // Fallback row key when no transcript mid exists (live pushes, streaming
   // turns): derived from CONTENT, so the key survives both index shifts and
   // the live->rebuild swap — index-based keys re-keyed whole stretches and
@@ -2466,6 +2483,10 @@ Item {
         // own model property, so model.d is only readable at the delegate root.
         readonly property var turn: model.d
         readonly property bool isUser: turnDel.turn.kind === "user"
+        readonly property bool compactUser: isUser && rail.compactUserMessage(turn.text)
+        readonly property string userFoldKey: "user-" + (turn.key || rowIndex)
+        readonly property bool userExpanded: compactUser && rail.expandedGroups[userFoldKey] === true
+        readonly property var userStats: rail.userMessageStats(isUser ? turn.text : "")
         // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
         readonly property bool isSys: turnDel.turn.sys === true
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
@@ -2553,8 +2574,36 @@ Item {
               }
             }
 
+            Rectangle {
+              visible: turnDel.compactUser
+              width: cardCol.width
+              implicitHeight: 36
+              radius: 9
+              color: Theme.surface0
+              border.width: 1
+              border.color: Theme.hairline
+              RowLayout {
+                anchors { fill: parent; leftMargin: 11; rightMargin: 11 }
+                spacing: 8
+                Icon {
+                  name: "file-content"
+                  width: 16; height: 16; color: Theme.orange
+                }
+                Text {
+                  text: "Pasted text · " + turnDel.userStats.lines + " lines · " + turnDel.userStats.chars + " chars"
+                  color: Theme.fg_muted
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                  Layout.fillWidth: true
+                }
+                Icon {
+                  name: turnDel.userExpanded ? "chevron-down" : "chevron-right"
+                  width: 13; height: 13; color: Theme.fg_muted
+                }
+              }
+            }
+
             Loader {
-              active: turnDel.isUser
+              active: turnDel.isUser && (!turnDel.compactUser || turnDel.userExpanded)
               visible: active
               width: cardCol.width
               sourceComponent: markdownContent
@@ -4257,7 +4306,36 @@ Item {
           property int rowIndex: markdownRoot.parent.rowIndex
           property color bodyColor: markdownRoot.parent.bodyColor
           property bool agentAuthored: markdownRoot.parent.agentAuthored
-          sourceComponent: block.kind === "fence" ? fencedCodeBlock : markdownTextBlock
+          sourceComponent: block.kind === "fence" ? fencedCodeBlock
+                         : block.kind === "attachment" ? attachmentChip : markdownTextBlock
+        }
+      }
+    }
+  }
+  Component {
+    id: attachmentChip
+    Rectangle {
+      implicitWidth: Math.min(parent ? parent.width : 400, attachmentRow.implicitWidth + 22)
+      width: implicitWidth
+      implicitHeight: 36
+      radius: 9
+      color: Theme.surface0
+      border.width: 1
+      border.color: Theme.hairline
+      Row {
+        id: attachmentRow
+        anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 11 }
+        spacing: 8
+        Icon {
+          name: "image"
+          width: 16; height: 16; color: Theme.electric
+          anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+          text: "Image · " + String(block.file || "")
+          color: Theme.fg_muted
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          anchors.verticalCenter: parent.verticalCenter
         }
       }
     }
