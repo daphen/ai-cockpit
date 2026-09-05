@@ -1017,11 +1017,9 @@ bool TermView::sendKey(QKeyEvent *e, uint32_t action) {
         ev.function_key = (uint8_t)(k - Qt::Key_F1 + 1);
       } else if (k > 0 && k < 0x01000000) {
         // A character key. Qt reports the shifted symbol as an UPPERCASE Latin-1 code
-        // (Key_A for both a and A); librio wants the unshifted name and the produced
-        // text separately, with shift marked as already spent on that text.
+        // (Key_A for both a and A); librio wants the unshifted name and produced text.
         ev.tag = RIO_KEY_CHAR;
         ev.codepoint = k <= 0xFFFF ? (uint32_t)QChar((ushort)k).toLower().unicode() : (uint32_t)k;
-        if (!text.isEmpty() && (ev.mods & RIO_MOD_SHIFT)) ev.consumed_mods |= RIO_MOD_SHIFT;
       } else if (!text.isEmpty()) {
         ev.tag = RIO_KEY_NONE;   // text-only event (input method commit, dead-key result)
       } else {

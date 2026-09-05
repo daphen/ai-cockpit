@@ -14,6 +14,7 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick Qml)
 find_package(Threads REQUIRED)
+include(CTest)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # librio: PTY + VT state + a pulled render snapshot, as a static Rust lib with a C ABI
@@ -90,6 +91,15 @@ target_link_libraries(heidr_term PRIVATE Qt6::Quick Qt6::Gui librio)
 qt_add_executable(heidr-term-spike main.cpp)
 qt_add_qml_module(heidr-term-spike URI HeidrApp VERSION 1.0 QML_FILES Main.qml)
 target_link_libraries(heidr-term-spike PRIVATE heidr_term Qt6::Quick Qt6::Gui)
+
+if(BUILD_TESTING)
+  find_package(Qt6 REQUIRED COMPONENTS Test)
+  qt_add_executable(termview-key-test test/termview-key-test.cpp)
+  target_include_directories(termview-key-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(termview-key-test PRIVATE heidr_term librio Qt6::Quick Qt6::Test)
+  add_test(NAME termview-key-test COMMAND termview-key-test)
+  set_tests_properties(termview-key-test PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+endif()
 
 # Install rules (used by the nix flake). cmake rewrites the install rpath to $ORIGIN,
 # so the module dir is self-contained + build-path-free; librio is inside the impl lib.
