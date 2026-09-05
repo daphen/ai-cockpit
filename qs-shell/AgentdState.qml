@@ -322,7 +322,11 @@ Item {
     if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text, steered: true })
     _echoTrack(sid, text)
-    _steerPending[sid] = { text: text, at: Date.now() }
+    var pending = _steerPending
+    var list = pending[sid] || []
+    list.push({ text: text, at: Date.now() })
+    pending[sid] = list
+    _steerPending = pending
   }
   // Queued prompts. Enter while the agent runs STEERS (redirect the live turn — the
   // default, it is what you usually mean); Ctrl+Enter QUEUES: the message waits for the
@@ -852,12 +856,16 @@ Item {
     // Strand fallback: the turn ended too soon after a steer to have consumed it, so
     // pi dropped the message. Re-send it as a fresh prompt (already echoed in the feed).
     if (t === "turn_end" || t === "agent_end") {
-      var sp = _steerPending[sid]
+      var pendingSteers = _steerPending[sid]
+      var steers = Array.isArray(pendingSteers) ? pendingSteers : (pendingSteers ? [pendingSteers] : [])
       delete _steerPending[sid]
-      if (sp && (Date.now() - sp.at) < steerGraceMs)
-        send({ type: "prompt", session: sid, message: sp.text })
-      else if (sp)
-        _settleEcho(sid, sp.text)
+      for (var spi = 0; spi < steers.length; spi++) {
+        var sp = steers[spi]
+        if ((Date.now() - sp.at) < steerGraceMs)
+          send({ type: "prompt", session: sid, message: sp.text })
+        else
+          _settleEcho(sid, sp.text)
+      }
     }
 
     if (t === "prompt_accepted") {

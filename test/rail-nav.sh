@@ -334,13 +334,14 @@ say "15. a steered message stays visible until the transcript catches up"
 # while. The optimistic row used to be wiped by the next rebuild — sends silently
 # vanished, then all appeared at once when pi consumed the queue.
 fake stream_on
-ipc_send railSend "steer me visible"; sleep 5
-fake grow                              # turn_end → full transcript rebuild, steer NOT in it
+ipc_send railSend "steer me visible"
+ipc_send railSend "second steer visible"; sleep 5
+fake grow                              # turn_end → full transcript rebuild, steers NOT in it
 vis=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railGeom >/dev/null 2>&1; st)
 check "echo survived the rebuild" "$(case "$(tailfeed)" in *"steer me visible"*) echo 1;; *) echo 0;; esac)" "1"
 fake grow
-anchored=$(tailfeed | python3 -c 'import json,sys; a=json.load(sys.stdin); p=[i for i,x in enumerate(a) if "steer me visible" in x]; print(int(len(p)==1 and p[0] < len(a)-1))')
-check "consumed steer stays anchored" "$anchored" "1"
+anchored=$(tailfeed | python3 -c 'import json,sys; a=json.load(sys.stdin); p=[[i for i,x in enumerate(a) if text in x] for text in ("steer me visible", "second steer visible")]; print(int(all(len(x)==1 and x[0] < len(a)-1 for x in p) and p[0][0] < p[1][0]))')
+check "consumed steers stay anchored in order" "$anchored" "1"
 say "16. turn outcomes render: retry, retry-exhausted, compaction, tool failure"
 fake retry 1
 live=$(timeout 10 qs -p "$T/qs-shell" ipc call cockpit railTail 2>/dev/null | tail -1)
