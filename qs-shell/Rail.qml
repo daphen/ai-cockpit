@@ -2306,7 +2306,7 @@ Item {
   }
   Connections {
     target: agentd
-    function onFeedGenChanged() { feedDebounce.restart() }
+    function onFeedGenChanged() { if (!feedDebounce.running) feedDebounce.start() }
   }
 
   readonly property var feed: {
