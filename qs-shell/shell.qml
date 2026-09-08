@@ -117,6 +117,35 @@ ShellRoot {
       onActivated: win.toggleRail()
     }
 
+    Shortcut {
+      sequence: "Ctrl+Tab"
+      context: Qt.ApplicationShortcut
+      onActivated: rail.showWorkspace("cycle")
+    }
+    Shortcut {
+      sequence: "Ctrl+1"
+      context: Qt.ApplicationShortcut
+      onActivated: rail.showWorkspace("diff")
+    }
+    Shortcut {
+      sequence: "Ctrl+2"
+      context: Qt.ApplicationShortcut
+      onActivated: rail.showWorkspace("plan")
+    }
+    Shortcut {
+      sequence: "Ctrl+3"
+      context: Qt.ApplicationShortcut
+      onActivated: rail.showWorkspace("dashboard")
+    }
+    Shortcut {
+      sequence: "Ctrl+F"
+      context: Qt.ApplicationShortcut
+      enabled: win.dashboardActive && win.pane === "nvim"
+      onActivated: rail.showWorkspace("diff")
+    }
+
+    FocusCache { nvimSocket: term.nvimSocket }
+
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
       personalAgentd.setPresence(modeReady && scopeMode === "personal" && windowFocused ? rail.selectedRaw : "")
@@ -273,11 +302,13 @@ ShellRoot {
     AgentdState {
       id: personalAgentd
       scope: "personal"
+      selectedSession: win.modeReady && win.scopeMode === "personal" ? rail.selectedRaw : ""
       configuredSockPaths: win.pathsFor("personal")
     }
     AgentdState {
       id: workAgentd
       scope: "lovable"
+      selectedSession: win.modeReady && win.scopeMode === "work" ? rail.selectedRaw : ""
       configuredSockPaths: win.pathsFor("work")
     }
 
@@ -306,9 +337,10 @@ ShellRoot {
             Crossfade {
               anchors.fill: parent
               showSecond: win.dashboardActive
-              enterDuration: 400
-              exitDuration: 350
-              shift: 8
+              enterDuration: 100
+              exitDuration: 100
+              shift: 0
+              blurAmount: 0
               first: TermView {
                 id: term
                 anchors.fill: parent

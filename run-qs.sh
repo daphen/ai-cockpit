@@ -86,7 +86,7 @@ export QML_IMPORT_PATH="$QML2_IMPORT_PATH"
 export LD_LIBRARY_PATH="$PWD/build:${LD_LIBRARY_PATH:-}"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 _user=$(id -un)
-export PATH="/etc/profiles/per-user/$_user/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
+export PATH="$HOME/.local/bin:/etc/profiles/per-user/$_user/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
 echo "QML_IMPORT_PATH=$QML_IMPORT_PATH"
 # NO workspace placement here: a relaunch must come back on the workspace that was
 # hosting it. Pinning it to the named `lovable` workspace yanked the cockpit off the

@@ -181,7 +181,7 @@ FocusScope {
                 width: cardBody.width
                 height: modelData.text ? 32 : 12
                 radius: 8
-                color: modelData.action === root.currentAction ? Theme.selection : "transparent"
+                color: modelData.action === root.currentAction ? Theme.itemCursor : "transparent"
 
                 readonly property bool splitMarker: !!modelData.markerTone && String(modelData.text || "").length > 1
                 readonly property bool hasIcon: modelData.icon !== undefined || splitMarker
