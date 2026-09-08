@@ -21,6 +21,14 @@ trap cleanup EXIT
 cp qs-shell/*.qml "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
 mkdir -p "$tmp/home"
+if [[ "${1:-}" == "test/mirror-preparation.qml" ]]; then
+  mkdir -p "$tmp/home/.config/niri/scripts" "$tmp/home/bin"
+  cp test/fake-mirror-prepare.sh "$tmp/home/.config/niri/scripts/vm-sync"
+  printf '#!/usr/bin/env sh\nprintf "%%s\\n" "$*" >> "$HOME/nvim-calls"\n' > "$tmp/home/bin/nvim"
+  chmod +x "$tmp/home/.config/niri/scripts/vm-sync" "$tmp/home/bin/nvim"
+  touch "$tmp/home/mirror-calls" "$tmp/home/mirror-done" "$tmp/home/nvim-calls"
+  export PATH="$tmp/home/bin:$PATH"
+fi
 if [[ "${1:-}" == "test/live-text.qml" ]]; then
   python3 test/fake-agentd.py "$tmp/agentd-personal.sock" >"$tmp/server.log" 2>&1 &
   server_pid=$!

@@ -857,25 +857,55 @@ Item {
     if (!nvimSock.length) return
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
       'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
-    if (!view) _alignMirror(sid)
   }
   function showWorkspace(view) {
     landNvim(selectedRaw, view)
     focusNvim()
   }
 
-  // A remote session's local mirror carries files but not git history, so the moment the
-  // agent commits or rebases on the box, the mirror's HEAD is stale and git blames every
-  // upstream commit that came down on YOUR diff (one rebase read as 5376 files in lualine).
-  // `vm-sync --align` moves HEAD + index only — no checkout, no clean, no file touched —
-  // so it is safe to fire on every switch. It exits immediately when already aligned.
+  Process {
+    id: mirrorPrepare
+    property string sessionName: ""
+    property string remoteCwd: ""
+    property bool rerun: false
+    stdout: StdioCollector { id: mirrorOutput }
+    stderr: StdioCollector { id: mirrorError }
+    onExited: (code, status) => {
+      if (rerun || rail.selectedRaw !== sessionName || rail._sessionCwdOf(sessionName) !== remoteCwd) {
+        rerun = false
+        Qt.callLater(rail._prepareSelectedMirror)
+        return
+      }
+      if (code !== 0) {
+        var detail = (mirrorError.text || mirrorOutput.text || "exit " + code).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").trim()
+        feedbackPill.show("Local mirror unavailable: " + detail.slice(0, 180))
+        console.warn("mirror preparation failed for " + sessionName + ": " + detail)
+        return
+      }
+      if (!rail.nvimSock.length) return
+      var ss = rail._sessionOf(sessionName)
+      var local = rail._localPath(remoteCwd)
+      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", ""].map(JSON.stringify).join(",")
+      var lua = '(function() local m=require("cockpit"); local d=m.dashboard_snapshot(); if d.active and d.model.cwd=='
+        + JSON.stringify(local) + ' then m.workspace(' + args + ') end; require("cockpit.chin").refresh(); return "" end)()'
+      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
+    }
+  }
+  function _prepareSelectedMirror() { _alignMirror(selectedRaw) }
   function _alignMirror(sid) {
     var cwd = _sessionCwdOf(sid)
-    if (!cwd || !rail._isRemote(cwd) || !/\/src\/lovable-[^/]+$/.test(cwd)) return
-    var m = String(sid).match(/([a-z]+-\d+)/i)
-    if (!m) return
-    Quickshell.execDetached([Quickshell.env("HOME") + "/.config/niri/scripts/vm-sync",
-                             "--align", m[1]])
+    if (!cwd || !rail._isRemote(cwd) || !/\/src\/lovable[.-][^/]+$/.test(cwd)) return
+    if (mirrorPrepare.running) { mirrorPrepare.rerun = true; return }
+    var ticket = cwd.match(/(every-\d+)(?:-|$)/i)
+    if (!ticket) return
+    var args = [Quickshell.env("HOME") + "/.config/niri/scripts/vm-sync", "--prepare"]
+    if (!/\/src\/lovable-every-\d+$/i.test(cwd)) args.push("--remote-cwd", cwd)
+    args.push(ticket[1])
+    mirrorPrepare.rerun = false
+    mirrorPrepare.sessionName = sid
+    mirrorPrepare.remoteCwd = cwd
+    mirrorPrepare.command = args
+    mirrorPrepare.running = true
   }
 
   function openInNvim(path) {
@@ -1341,10 +1371,8 @@ Item {
     if (!f) return { name: daemonUp ? "no sessions" : "disconnected", rawName: "", state: "", status: "idle" }
     return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
   }
-  // A turn ending is when the agent's commits land, so realign the mirror then too —
-  // otherwise a commit made while you sit in the session leaves lualine stale until you
-  // switch away and back. Cheap: the align exits immediately when nothing moved.
-  onFeaturedStreamingChanged: if (!featuredStreaming && selectedRaw) _alignMirror(selectedRaw)
+  onSelectedStatusChanged: if (selectedStatus === "idle") Qt.callLater(rail._prepareSelectedMirror)
+  onSelectedCwdChanged: Qt.callLater(rail._prepareSelectedMirror)
 
   // The selected session and every descendant it spawned. The collapsed header is
   // their shared home, so its large orb represents this fleet rather than only the root.
@@ -1685,6 +1713,7 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
+    Qt.callLater(rail._prepareSelectedMirror)
     rememberRecent(selectedRaw)
     rememberSelection(selectedRaw)
     _ensureChanges()
