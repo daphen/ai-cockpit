@@ -99,6 +99,7 @@ private:
   // through a registry rather than trusting a raw TermView*, because the IO thread
   // is not joined on rio_surface_free and could still fire during teardown.
   static void onWakeup(void *userdata, rio_surface_id_t surface);
+  static void onAction(void *userdata, rio_surface_id_t surface, rio_action_s action);
   static void onCloseSurface(void *userdata, rio_surface_id_t surface);
   uintptr_t bridgeId_ = 0;
 

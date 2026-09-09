@@ -239,6 +239,7 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
   rio_runtime_config_s rc{};
   rc.userdata = reinterpret_cast<void *>(bridgeId_);
   rc.wakeup_cb = &TermView::onWakeup;
+  rc.action_cb = &TermView::onAction;
   rc.close_surface_cb = &TermView::onCloseSurface;
   engine_ = rio_engine_new(&rc);
   if (!engine_) qFatal("rio_engine_new failed");
@@ -304,6 +305,13 @@ TermView::~TermView() {
 
 void TermView::onWakeup(void *userdata, rio_surface_id_t) {
   // IO thread. Only flag/schedule here — never call back into rio_* (librio.h).
+  std::lock_guard<std::mutex> lk(g_bridgeMtx);
+  auto it = g_bridges.find(reinterpret_cast<uintptr_t>(userdata));
+  if (it != g_bridges.end()) it->second->wakeWorker();
+}
+
+void TermView::onAction(void *userdata, rio_surface_id_t, rio_action_s action) {
+  if (action.tag != RIO_ACTION_CURSOR_BLINKING_CHANGE) return;
   std::lock_guard<std::mutex> lk(g_bridgeMtx);
   auto it = g_bridges.find(reinterpret_cast<uintptr_t>(userdata));
   if (it != g_bridges.end()) it->second->wakeWorker();
