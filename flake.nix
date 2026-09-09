@@ -31,6 +31,7 @@
         pname = "librio";
         version = rioVersion;
         src = rio;
+        patches = [ ./librio-full-frame-snapshot.patch ];
         cargoLock.lockFile = "${rio}/Cargo.lock";
         cargoBuildFlags = [ "-p" "librio" ];
         doCheck = false;

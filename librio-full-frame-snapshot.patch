@@ -1,0 +1,20 @@
+diff --git a/librio/src/render_state.rs b/librio/src/render_state.rs
+index be9fddf..e2f2852 100644
+--- a/librio/src/render_state.rs
++++ b/librio/src/render_state.rs
+@@ -120,13 +120,7 @@ impl RenderState {
+     pub fn update(&mut self) {
+         let mut term = self.terminal.lock();
+-        let damage = if self.rows.is_empty() {
+-            TerminalDamage::Full
+-        } else {
+-            match term.peek_damage_event() {
+-                Some(damage) => damage,
+-                None => TerminalDamage::Full,
+-            }
+-        };
++        // Full-frame embedders cannot retain snapshot rows across scroll-region shifts.
++        let damage = TerminalDamage::Full;
+         term.snapshot_visible(
+             &damage,
+             &mut self.rows,
