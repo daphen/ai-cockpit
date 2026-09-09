@@ -1,0 +1,1 @@
+/home/daphen/nixos/dotfiles/ai/contexts/cockpit.md

@@ -11,6 +11,10 @@ Item {
   id: root
 
   property string scope: "lovable"
+  property string selectedSession: ""
+  onSelectedSessionChanged: {
+    for (var sid in feeds) if (sid !== selectedSession) _finishLiveText(sid)
+  }
   property var configuredSockPaths: null
   property bool connected: false
   property var sessions: []      // merged roster across every scope, each tagged .scope
@@ -135,7 +139,8 @@ Item {
   // Pending ask_user questions (extension_ui_request): sid -> request obj
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
-  signal editSeen(string sid, string path, string needleB64)
+  signal editSeen(string sid, string path, string needleB64, bool historical)
+  signal openInNvimRequested(string sid, string path, int line, int column)
   // The edit's most distinctive inserted line (longest trimmed, >=3 chars),
   // base64ed for safe transport through --remote-expr quoting.
   function _editNeedle(tn, args) {
@@ -211,6 +216,11 @@ Item {
   // on the work instead of the dashboard.
   property var _lastEdit: ({})
   function lastEditFor(sid) { return _lastEdit[sid] || "" }
+  function _isCodeEdit(path) {
+    return !!path && !/\.(progress|review)\.json$/.test(path)
+      && !/(^|\/)\.plans\/[^/]+\.md$/.test(path)
+      && !/\/notes\/storage\/plans\/[^/]+\.md$/.test(path)
+  }
 
   property var asks: ({})
   property var _answerEchoes: ({})
@@ -274,6 +284,10 @@ Item {
       if (sessions[i].name === sid) return sessions[i].status === "streaming"
     return false
   }
+  function isInterrupting(sid) {
+    pendingGen
+    return pendingSends[sid] === "abort"
+  }
   function _clearPending(sid) {
     if (!pendingSends[sid]) return
     var p = Object.assign({}, pendingSends); delete p[sid]; pendingSends = p; pendingGen++
@@ -319,6 +333,7 @@ Item {
   readonly property int steerGraceMs: 4000
   property var _steerPending: ({})
   function steer(sid, text) {
+    if (isInterrupting(sid)) { enqueue(sid, text); return }
     if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text, steered: true })
     _echoTrack(sid, text)
@@ -402,9 +417,17 @@ Item {
   function myAbortAgoFor(sid) { return _myAbortAt[sid] ? (Date.now() - _myAbortAt[sid]) : -1 }
   function interrupt(sid) {
     if (!sid) return
-    if (!send({ type: "abort", session: sid })) return
+    if (!send({ type: "abort", session: sid })) {
+      _push(sid, { kind: "cmd", tool: "error", text: "interrupt not delivered — daemon disconnected" })
+      return
+    }
     var ab = _myAbortAt; ab[sid] = Date.now(); _myAbortAt = ab
     delete _steerPending[sid]
+    var p = Object.assign({}, pendingSends); p[sid] = "abort"; pendingSends = p; pendingGen++
+    _push(sid, { kind: "cmd", tool: "info", text: "interrupt requested — waiting for confirmation" })
+  }
+  function _confirmInterrupt(sid) {
+    if (!isInterrupting(sid)) return
     _clearPending(sid)
     var mk = _marks; var l = (mk[sid] = mk[sid] || [])
     l.push({ text: "⏹ interrupted by you", at: Date.now() })
@@ -519,6 +542,21 @@ Item {
     if (arr.length > feedCap) arr = arr.slice(arr.length - feedCap)
     feeds[sid] = arr
     feedGen++
+  }
+
+  function _finishLiveText(sid) {
+    var items = feeds[sid] || [], changed = false
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].liveText) { items[i].liveText = false; changed = true }
+    }
+    if (changed) feedGen++
+  }
+  function _liveText(sid) {
+    var items = feeds[sid] || []
+    for (var i = items.length - 1; i >= 0; i--) if (items[i].liveText) return items[i]
+    var item = { kind: "text", text: "", liveText: true, mid: "live:" + Date.now() + ":" + items.length }
+    _push(sid, item)
+    return item
   }
 
   // Selecting a session: pull its transcript AND its current changed files.
@@ -833,7 +871,20 @@ Item {
       if (prunedAsk) { asks = a2; askGen++ }
       return
     }
-    if (t === "response" && m.command === "get_entries") { onEntries(m); return }
+    if (t === "response" && m.command === "abort") {
+      if (isInterrupting(m.session)) {
+        if (m.success) { _confirmInterrupt(m.session); _flushQueue(m.session) }
+        else {
+          _clearPending(m.session)
+          _push(m.session, { kind: "cmd", tool: "error", text: "interrupt failed: " + String(m.error || "no confirmation") })
+        }
+      }
+      return
+    }
+    if (t === "response" && m.command === "get_entries") {
+      if (m.session === selectedSession) onEntries(m)
+      return
+    }
     if (t === "response" && m.command === "get_available_models" && m.session) {
       _availableModels.set(m.session, (m.data && m.data.models) || [])
       availableModelsGen++
@@ -841,12 +892,33 @@ Item {
     }
     const sid = m.session
     if (!sid) return
+    if (sid === selectedSession) {
+      if (t === "message_start" && m.message && m.message.role === "assistant") {
+        _finishLiveText(sid)
+      } else if (t === "message_update" && m.assistantMessageEvent) {
+        var delta = m.assistantMessageEvent
+        if (delta.type === "text_start") {
+          var start = _liveText(sid)
+          if (start.text.length) start.text += "\n\n"
+        } else if (delta.type === "text_delta") {
+          _liveText(sid).text += String(delta.delta || "")
+          feedGen++
+        }
+      } else if (t === "message_end" && m.message && m.message.role === "assistant") {
+        var textItems = []
+        _expandAssistant(m.message.content, textItems)
+        var prose = textItems.filter(function(item) { return item.kind === "text" }).map(function(item) { return item.text }).join("\n\n")
+        if (prose.length) _liveText(sid).text = prose
+        _finishLiveText(sid)
+      }
+    }
     // Recency: any session-tagged event is activity. Silent (no gen bump) — the
     // roster re-sorts on the daemon's own roster pushes, which land at exactly
     // the status boundaries where order should change.
     _lastAct.set(sid, Date.now())
     // The daemon is talking about this session, so its real status is authoritative now.
-    if (t === "turn_end" || t === "agent_end" || t === "error") root._clearPending(sid)
+    if (t === "agent_end") root._confirmInterrupt(sid)
+    if (t === "agent_end" || t === "error" || (t === "turn_end" && !isInterrupting(sid))) root._clearPending(sid)
     if (t === "agent_end") { _curTool.delete(sid); curToolGen++ }
     // The whole turn is over (completed or aborted) → the next queued message goes out.
     if (t === "agent_end") root._flushQueue(sid)
@@ -932,6 +1004,8 @@ Item {
     if (t === "tool_execution_start") {
       const tn = m.toolName || ""
       const args = m.args || {}
+      if (tn === "open_in_nvim" && args.path)
+        root.openInNvimRequested(sid, String(args.path), Math.max(1, Number(args.line) || 1), Math.max(1, Number(args.column) || 1))
       _curTool.set(sid, AgentActivity.classify(tn, args))
       _curToolAt.set(sid, Date.now())
       _curToolLive.set(sid, true)
@@ -941,8 +1015,10 @@ Item {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
                      add: 0, del: 0, id: m.toolCallId })
         if (args.path) {
-          var le = _lastEdit; le[sid] = String(args.path); _lastEdit = le
-          root.editSeen(sid, String(args.path), _editNeedle(tn, args))
+          if (_isCodeEdit(String(args.path))) {
+            var le = _lastEdit; le[sid] = String(args.path); _lastEdit = le
+            root.editSeen(sid, String(args.path), _editNeedle(tn, args), false)
+          }
         }
       } else {
         // bash/mcp/grep/read/… → one-line hint; keep the raw payload so the row
@@ -1006,21 +1082,16 @@ Item {
             var hms = String(det.diff).match(/@@ -\d+(?:,\d+)? \+(\d+)/g)
             if (hms && hms.length && arr[i].path) {
               var lastH = hms[hms.length - 1].match(/\+(\d+)/)
-              if (lastH) root.editHunk(sid, String(arr[i].path), parseInt(lastH[1]))
+              if (lastH && _isCodeEdit(String(arr[i].path))) root.editHunk(sid, String(arr[i].path), parseInt(lastH[1]))
             }
             break
           }
         }
         feeds[sid] = arr; feedGen++
       }
-    } else if (t === "turn_end" || t === "agent_end") {
-      // Turn finished → refresh the authoritative transcript (prose lives here),
-      // but only for sessions already loaded (selected) to avoid parsing 7MB
-      // transcripts for sessions you're not looking at.
-      if (feeds[sid]) select(sid)
+    } else if (t === "agent_end" && sid === selectedSession) {
+      select(sid)
     }
-    // message_start / message_update ignored — the prose is reconstructed from
-    // get_entries below (matches the nvim rail).
   }
 
   // get_entries response → rebuild the session's feed from the full transcript.
@@ -1029,7 +1100,8 @@ Item {
     var esid = m.session
     if (!esid) return
     _feedSid = esid
-    feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId)
+    var liveText = (feeds[esid] || []).filter(function(item) { return item.liveText })
+    feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId).concat(liveText)
     // Answer echoes are a BRIDGE, not history (same contract as the interrupt
     // marks below): pi's transcript renders the answered ask itself once the
     // toolResult lands ("❯ question ↳ answer"), so an echo re-appended past that
@@ -1148,16 +1220,19 @@ Item {
       if (left.length) le[esid] = left; else delete le[esid]
       _localEcho = le
     }
+    var latestCode = ""
     for (var li = feeds[esid].length - 1; li >= 0; li--) {
       var lit = feeds[esid][li]
-      var lp = lit.kind === "edit" ? lit.path
+      var lp = lit.kind === "edit" && _isCodeEdit(lit.path) ? lit.path
              : (lit.kind === "turn" && lit.items) ? (function (its) {
                  for (var lj = its.length - 1; lj >= 0; lj--)
-                   if (its[lj].kind === "edit" && its[lj].path) return its[lj].path
+                   if (its[lj].kind === "edit" && root._isCodeEdit(its[lj].path)) return its[lj].path
                  return ""
                })(lit.items) : ""
-      if (lp) { var le2 = _lastEdit; le2[esid] = String(lp); _lastEdit = le2; break }
+      if (lp) { latestCode = String(lp); break }
     }
+    var le2 = _lastEdit; le2[esid] = latestCode; _lastEdit = le2
+    if (latestCode) root.editSeen(esid, latestCode, "", true)
     feedGen++
     _recoverAsk(esid, m.data.entries)
   }

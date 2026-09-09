@@ -675,7 +675,9 @@ Item {
     // repository, and a plain mirror has none — mutagen has to skip .git because a
     // worktree's .git is a FILE holding a VM-absolute gitdir.
     { remote: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable-",
-      local: Quickshell.env("HOME") + "/work/lovable.daphen-" }
+      local: Quickshell.env("HOME") + "/work/lovable.daphen-" },
+    { remote: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable.",
+      local: Quickshell.env("HOME") + "/work/lovable." }
   ]
   function _localPath(p) {
     var s = String(p || "")
@@ -841,102 +843,96 @@ Item {
   }
   function openPlanInNvim(slug) {
     if (!slug || !nvimSock.length) return
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-                             'v:lua.require("plan-nvim").open(' + JSON.stringify(slug) + ')'])
+    landNvim(selectedRaw, "plan")
   }
-  function landNvim(sid) {
+  function landNvim(sid, view) {
     if (!sid || !agentd) return
     var ss = _sessionOf(sid)
     var cwd = ss ? String(ss.cwd || "") : "", plan = ss ? String(ss.plan || "") : ""
     if (!cwd) return
     _landedFor = sid + "@" + cwd + "#" + plan
-    var repo = rail.remoteOffered ? Quickshell.env("HOME") + "/work/lovable" : cwd
-    var dashAt = function (d) {
-      return 'v:lua.require("cockpit").dashboard(' + JSON.stringify(d) + ',' + JSON.stringify(sid) + ')'
-    }
-    var fallback = plan.length
-      ? 'v:lua.require("plan-nvim").open(' + JSON.stringify(plan) + ')'
-      : dashAt(repo)
-    // A session with edit history resumes at its latest changed file regardless of
-    // whether the turn is still streaming or has just settled idle. A remote session
-    // without a local mirror/file lands on its bound plan instead of silently no-oping.
-    if (agentd.lastEditFor(sid) && nvimSock.length) {
-      var lcwd0 = rail._localPath(cwd)
-      var lp0 = rail._localPath(String(agentd.lastEditFor(sid)))
-      if (lp0.charAt(0) !== "/") lp0 = lcwd0 + "/" + lp0
-      var follow = 'v:lua.require("cockpit").follow_remote("' + lcwd0 + '","' + lp0 + '", v:true)'
-      var land = 'isdirectory("' + lcwd0 + '") && filereadable("' + lp0 + '")'
-        + ' ? (execute("cd ' + lcwd0 + '") . ' + dashAt(lcwd0) + ' . ' + follow + ') : ' + fallback
-      Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", land])
-      _alignMirror(sid)
-      return
-    }
-    cwd = rail._localPath(cwd)   // box path → local mutagen mirror (no-op for local sessions)
-    // Plan location depends on where the session lives: local work uses the vault,
-    // a lovbox session has no vault so plan-ticket writes <worktree>/.plans/.
-    // Build a vimscript chain that prefers the worktree plan, then the vault, then
-    // the session dashboard — filereadable() runs inside nvim, which is the only
-    // side that can actually test the paths.
-    // The dashboard needs a git worktree. A remote session's mirror deliberately has no
-    // .git (a worktree's .git is a FILE holding a VM-absolute gitdir), so pointing the
-    // dashboard at the mirror renders an almost-empty buffer — the "giant whitespace".
-    // Fall back to the local checkout for the dashboard while still cd'ing to the mirror.
-    // The no-.git fallback repo is SCOPE-BOUND: the lovable checkout is only a
-    // sane dashboard home on the work instance — the private Cockpit was falling
-    // back to it and showing the lovable fleet dash for ~/personal sessions.
-    var dash = '((isdirectory("' + cwd + '/.git") || filereadable("' + cwd + '/.git")) ? '
-             + dashAt(cwd) + ' : ' + fallback + ')'
-    // Always the DASHBOARD, never the plan. The dashboard is the session's home — it's
-    // where the app, the tickets and the plan are all reachable from — so opening the plan
-    // buffer instead dropped you somewhere you then had to navigate out of. Read the plan
-    // from the dashboard when you want it.
-    var open = dash
-    // Guard the cd: a session whose worktree isn't mirrored locally (the VM's main
-    // checkout, an unsynced tree) maps to a path that does not exist here, and cd'ing
-    // there left nvim on an empty buffer staring at nothing.
-    var expr = 'isdirectory("' + cwd + '") ? (execute("cd ' + cwd + '") . ' + open + ') : ' + fallback
+    var localCwd = rail._localPath(cwd)
+    var latest = rail._localPath(String(agentd.lastEditFor(sid) || ""))
+    if (latest && latest.charAt(0) !== "/") latest = localCwd + "/" + latest
     if (!nvimSock.length) return
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", expr])
-    _alignMirror(sid)
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
+      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
+  }
+  function showWorkspace(view) {
+    landNvim(selectedRaw, view)
+    focusNvim()
   }
 
-  // A remote session's local mirror carries files but not git history, so the moment the
-  // agent commits or rebases on the box, the mirror's HEAD is stale and git blames every
-  // upstream commit that came down on YOUR diff (one rebase read as 5376 files in lualine).
-  // `vm-sync --align` moves HEAD + index only — no checkout, no clean, no file touched —
-  // so it is safe to fire on every switch. It exits immediately when already aligned.
-  function _alignMirror(sid) {
-    var cwd = _sessionCwdOf(sid)
-    if (!cwd || !rail._isRemote(cwd)) return
-    var m = String(sid).match(/([a-z]+-\d+)/i)
-    if (!m) return
-    Quickshell.execDetached([Quickshell.env("HOME") + "/.config/niri/scripts/vm-sync",
-                             "--align", m[1]])
-  }
-
-  function openInNvim(path) {
-    if (!path || !String(path).length || !nvimSock.length) return
-    var p = String(path)
-    if (p.indexOf("~/") === 0) p = Quickshell.env("HOME") + p.substring(1)
-    if (p.charAt(0) !== "/") {
-      var repoPath = rail._localPath(changesCwd ? changesCwd + "/" + p : p)
-      if (/^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(p)) {
-        var vaultPath = Quickshell.env("HOME") + "/personal/notes/storage/" + p
-        var chosen = "filereadable(" + JSON.stringify(vaultPath) + ") ? "
-                   + JSON.stringify(vaultPath) + " : " + JSON.stringify(repoPath)
-        Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-                                 'execute("edit " . fnameescape(' + chosen + "))"])
-        rail.focusNvim()
+  Process {
+    id: mirrorPrepare
+    property string sessionName: ""
+    property string remoteCwd: ""
+    property bool rerun: false
+    stdout: StdioCollector { id: mirrorOutput }
+    stderr: StdioCollector { id: mirrorError }
+    onExited: (code, status) => {
+      if (rerun || rail.selectedRaw !== sessionName || rail._sessionCwdOf(sessionName) !== remoteCwd) {
+        rerun = false
+        Qt.callLater(rail._prepareSelectedMirror)
         return
       }
-      p = repoPath
+      if (code !== 0) {
+        var detail = (mirrorError.text || mirrorOutput.text || "exit " + code).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").trim()
+        feedbackPill.show("Local mirror unavailable: " + detail.slice(0, 180))
+        console.warn("mirror preparation failed for " + sessionName + ": " + detail)
+        return
+      }
+      if (!rail.nvimSock.length) return
+      var ss = rail._sessionOf(sessionName)
+      var local = rail._localPath(remoteCwd)
+      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", ""].map(JSON.stringify).join(",")
+      var lua = '(function() local m=require("cockpit"); local d=m.dashboard_snapshot(); if d.active and d.model.cwd=='
+        + JSON.stringify(local) + ' then m.workspace(' + args + ') end; require("cockpit.chin").refresh(); return "" end)()'
+      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
+    }
+  }
+  function _prepareSelectedMirror() { _alignMirror(selectedRaw) }
+  function _alignMirror(sid) {
+    var cwd = _sessionCwdOf(sid)
+    if (!cwd || !rail._isRemote(cwd) || !/\/src\/lovable[.-][^/]+$/.test(cwd)) return
+    if (mirrorPrepare.running) { mirrorPrepare.rerun = true; return }
+    var ticket = cwd.match(/(every-\d+)(?:-|$)/i)
+    if (!ticket) return
+    var args = [Quickshell.env("HOME") + "/.config/niri/scripts/vm-sync", "--prepare"]
+    if (!/\/src\/lovable-every-\d+$/i.test(cwd)) args.push("--remote-cwd", cwd)
+    args.push(ticket[1])
+    mirrorPrepare.rerun = false
+    mirrorPrepare.sessionName = sid
+    mirrorPrepare.remoteCwd = cwd
+    mirrorPrepare.command = args
+    mirrorPrepare.running = true
+  }
+
+  function openInNvim(path, baseCwd, line, column) {
+    if (!path || !String(path).length || !nvimSock.length) return
+    var p = String(path), alternate = ""
+    if (p.indexOf("~/") === 0) p = Quickshell.env("HOME") + p.substring(1)
+    if (p.charAt(0) !== "/") {
+      var cwd = String(baseCwd || changesCwd || "")
+      var repoPath = rail._localPath(cwd ? cwd + "/" + p : p)
+      if (/^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(p)) {
+        alternate = repoPath
+        p = Quickshell.env("HOME") + "/personal/notes/storage/" + p
+      } else p = repoPath
     }
     p = rail._localPath(p)
-    var quoted = JSON.stringify(p)
-    var expr = 'filereadable(' + quoted + ') ? execute("edit " . fnameescape(' + quoted + '))'
-             + ' : execute("echohl WarningMsg | echomsg " . string("file no longer exists: " . ' + quoted + ') . " | echohl None")'
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", expr])
+    alternate = rail._localPath(alternate)
+    var row = Math.max(1, Number(line) || 1), col = Math.max(1, Number(column) || 1)
+    var lua = '(function() local p=' + JSON.stringify(p) + '; local alt=' + JSON.stringify(alternate)
+      + '; if vim.fn.filereadable(p)~=1 and alt~="" and vim.fn.filereadable(alt)==1 then p=alt end'
+      + '; if vim.fn.filereadable(p)~=1 then vim.notify("file no longer exists: "..p, vim.log.levels.WARN); return "" end'
+      + '; vim.cmd.edit(vim.fn.fnameescape(p)); vim.api.nvim_win_set_cursor(0, {' + row + ',' + (col - 1) + '}); return "" end)()'
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
     rail.focusNvim()
+  }
+  function openRequestedFile(sid, path, line, column) {
+    if (sid !== selectedRaw) return
+    openInNvim(path, _sessionCwdOf(sid), line, column)
   }
   // Prose blocks of an agent turn (the headline answer).
   function turnProse(items) { return (items || []).filter(x => x.kind === "text") }
@@ -1114,6 +1110,7 @@ Item {
   // "<tool> · 1m32" for the RUNNING tool call, ticking; "" when idle.
   function runningToolLabel(sid) {
     nowTick
+    if (agentd && agentd.isInterrupting(sid)) return "stopping — waiting for confirmation"
     agentd ? agentd.curToolGen : 0
     // Compaction is invisible otherwise: no tool runs, the orb just spins.
     var cAt = agentd ? agentd.compactingSince(sid) : 0
@@ -1143,15 +1140,6 @@ Item {
   readonly property color selectedTurnBorder: Theme.mode === "light"
     ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.42)
     : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
-  readonly property color rosterHoverSurface: Theme.mode === "light"
-    ? Qt.lighter(Theme.bgDim, 1.008)
-    : Theme.surface
-  readonly property color rosterSelectedSurface: Theme.mode === "light"
-    ? Theme.bgDim
-    : Theme.surface1
-  readonly property color rosterCursorSurface: Theme.mode === "light"
-    ? Qt.darker(Theme.bgDim, 1.018)
-    : Theme.selection
   // One colour vocabulary for BOTH roster states: the collapsed dots and the expanded
   // rows now read identically, so "what is this session doing" is the same glance either
   // way. Working is the orb, never a dot.
@@ -1385,10 +1373,8 @@ Item {
     if (!f) return { name: daemonUp ? "no sessions" : "disconnected", rawName: "", state: "", status: "idle" }
     return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
   }
-  // A turn ending is when the agent's commits land, so realign the mirror then too —
-  // otherwise a commit made while you sit in the session leaves lualine stale until you
-  // switch away and back. Cheap: the align exits immediately when nothing moved.
-  onFeaturedStreamingChanged: if (!featuredStreaming && selectedRaw) _alignMirror(selectedRaw)
+  onSelectedStatusChanged: if (selectedStatus === "idle") Qt.callLater(rail._prepareSelectedMirror)
+  onSelectedCwdChanged: Qt.callLater(rail._prepareSelectedMirror)
 
   // The selected session and every descendant it spawned. The collapsed header is
   // their shared home, so its large orb represents this fleet rather than only the root.
@@ -1412,6 +1398,7 @@ Item {
     var colors = []
     for (var i = 0; i < featuredFleet.length; i++) {
       var session = featuredFleet[i]
+      if (agentd && agentd.isInterrupting(session.name)) continue
       if (session.status === "streaming" || (agentd && agentd.isBusy(session.name)))
         colors.push(actionGlow(session.name))
     }
@@ -1728,6 +1715,7 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
+    Qt.callLater(rail._prepareSelectedMirror)
     rememberRecent(selectedRaw)
     rememberSelection(selectedRaw)
     _ensureChanges()
@@ -1816,6 +1804,9 @@ Item {
   }
   Connections {
     target: rail.agentd
+    function onOpenInNvimRequested(sid, path, line, column) {
+      rail.openRequestedFile(sid, path, line, column)
+    }
     function onEditHunk(sid, path, line) {
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
       var cwd = rail._sessionCwdOf(sid)
@@ -1828,7 +1819,8 @@ Item {
         'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", '
         + (rail.focused ? 'v:true' : 'v:false') + ', ' + line + ') . execute("HunkSignsRefresh")'])
     }
-    function onEditSeen(sid, path, needleB64) {
+    function onEditSeen(sid, path, needleB64, historical) {
+      if (historical && sid !== rail.selectedRaw) return
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
       var cwd = rail._sessionCwdOf(sid)
       if (!cwd) return
@@ -1837,7 +1829,7 @@ Item {
       if (p.charAt(0) !== "/") p = lcwd + "/" + p     // pi may report worktree-relative
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
         'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", '
-        + (rail.focused ? 'v:true' : 'v:false') + ', v:null, "' + String(needleB64 || "") + '")'])
+        + (!historical && rail.focused ? 'v:true' : 'v:false') + ', v:null, "' + String(needleB64 || "") + '")'])
     }
   }
 
@@ -1873,6 +1865,7 @@ Item {
   }
   function exitInsert() {
     insert = false
+    feedDebounce.restart()
     composerInput.focus = false
     if (askWantsText) askInput.focus = false
     rail.forceActiveFocus()
@@ -2333,13 +2326,14 @@ Item {
   Timer {
     id: feedDebounce; interval: 120
     onTriggered: {
+      if (rail.insert && rail.composerText.length) return
       rail.feedTick++
       rail._resyncFeed()
     }
   }
   Connections {
     target: agentd
-    function onFeedGenChanged() { feedDebounce.restart() }
+    function onFeedGenChanged() { if (!feedDebounce.running) feedDebounce.start() }
   }
 
   readonly property var feed: {
@@ -3158,12 +3152,9 @@ Item {
               rail.agentd ? rail.agentd.askGen : 0
               return rail.agentd ? rail.agentd.askFor(modelData.rawName || modelData.name) !== null : false
             }
-              // The theme's surface ladder, so cursor vs selected stay two clear
-              // steps apart in both modes: hover < selected (surface1) <
-              // cursor (selection). fg-alpha washes collapsed into one grey.
-              color: cursor ? rail.rosterCursorSurface
-                   : selected ? rail.rosterSelectedSurface
-                   : hov.hovered ? rail.rosterHoverSurface : "transparent"
+              color: cursor ? Theme.itemCursor
+                   : selected ? Theme.itemSelected
+                   : hov.hovered ? Theme.itemHover : "transparent"
               HoverHandler { id: hov }
               // Collapsed: index doesn't map to the full list → just focus/expand.
               TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
@@ -3814,6 +3805,7 @@ Item {
             color: Theme.fg
             font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
             onCursorRectangleChanged: composerFlick.ensureVisible(cursorRectangle)
+            onTextChanged: if (!text.length) feedDebounce.restart()
             // Orange blinking caret, matching the sibling apps (Theme.cursor).
             cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible ? 1 : 0 }
             // TextArea has no onAccepted — plain Enter routes here from Keys below.
