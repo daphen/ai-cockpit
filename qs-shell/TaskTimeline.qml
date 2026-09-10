@@ -38,14 +38,28 @@ Item {
       HoverHandler { id: hover }
       TapHandler { onTapped: timeline.activate(mark.index) }
       Rectangle {
-        visible: hover.hovered
+        id: detailCard
+        objectName: "taskDetail-" + mark.index
+        readonly property real restingY: Math.min(0, timeline.height - mark.y - height)
+        visible: opacity > 0.01
+        opacity: hover.hovered ? 1 : 0
         anchors { right: parent.left; rightMargin: 6 }
-        y: Math.min(0, timeline.height - mark.y - height)
+        y: restingY + (hover.hovered ? 2 : -3)
         width: 230
         height: detail.implicitHeight + 16
         color: Theme.bg
         border.color: Theme.hairline
         radius: Theme.radiusSm
+        Behavior on opacity {
+          NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+        }
+        Behavior on y {
+          NumberAnimation {
+            duration: Motion.med
+            easing.type: Motion.easeEmphasized
+            easing.bezierCurve: Motion.curveEmphasized
+          }
+        }
         Text {
           id: detail
           anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }

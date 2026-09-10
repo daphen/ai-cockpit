@@ -98,10 +98,14 @@ ShellRoot {
         test.check(!rail.groupedFeed.some(row => (row.items || []).some(item => item.tool === "task")), "task boundaries became transcript cards")
         test.check(test.shownText(rail).indexOf("Task · ") < 0 && test.shownText(rail).indexOf("Finished · ") < 0, "visible task boundary label leaked")
         var target = test.find(timeline,"taskNotch-2").parent
+        var detailCard = test.find(timeline,"taskDetail-2")
+        test.check(detailCard && detailCard.opacity === 0 && Math.abs(detailCard.y - detailCard.restingY + 3) < 0.1, "task popup did not start in the orb's hidden state")
         input.mouseClick(timeline, timeline.width / 2, target.y + target.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
         input.mouseMove(timeline, timeline.width / 2, target.y + target.height / 2, 0, Qt.NoButton, Qt.NoModifier)
       } else if (test.phase === 4) {
+        var shownDetail = test.find(rail,"taskDetail-2")
         test.check(test.shownText(test.find(rail,"sessionTaskTimeline")).indexOf("Recovered") >= 0, "hover did not show the finish outcome")
+        test.check(shownDetail && shownDetail.opacity > 0.99 && Math.abs(shownDetail.y - shownDetail.restingY - 2) < 0.1, "task popup did not finish the orb fade-and-settle transition")
         test.notch(2, 21, 2, Theme.fg)
         test.notch(3, 28, 3, Theme.cursor)
         test.check(rail.activeTask === "Current task", "navigation changed task activity")
