@@ -714,7 +714,7 @@ Item {
         // sys, not cmd: compaction is housekeeping between turns — inlining it in
         // the following turn's card made its neighbors ("output truncated") read
         // as compaction failures.
-        items.push({ kind: "sys", tool: "info", text: "· context compacted" })
+        items.push({ kind: "sys", tool: "info", text: msg.fromHook === true || (msg.details && msg.details.strategy === "deterministic-auto-v3") ? "context rolled over" : "context compacted" })
       } else {
         _expandAssistant(msg.content, items, toolErrs, toolResults)
         // A failed assistant turn carries its reason on the MESSAGE, not the content —
@@ -802,7 +802,7 @@ Item {
       }
       // Compaction is a fact about the conversation; pi/Claude Code both mark it.
       if (e.type === "compaction") {
-        msgs.push({ role: "assistant", content: [], _compaction: true, _mid: e.id })
+        msgs.push({ role: "assistant", content: [], _compaction: true, fromHook: e.fromHook, details: e.details, _mid: e.id })
         continue
       }
       if (e.type === "custom" && e.customType === "cockpit-session-task" && e.data
