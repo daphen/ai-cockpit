@@ -2408,10 +2408,11 @@ Item {
             segments.push(segment)
             active = it.taskTitle
           } else if (it.taskAction === "finish" && it.taskTitle === active) {
-            if (segment) { segment.end = out.length; segment.outcome = it.outcome || ""; segment.finishedAt = it.timestamp }
+            if (segment) { segment.end = out.length - 1; segment.outcome = it.outcome || ""; segment.finishedAt = it.timestamp }
             segment = null
             active = ""
           }
+          continue
         }
         out.push({ kind: "turn", sys: true, items: [it], key: it.mid || _contentKey(it.kind, it.text) })
       } else {
@@ -2445,10 +2446,9 @@ Item {
     }
     if (segment) segment.end = out.length - 1
     for (var si = 0; si < segments.length; si++) {
-      segments[si].position = segments[si].row / Math.max(1, out.length - 1)
       segments[si].active = segments[si] === segment
     }
-    return { rows: out, segments: segments, active: active }
+    return { rows: out, segments: segments.filter(s => s.end >= s.row), active: active }
   }
 
   function jumpToEnd() {
@@ -2471,6 +2471,7 @@ Item {
     prefillComposer("/task ")
   }
   TaskTimeline {
+    id: taskTimeline
     objectName: "sessionTaskTimeline"
     anchors { right: parent.right; rightMargin: 2; top: parent.top; topMargin: 20; bottom: chin.top }
     z: 10
@@ -2496,7 +2497,8 @@ Item {
     Crossfade {
       Layout.fillWidth: true
       Layout.fillHeight: true
-      Layout.leftMargin: 20; Layout.rightMargin: 20
+      Layout.leftMargin: 20
+      Layout.rightMargin: rail.view === "chat" && rail.taskSegments.length ? taskTimeline.width + 12 : 20
       showSecond: rail.view === "chat"
       enterDuration: 400
       exitDuration: 350

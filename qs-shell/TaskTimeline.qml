@@ -7,6 +7,7 @@ Item {
   property int selectedRow: -1
   signal jumpRequested(int row)
   implicitWidth: 32
+  readonly property real pitch: Math.min(8, height / Math.max(1, segments.length))
 
   function activate(index) {
     if (index >= 0 && index < segments.length) jumpRequested(segments[index].row)
@@ -19,8 +20,8 @@ Item {
       required property int index
       readonly property var segment: timeline.segments[index]
       width: timeline.width
-      y: (segment?.position || 0) * Math.max(0, timeline.height - 14)
-      height: 14
+      y: (timeline.height - timeline.segments.length * timeline.pitch) / 2 + index * timeline.pitch
+      height: timeline.pitch
       readonly property bool selected: !!segment && timeline.selectedRow >= segment.row && timeline.selectedRow <= segment.end
       Behavior on y { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
       Rectangle {
