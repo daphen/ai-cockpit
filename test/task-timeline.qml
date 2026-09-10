@@ -82,7 +82,9 @@ ShellRoot {
         test.notch(3, 28, 3, Theme.cursor)
         test.check(rail.taskSegments[2].outcome === "Recovered" && rail.taskSegments[2].finishedAt.length > 0, "finish details lost")
         test.check(rail.taskSegments[0].title === rail.taskSegments[2].title, "returning to a task changed its identity")
-        test.check(test.find(rail,"activeTaskPill").visible, "active task pill missing")
+        var taskLabel = test.find(rail,"activeTaskLabel")
+        test.check(taskLabel.visible && taskLabel.width > 180, "active task subtitle missing or still width-capped")
+        test.check(taskLabel.color === Theme.fg_muted && taskLabel.font.pixelSize < rail.fsName, "active task subtitle is not smaller and muted")
         for (var i = 0; i < 4; i++) test.check(rail.taskSegments[i].row === test.expectedRows[i], "incorrect rendered row index")
         rail.prefillTask()
         test.check(rail.composerText === "/task ", "pill did not prefill command")
@@ -122,7 +124,7 @@ ShellRoot {
       } else if (test.phase === 5) {
         if (!test.ready(rail.activeTask === "Only task")) return
         test.check(rail.groupedFeed.length === 0 && rail.taskSegments.length === 0, "empty task fabricated a row or jump target")
-        test.check(test.find(rail,"activeTaskPill").visible, "empty current task lost its pill")
+        test.check(test.find(rail,"activeTaskLabel").visible, "empty current task lost its subtitle")
         test.history([test.marker("only",null,"switch","Only task"),test.entry("only-row","only","assistant","First visible answer")],"only-row")
       } else if (test.phase === 6) {
         if (!test.ready(rail.taskSegments.length === 1 && rail.groupedFeed.length === 1)) return

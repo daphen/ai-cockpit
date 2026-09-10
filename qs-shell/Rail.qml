@@ -3042,79 +3042,66 @@ Item {
                 }
               }
             }
-            Row {
+            Column {
+              width: Math.max(0, glanceCol.width - locSlot.width - glanceName.spacing - 150)
               anchors.verticalCenter: parent.verticalCenter
-              spacing: 6
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: rail.selectedParent.length > 0
-                text: rail.shortName(rail.selectedParent).toUpperCase()
-                color: Theme.fg_muted
-                font { family: Theme.fontFamily; pixelSize: rail.fsMeta; weight: 600 }
+              spacing: 1
+
+              Row {
+                spacing: 6
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: rail.selectedParent.length > 0
+                  text: rail.shortName(rail.selectedParent).toUpperCase()
+                  color: Theme.fg_muted
+                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta; weight: 600 }
+                }
+                Icon {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: rail.selectedParent.length > 0
+                  name: "chevron-right"
+                  width: 11; height: 11
+                  color: Theme.fg_muted
+                }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
+                  color: Theme.fg
+                  font { family: Theme.fontFamily; pixelSize: rail.fsName; bold: true }
+                }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: !rail.activeTask.length && rail.selectedPlan.length > 0
+                    && rail.selectedPlan.toUpperCase() !== (rail.shortName(rail.selectedRaw) || "").toUpperCase()
+                  width: Math.min(implicitWidth, 240)
+                  elide: Text.ElideMiddle
+                  text: rail.selectedPlan
+                  color: Theme.fg_muted
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                }
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: text.length > 0
+                  text: rail.runningToolLabel(rail.selectedRaw)
+                  color: Theme.fg_muted
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                }
               }
-              Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: rail.selectedParent.length > 0
-                name: "chevron-right"
-                width: 11; height: 11
-                color: Theme.fg_muted
-              }
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
-                color: Theme.fg
-                font { family: Theme.fontFamily; pixelSize: rail.fsName; bold: true }
-              }
-            }
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              // A ticket session's plan key IS its name — showing both reads as
-              // a stutter (EVERY-3064 EVERY-3064), so the chip only earns its
-              // slot when it adds information.
-              visible: !rail.activeTask.length && rail.selectedPlan.length > 0
-                && rail.selectedPlan.toUpperCase() !== (rail.shortName(rail.selectedRaw) || "").toUpperCase()
-              width: Math.min(implicitWidth, 240)
-              elide: Text.ElideMiddle
-              text: rail.selectedPlan
-              color: Theme.fg_muted
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-            }
-            Rectangle {
-              objectName: "activeTaskPill"
-              anchors.verticalCenter: parent.verticalCenter
-              visible: rail.activeTask.length > 0
-              width: Math.min(taskLabel.implicitWidth + 16, 180)
-              height: 24
-              radius: Theme.radiusSm
-              color: taskHover.hovered ? Theme.selection : Theme.bg
-              border.color: Theme.hairline
+
               Text {
                 id: taskLabel
-                anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
-                verticalAlignment: Text.AlignVCenter
+                objectName: "activeTaskLabel"
+                visible: rail.activeTask.length > 0
+                width: parent.width
                 text: rail.activeTask
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
-                color: Theme.fg
+                color: Theme.fg_muted
                 font.family: Theme.fontFamily
-                font.pixelSize: rail.fsMeta
+                font.pixelSize: rail.fsMeta - 1
+                HoverHandler { id: taskHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: rail.prefillTask() }
               }
-              HoverHandler { id: taskHover }
-              TapHandler { onTapped: rail.prefillTask() }
-            }
-            // Watchdog visibility: a silently-vanished goal cost hours twice. Armed
-            // shows quietly; an orchestrator running WITHOUT a goal is loud.
-            // Dot + words, not a glyph — nerd glyphs sit off the text baseline.
-            // The "thinking" signifier lives HERE now (the floating pill is gone):
-            // same orb grammar as the expanded rows.
-            // What it's doing and for how long — the judgment input for
-            // Shift+Esc ("this should NOT take 4 minutes").
-            Text {
-              anchors.verticalCenter: parent.verticalCenter
-              visible: text.length > 0
-              text: rail.runningToolLabel(rail.selectedRaw)
-              color: Theme.fg_muted
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
           }
           // Right slot: watchdog status beside the location marker (expanded) or
