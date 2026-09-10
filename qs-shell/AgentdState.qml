@@ -315,7 +315,13 @@ Item {
       if (sessions[i].id === sid || sessions[i].name === sid) return sessions[i].status || ""
     return ""
   }
+  function _taskCommand(sid, text) {
+    if (!/^\/task(?:\s|$)/.test(String(text || ""))) return false
+    if (!send({ type: "prompt", session: sid, message: text, id: "cockpit-task:" + Date.now() })) _undelivered(sid, text)
+    return true
+  }
   function sendPrompt(sid, text) {
+    if (_taskCommand(sid, text)) return
     // Moving on ends the interrupt bridge: without this, an accidental Esc
     // kept re-appending "interrupted by you" after every later message until
     // the 60s cap.
@@ -333,6 +339,7 @@ Item {
   readonly property int steerGraceMs: 4000
   property var _steerPending: ({})
   function steer(sid, text) {
+    if (_taskCommand(sid, text)) return
     if (isInterrupting(sid)) { enqueue(sid, text); return }
     if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
     _push(sid, { kind: "user", text: text, steered: true })
@@ -362,10 +369,12 @@ Item {
     sendPrompt(sid, q[0])
   }
   function enqueue(sid, text) {
+    if (_taskCommand(sid, text)) return
     if (!isBusy(sid)) { sendPrompt(sid, text); return }   // nothing to wait for
     var q = queued; (q[sid] = q[sid] || []).push(text); queued = q; queuedGen++
   }
   function submit(sid, text) {
+    if (_taskCommand(sid, text)) return
     // A prompt IS the answer to a stale ask ("send a prompt with your answer to
     // continue"), so sending one retires the notice — leaving it up read as unanswered.
     dismissStaleAsk(sid)
@@ -678,7 +687,11 @@ Item {
       var isLast = (mi === msgs.length - 1)
       var prevAborted = mi > 0 && msgs[mi - 1].role === "assistant" && msgs[mi - 1].stopReason === "aborted"
       var _from = items.length
-      if (msg.role === "userBashApproval") {
+      if (msg.role === "sessionTask") {
+        items.push({ kind: "sys", tool: "task", taskAction: msg.action, taskTitle: msg.title,
+                     outcome: msg.outcome, timestamp: msg.timestamp,
+                     text: (msg.action === "switch" ? "Task · " : "Finished · ") + msg.title + (msg.outcome ? " — " + msg.outcome : "") })
+      } else if (msg.role === "userBashApproval") {
         items.push({ kind: "cmd", tool: "ask",
                      text: "❯ ! " + String(msg.command || "") + "  ↳ approved" })
       } else if (msg.role === "user") {
@@ -792,6 +805,12 @@ Item {
         msgs.push({ role: "assistant", content: [], _compaction: true, _mid: e.id })
         continue
       }
+      if (e.type === "custom" && e.customType === "cockpit-session-task" && e.data
+          && (e.data.action === "switch" || e.data.action === "finish") && typeof e.data.title === "string" && e.data.title.trim()) {
+        msgs.push({ role: "sessionTask", action: e.data.action, title: e.data.title.trim(),
+                    outcome: typeof e.data.outcome === "string" ? e.data.outcome : "", timestamp: e.timestamp || "", _mid: e.id })
+        continue
+      }
       if (e.type === "custom" && e.customType === "cockpit-user-bash-approval"
           && e.data && e.data.decision === "approved") {
         msgs.push({ role: "userBashApproval", command: e.data.command || "", _mid: e.id })
@@ -879,6 +898,11 @@ Item {
           _push(m.session, { kind: "cmd", tool: "error", text: "interrupt failed: " + String(m.error || "no confirmation") })
         }
       }
+      return
+    }
+    if (t === "response" && m.command === "prompt" && String(m.id || "").indexOf("cockpit-task:") === 0) {
+      if (m.session === selectedSession && m.success) refreshEntries(m.session)
+      if (!m.success) _push(m.session, { kind: "cmd", tool: "error", text: "task change failed: " + String(m.error || "unknown error") })
       return
     }
     if (t === "response" && m.command === "get_entries") {
@@ -1060,6 +1084,7 @@ Item {
       _setTransient(sid, "toolkill", "error",
                     "⨯ killed the running tool call (" + (m.killed || 0) + " process" + ((m.killed || 0) === 1 ? "" : "es") + ") — the turn continues", 60000)
     } else if (t === "tool_execution_end") {
+      if (m.toolName === "session_task" && sid === selectedSession) refreshEntries(sid)
       _curToolLive.delete(sid)
       _curToolId.delete(sid)
       curToolGen++

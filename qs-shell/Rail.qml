@@ -2099,7 +2099,7 @@ Item {
     case Qt.Key_H:      rail.focusNvim(); return true
     case Qt.Key_J:      rail.moveDown(); return true
     case Qt.Key_K:      rail.moveUp(); return true
-    case Qt.Key_G:      cur = shift ? navTotal - 1 : 0; return true
+    case Qt.Key_G:      if (shift) jumpToEnd(); else cur = 0; return true
     case Qt.Key_F:      rail.startHints(); return true          // vimium-style link hints
     case Qt.Key_Y:
       if (shift) {                                              // Y = whole message, no mode
@@ -2198,7 +2198,7 @@ Item {
     if (k === "j") moveDown()
     else if (k === "k") moveUp()
     else if (k === "g") cur = 0
-    else if (k === "G") cur = Math.max(0, navTotal - 1)
+    else if (k === "G") jumpToEnd()
     else if (k === "enter") activateCur()
     else if (k === "tab") { view = (view === "chat") ? "files" : "chat"; if (cur >= rSize) cur = rSize }
     else if (k === "i") enterInsert()
@@ -2380,8 +2380,12 @@ Item {
   function _contentKey(kind, text) {
     return "c:" + kind + ":" + String(text || "").slice(0, 60)
   }
-  readonly property var groupedFeed: {
+  readonly property var groupedFeed: taskProjection.rows
+  readonly property var taskSegments: taskProjection.segments
+  readonly property string activeTask: taskProjection.active
+  readonly property var taskProjection: {
     var f = feed, out = [], cur = null, acts = 0, chunked = false
+    var segments = [], segment = null, active = ""
     for (var i = 0; i < f.length; i++) {
       var it = f[i]
       if (it.kind === "user") {
@@ -2397,6 +2401,18 @@ Item {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
         if (!String(it.text || "").trim().length) continue
+        if (it.tool === "task") {
+          if (it.taskAction === "switch") {
+            if (segment) segment.end = out.length - 1
+            segment = { key: it.mid, title: it.taskTitle, timestamp: it.timestamp, row: out.length, end: out.length, outcome: "", finishedAt: "" }
+            segments.push(segment)
+            active = it.taskTitle
+          } else if (it.taskAction === "finish" && it.taskTitle === active) {
+            if (segment) { segment.end = out.length; segment.outcome = it.outcome || ""; segment.finishedAt = it.timestamp }
+            segment = null
+            active = ""
+          }
+        }
         out.push({ kind: "turn", sys: true, items: [it], key: it.mid || _contentKey(it.kind, it.text) })
       } else {
         // An empty assistant text (a turn that produced no prose — aborted mid-turn,
@@ -2427,7 +2443,41 @@ Item {
       if (seenK[bk] === undefined) seenK[bk] = 0
       else { seenK[bk]++; out[oi].key = bk + "#" + seenK[bk] }
     }
-    return out
+    if (segment) segment.end = out.length - 1
+    for (var si = 0; si < segments.length; si++) {
+      segments[si].position = segments[si].row / Math.max(1, out.length - 1)
+      segments[si].span = (segments[si].end - segments[si].row + 1) / Math.max(1, out.length)
+      segments[si].active = segments[si] === segment
+    }
+    return { rows: out, segments: segments, active: active }
+  }
+
+  function jumpToEnd() {
+    cur = Math.max(0, navTotal - 1)
+    if (view === "chat") feedScroll.toEnd()
+  }
+  function jumpTask(row) {
+    if (row < 0 || row >= groupedFeed.length) return
+    exitInsert()
+    view = "chat"
+    _resyncFeed()
+    feedScroll.hold()
+    requestFocus()
+    cur = rSize + row
+    feedScroll.cursorMoved(row, false)
+  }
+  function prefillTask() {
+    if (composerText.length) { feedbackPill.show("Finish the current draft before changing tasks"); return }
+    requestFocus()
+    prefillComposer("/task ")
+  }
+  TaskTimeline {
+    objectName: "sessionTaskTimeline"
+    anchors { right: parent.right; rightMargin: 2; top: parent.top; topMargin: 20; bottom: chin.top }
+    z: 10
+    visible: rail.view === "chat" && rail.taskSegments.length > 0
+    segments: rail.taskSegments
+    onJumpRequested: row => rail.jumpTask(row)
   }
 
   ColumnLayout {
@@ -3019,13 +3069,36 @@ Item {
               // A ticket session's plan key IS its name — showing both reads as
               // a stutter (EVERY-3064 EVERY-3064), so the chip only earns its
               // slot when it adds information.
-              visible: rail.selectedPlan.length > 0
+              visible: !rail.activeTask.length && rail.selectedPlan.length > 0
                 && rail.selectedPlan.toUpperCase() !== (rail.shortName(rail.selectedRaw) || "").toUpperCase()
               width: Math.min(implicitWidth, 240)
               elide: Text.ElideMiddle
               text: rail.selectedPlan
               color: Theme.fg_muted
               font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            }
+            Rectangle {
+              objectName: "activeTaskPill"
+              anchors.verticalCenter: parent.verticalCenter
+              visible: rail.activeTask.length > 0
+              width: Math.min(taskLabel.implicitWidth + 16, 180)
+              height: 24
+              radius: Theme.radiusSm
+              color: taskHover.hovered ? Theme.selection : Theme.bg
+              border.color: Theme.hairline
+              Text {
+                id: taskLabel
+                anchors { fill: parent; leftMargin: 8; rightMargin: 8 }
+                verticalAlignment: Text.AlignVCenter
+                text: rail.activeTask
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Theme.fg
+                font.family: Theme.fontFamily
+                font.pixelSize: rail.fsMeta
+              }
+              HoverHandler { id: taskHover }
+              TapHandler { onTapped: rail.prefillTask() }
             }
             // Watchdog visibility: a silently-vanished goal cost hours twice. Armed
             // shows quietly; an orchestrator running WITHOUT a goal is loud.
