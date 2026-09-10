@@ -4,28 +4,35 @@ import QsLib
 Item {
   id: timeline
   property var segments: []
+  property int selectedRow: -1
   signal jumpRequested(int row)
-  implicitWidth: 14
+  implicitWidth: 32
 
   function activate(index) {
     if (index >= 0 && index < segments.length) jumpRequested(segments[index].row)
   }
 
   Repeater {
-    model: timeline.segments
+    model: timeline.segments.length
     Item {
       id: mark
-      required property var modelData
       required property int index
+      readonly property var segment: timeline.segments[index]
       width: timeline.width
-      y: modelData.position * Math.max(0, timeline.height - 14)
-      height: Math.max(10, modelData.span * Math.max(0, timeline.height - 14))
+      y: (segment?.position || 0) * Math.max(0, timeline.height - 14)
+      height: 14
+      readonly property bool selected: !!segment && timeline.selectedRow >= segment.row && timeline.selectedRow <= segment.end
+      Behavior on y { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
       Rectangle {
-        anchors { top: parent.top; bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
-        width: hover.hovered ? 6 : 3
-        radius: 2
-        color: mark.modelData.active ? Theme.sky : Theme.fg_muted
-        opacity: hover.hovered || mark.modelData.active ? 1 : 0.55
+        objectName: "taskNotch-" + mark.index
+        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+        width: mark.segment?.active ? 28 : (hover.hovered || mark.selected ? 21 : 17)
+        height: mark.segment?.active ? 3 : 2
+        radius: height / 2
+        color: mark.segment?.active ? Theme.cursor : (hover.hovered || mark.selected ? Theme.fg : Theme.dimmedFg)
+        Behavior on width { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
+        Behavior on height { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
+        Behavior on color { ColorAnimation { duration: 110 } }
       }
       HoverHandler { id: hover }
       TapHandler { onTapped: timeline.activate(mark.index) }
@@ -41,10 +48,10 @@ Item {
         Text {
           id: detail
           anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
-          text: mark.modelData.title
-            + (mark.modelData.timestamp ? "\n" + Qt.formatDateTime(new Date(mark.modelData.timestamp), "ddd hh:mm") : "")
-            + (mark.modelData.finishedAt ? "\nFinished" : "")
-            + (mark.modelData.outcome ? " — " + mark.modelData.outcome : "")
+          text: (mark.segment?.title || "")
+            + (mark.segment?.timestamp ? "\n" + Qt.formatDateTime(new Date(mark.segment.timestamp), "ddd hh:mm") : "")
+            + (mark.segment?.finishedAt ? "\nFinished" : "")
+            + (mark.segment?.outcome ? " — " + mark.segment.outcome : "")
           textFormat: Text.PlainText
           wrapMode: Text.Wrap
           color: Theme.fg

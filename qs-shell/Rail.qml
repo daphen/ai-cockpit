@@ -2446,7 +2446,6 @@ Item {
     if (segment) segment.end = out.length - 1
     for (var si = 0; si < segments.length; si++) {
       segments[si].position = segments[si].row / Math.max(1, out.length - 1)
-      segments[si].span = (segments[si].end - segments[si].row + 1) / Math.max(1, out.length)
       segments[si].active = segments[si] === segment
     }
     return { rows: out, segments: segments, active: active }
@@ -2477,6 +2476,7 @@ Item {
     z: 10
     visible: rail.view === "chat" && rail.taskSegments.length > 0
     segments: rail.taskSegments
+    selectedRow: rail.cur - rail.rSize
     onJumpRequested: row => rail.jumpTask(row)
   }
 

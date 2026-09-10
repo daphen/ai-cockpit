@@ -48,6 +48,8 @@ interface Entry {
   parentId?: string
   type?: string
   customType?: string
+  fromHook?: boolean
+  details?: { strategy?: string }
   data?: Record<string, unknown>
   message?: {
     role?: string
@@ -214,7 +216,7 @@ function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
   for (const [index, entry] of recent.entries()) {
     const key = entry.id ?? `entry-${index}`
     if (entry.type === "compaction") {
-      feed.push({ kind: "system", text: "context compacted", key })
+      feed.push({ kind: "system", text: entry.fromHook === true || entry.details?.strategy === "deterministic-auto-v3" ? "context rolled over" : "context compacted", key })
       continue
     }
     if (entry.type === "custom" && entry.customType === "cockpit-user-bash-approval") {
