@@ -393,7 +393,19 @@ Item {
   // (select() also re-pins the feed). Used to keep a streaming session's chat live:
   // prose arrives via get_entries, not via message_* events, so a client that joins
   // mid-turn otherwise shows a frozen snapshot until the turn ends.
-  function refreshEntries(sid) { if (sid) send({ type: "get_entries", session: sid }) }
+  // One outstanding history request per session. A session whose transcript is huge
+  // (160-190MB here) can take minutes to serialize, and the roster tick re-asks
+  // whenever the feed is still empty — so the request was restarted before it could
+  // ever finish, and pi spent its time re-serializing instead of answering prompts.
+  property var _entriesAskedAt: ({})
+  readonly property int entriesRetryMs: 120000
+  function refreshEntries(sid) {
+    if (!sid) return
+    var at = _entriesAskedAt[sid] || 0
+    if (Date.now() - at < entriesRetryMs) return
+    var m = _entriesAskedAt; m[sid] = Date.now(); _entriesAskedAt = m
+    send({ type: "get_entries", session: sid })
+  }
   // Interrupt = abort the in-flight TURN; the session survives, idle, transcript
   // intact. This is pi's own rpc `abort` (Esc in its TUI) forwarded by agentd — and it
   // passes the daemon's blocked-on-a-question bounce, so it is also the escape hatch
@@ -1124,6 +1136,7 @@ Item {
     if (!m.data || !m.data.entries) return
     var esid = m.session
     if (!esid) return
+    var am = _entriesAskedAt; delete am[esid]; _entriesAskedAt = am
     _feedSid = esid
     var liveText = (feeds[esid] || []).filter(function(item) { return item.liveText })
     feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId).concat(liveText)
