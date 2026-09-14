@@ -118,6 +118,7 @@ ShellRoot {
         test.check(!state.isBusy("ticket"), "task command falsely marked a model turn busy")
         test.broadcast({type:"response",command:"prompt",session:"ticket",id:test.sent[0].id,success:true})
         test.check(test.sent[1].type === "get_entries", "command acknowledgement did not refresh native boundaries")
+        test.history(test.tasks(), "a5")
         test.broadcast({type:"tool_execution_end",session:"ticket",toolName:"session_task",result:{}})
         test.check(test.sent[2].type === "get_entries", "agent tool completion did not refresh boundaries")
         test.history([test.marker("only",null,"switch","Only task")],"only")

@@ -2944,9 +2944,6 @@ Item {
         Item {
           id: glanceCol
           anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
-          // FIXED height, sized for the orb (44px + breathing room): deriving it
-          // from the row's content made the whole sheet jump every time the orb
-          // entered or left. The space is reserved whether or not it's running.
           implicitHeight: 52
           // The header is the roster's handle: click to open it (and close it again).
           TapHandler {
@@ -2956,7 +2953,8 @@ Item {
             id: glanceName
             // Row geometry, with the pill's own 9px inset subtracted so the MARKER —
             // not the pill's border box — lands on the rows' 14px column.
-            anchors { left: parent.left; leftMargin: 5; verticalCenter: parent.verticalCenter }
+            anchors { left: parent.left; leftMargin: 5 }
+            y: rail.activeTask.length ? 4 : (glanceCol.height - height) / 2
             spacing: 12
             // On the ORCHESTRATOR this icon is also the handover switch — it already
             // says which host runs the role, so a second pill was a duplicate. Hover
@@ -3087,27 +3085,29 @@ Item {
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 }
               }
-
-              Text {
-                id: taskLabel
-                objectName: "activeTaskLabel"
-                visible: rail.activeTask.length > 0
-                width: parent.width
-                text: rail.activeTask
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                color: Theme.fg_muted
-                font.family: Theme.fontFamily
-                font.pixelSize: rail.fsMeta - 1
-                HoverHandler { id: taskHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { onTapped: rail.prefillTask() }
-              }
             }
+          }
+          Text {
+            id: taskLabel
+            objectName: "activeTaskLabel"
+            visible: rail.activeTask.length > 0
+            anchors { left: glanceName.left; leftMargin: locSlot.width + glanceName.spacing
+                      right: parent.right; rightMargin: 58 }
+            y: glanceName.y + glanceName.height + 4
+            text: rail.activeTask
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            color: Theme.fg_muted
+            font.family: Theme.fontFamily
+            font.pixelSize: rail.fsMeta - 1
+            HoverHandler { id: taskHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: rail.prefillTask() }
           }
           // Right slot: watchdog status beside the location marker (expanded) or
           // the sibling status dots (collapsed) — meta lives right, title left.
           Row {
-            anchors { right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
+            anchors { right: parent.right; rightMargin: 14 }
+            y: (glanceCol.height - height) / 2
             spacing: 12
             // HANDOVER SWITCH — only while the selected session IS the orchestrator, so
             // the control lives with the role rather than floating over a worker's row.
@@ -3130,6 +3130,7 @@ Item {
                 width: 20; height: 20
                 Crossfade {
                   anchors.centerIn: parent
+                  objectName: "featuredHeaderOrb"
                   width: 44; height: 44
                   showSecond: !rail.featuredFleetStreaming
                   enterDuration: 250
@@ -3383,6 +3384,7 @@ Item {
           model: rosterModel
           Item {
             id: sharedRosterOrb
+            objectName: "sharedRosterOrb"
             readonly property var md: model.d
             readonly property bool rootSession: (md.depth || 0) === 0
             readonly property bool hasAsk: {
@@ -3392,7 +3394,8 @@ Item {
             width: rail.rosterExpanded ? 20 : 16
             height: width
             x: rail.rosterExpanded ? rosterCard.width - 34 : rosterCard.collapsedOrbX(index) - 14
-            y: rail.rosterExpanded ? rosterInner.y + index * 43 + 10 : glanceCol.y + 18
+            y: rail.rosterExpanded ? rosterInner.y + index * 43 + 10
+              : glanceCol.y + glanceName.y + (glanceName.height - height) / 2
             visible: rootSession
             z: 5
 
