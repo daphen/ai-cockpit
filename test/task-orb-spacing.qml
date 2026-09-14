@@ -49,6 +49,11 @@ ShellRoot {
     for (var marker of roots) {
       if (!marker.visible) continue
       var b = box(marker), t = box(label)
+      if (!rail.rosterExpanded) {
+        var featured = box(orb)
+        check(Math.abs((b.y + b.bottom) / 2 - (featured.y + featured.bottom) / 2) < 0.1, "selected indicator dropped below the shared orb row")
+        check(orb.mapToItem(label.parent.parent, 0, 0).y >= 0, "featured orb is clipped above the header")
+      }
       check(b.bottom + 4 <= t.y || b.y >= t.bottom + 4, "task overlaps a shared roster marker")
     }
     check(label.width > 0 && label.x + label.width <= label.parent.width, "subtitle escapes the header width")

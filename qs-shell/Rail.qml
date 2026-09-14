@@ -2954,7 +2954,7 @@ Item {
             // Row geometry, with the pill's own 9px inset subtracted so the MARKER —
             // not the pill's border box — lands on the rows' 14px column.
             anchors { left: parent.left; leftMargin: 5 }
-            y: rail.activeTask.length ? 4 : (glanceCol.height - height) / 2
+            y: ((rail.activeTask.length ? 44 : glanceCol.height) - height) / 2
             spacing: 12
             // On the ORCHESTRATOR this icon is also the handover switch — it already
             // says which host runs the role, so a second pill was a duplicate. Hover
@@ -3107,7 +3107,7 @@ Item {
           // the sibling status dots (collapsed) — meta lives right, title left.
           Row {
             anchors { right: parent.right; rightMargin: 14 }
-            y: (glanceCol.height - height) / 2
+            y: glanceName.y + (glanceName.height - height) / 2
             spacing: 12
             // HANDOVER SWITCH — only while the selected session IS the orchestrator, so
             // the control lives with the role rather than floating over a worker's row.
