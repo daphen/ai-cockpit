@@ -1376,11 +1376,10 @@ Item {
   onSelectedStatusChanged: if (selectedStatus === "idle") Qt.callLater(rail._prepareSelectedMirror)
   onSelectedCwdChanged: Qt.callLater(rail._prepareSelectedMirror)
 
-  // The selected session and every descendant it spawned. The collapsed header is
-  // their shared home, so its large orb represents this fleet rather than only the root.
-  readonly property var featuredFleet: {
-    if (!selectedRaw) return []
-    var names = new Set([selectedRaw]), changed = true
+  function fleetActivityColors(sid) {
+    agentd ? agentd.curToolGen : 0
+    if (!sid) return []
+    var names = new Set([sid]), changed = true
     while (changed) {
       changed = false
       for (var i = 0; i < liveSessions.length; i++) {
@@ -1391,19 +1390,16 @@ Item {
         }
       }
     }
-    return liveSessions.filter(session => names.has(session.name))
-  }
-  readonly property var featuredActivityColors: {
-    agentd ? agentd.curToolGen : 0
     var colors = []
-    for (var i = 0; i < featuredFleet.length; i++) {
-      var session = featuredFleet[i]
-      if (agentd && agentd.isInterrupting(session.name)) continue
+    for (var i = 0; i < liveSessions.length; i++) {
+      var session = liveSessions[i]
+      if (!names.has(session.name) || (agentd && agentd.isInterrupting(session.name))) continue
       if (session.status === "streaming" || (agentd && agentd.isBusy(session.name)))
         colors.push(actionGlow(session.name))
     }
     return colors
   }
+  readonly property var featuredActivityColors: fleetActivityColors(selectedRaw)
   readonly property bool featuredFleetStreaming: {
     if (!live) return mockFeatured.status === "streaming"
     return featuredActivityColors.length > 0
@@ -3387,6 +3383,9 @@ Item {
             objectName: "sharedRosterOrb"
             readonly property var md: model.d
             readonly property bool rootSession: (md.depth || 0) === 0
+            readonly property var activityColors: !rootSession ? [] : rail.rosterExpanded
+              ? (md.status === "streaming" ? [rail.actionGlow(md.rawName || md.name)] : [])
+              : rail.fleetActivityColors(md.rawName || md.name)
             readonly property bool hasAsk: {
               rail.agentd ? rail.agentd.askGen : 0
               return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
@@ -3404,15 +3403,18 @@ Item {
             Behavior on width { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
 
             ThinkingOrb {
+              objectName: "rootActivityOrb"
               anchors.fill: parent
-              visible: !sharedRosterOrb.hasAsk && sharedRosterOrb.md.status === "streaming"
+              visible: !sharedRosterOrb.hasAsk && activityColors.length > 0
               running: visible
-              glow: rail.actionGlow(sharedRosterOrb.md.rawName || sharedRosterOrb.md.name)
+              activityColors: sharedRosterOrb.activityColors
+              glow: activityColors.length ? activityColors[0] : rail.actionGlow(sharedRosterOrb.md.rawName || sharedRosterOrb.md.name)
               seedKey: sharedRosterOrb.md.rawName || sharedRosterOrb.md.name
             }
             Rectangle {
+              objectName: "rootIdleDot"
               anchors.centerIn: parent
-              visible: !sharedRosterOrb.hasAsk && sharedRosterOrb.md.status !== "streaming"
+              visible: !sharedRosterOrb.hasAsk && sharedRosterOrb.activityColors.length === 0
               width: 7; height: 7; radius: 3.5
               color: rail.dotColor(sharedRosterOrb.md.status || sharedRosterOrb.md.state || "")
             }
