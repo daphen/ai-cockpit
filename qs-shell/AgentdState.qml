@@ -140,6 +140,7 @@ Item {
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
   signal editSeen(string sid, string path, string needleB64, bool historical)
+  signal modelChangeResult(string sid, bool success, string detail)
   signal openInNvimRequested(string sid, string path, int line, int column)
   // The edit's most distinctive inserted line (longest trimmed, >=3 chars),
   // base64ed for safe transport through --remote-expr quoting.
@@ -919,6 +920,11 @@ Item {
     }
     if (t === "response" && m.command === "get_entries") {
       if (m.session === selectedSession) onEntries(m)
+      return
+    }
+    if (t === "response" && m.command === "set_model" && m.session) {
+      modelChangeResult(m.session, m.success === true,
+        m.success ? String(m.data.id) : String(m.error || "Model change failed"))
       return
     }
     if (t === "response" && m.command === "get_available_models" && m.session) {

@@ -1222,6 +1222,9 @@ Item {
     target: rail.agentd
     function onSettledChanged() { rail._recomputeDefault() }
     function onAvailableModelsGenChanged() { rail.refreshModelEntries() }
+    function onModelChangeResult(sid, success, detail) {
+      if (sid === rail.selectedRaw) feedbackPill.show(success ? "Model changed: " + detail : "Model change failed: " + detail)
+    }
   }
   readonly property string selectedRaw: activeRaw || defaultRaw
   readonly property string selectedModelId: {
@@ -1255,8 +1258,11 @@ Item {
   function chooseModel(index) {
     var model = modelEntries[index]
     if (!model || !agentd || !selectedRaw) return
-    agentd.send({ type: "set_model", session: selectedRaw,
-                  provider: String(model.provider), modelId: String(model.id) })
+    if (!agentd.send({ type: "set_model", session: selectedRaw,
+                      provider: String(model.provider), modelId: String(model.id) })) {
+      feedbackPill.show("Model change not sent: daemon disconnected")
+      return
+    }
     modelOpen = false
   }
   readonly property string selectedGoal: {
@@ -4244,6 +4250,7 @@ Item {
 
   InlinePicker {
     id: modelPalette
+    objectName: "modelPalette"
     visible: rail.modelOpen
     anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
     width: Math.min(340, parent.width - 40)
