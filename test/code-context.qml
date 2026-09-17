@@ -8,6 +8,23 @@ ShellRoot {
   property int phase: 0
   property var sent: []
   property int serial: 0
+  property int railWidth: 720
+  property bool grewSmoothly: false
+  property bool shrankSmoothly: false
+  property real previousAttachmentHeight: 0
+  Timer {
+    interval: 16; repeat: true; running: true
+    onTriggered: {
+      var area = test.find(rail, "composerAttachments")
+      if (!area) return
+      var h = area.height
+      if (h > 0 && h < 37) {
+        if (h > test.previousAttachmentHeight) test.grewSmoothly = true
+        if (h < test.previousAttachmentHeight) test.shrankSmoothly = true
+      }
+      test.previousAttachmentHeight = h
+    }
+  }
   property string selectedCode: "const text = `literal`;\n```\n  unsaved();"
   SocketServer { active: true; path: Quickshell.env("HOME") + "/agentd-personal.sock"; handler: Socket {} }
   AgentdState {
@@ -28,14 +45,15 @@ ShellRoot {
     id: window
     property string pane: "rail"
     onPaneChanged: { if (pane === "nvim") editor.forceActiveFocus(); else rail.forceActiveFocus() }
-    visible: true; implicitWidth: 720; implicitHeight: 800
+    visible: true; implicitWidth: test.railWidth; implicitHeight: 800
     Item {
       id: editor
       onActiveFocusChanged: if (activeFocus) window.pane = "nvim"
       Keys.onPressed: event => { if (event.key === Qt.Key_L && (event.modifiers & Qt.ControlModifier)) { window.pane = "rail"; event.accepted = true } }
     }
     Rail {
-      id: rail; anchors.fill: parent; agentd: state; scopeMode: "personal"; instanceName: "code-context-test"; nvimSock: Quickshell.env("HOME") + "/nvim.sock"
+      id: rail; anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+      width: test.railWidth; agentd: state; scopeMode: "personal"; instanceName: "code-context-test"; nvimSock: Quickshell.env("HOME") + "/nvim.sock"
       focused: window.pane === "rail"
       onFocusNvim: window.pane = "nvim"
       onRequestFocus: window.pane = "rail"
@@ -58,7 +76,7 @@ ShellRoot {
   function attach() { return context({kind:"code",path:"/repo/src/code.ts",l1:4,l2:7,lang:"typescript",text:selectedCode}) }
   function press(key, modifiers) { keys.keyClick(key, modifiers || Qt.NoModifier, 0) }
   Timer {
-    interval: 250; repeat: true; running: true
+    interval: 150; repeat: true; running: true
     onTriggered: {
       if (test.phase === 0) {
         if (!state.connected) return
@@ -126,9 +144,29 @@ ShellRoot {
         test.check(rail.composerText === "keep draftx", "returning to the rail stole focus from the input")
         test.press(Qt.Key_H, Qt.ControlModifier)
         test.check(window.pane === "nvim", "second Ctrl+H was trapped in the input")
+        test.railWidth = 320
+        test.context({kind:"code",path:"/repo/code-context.qml",l1:52,l2:57,text:"selection"})
+        test.context({kind:"code",path:"/repo/a-very-long-filename-that-must-fit.qml",l1:1,l2:2,text:"other selection"})
+      } else if (test.phase === 10) {
+        var area = test.find(rail,"composerAttachments")
+        if (area.height < 70) return
+        test.check(area.height >= 70, "wrapped badges did not grow the attachment area: " + area.width + "×" + area.height + " count " + rail.codeAttachments.length)
+        test.check(area.width <= rail.width - 56 && test.find(rail,"codeAttachment-1").width <= area.width, "long filename escaped the composer")
+        var preview = Quickshell.env("CODE_CONTEXT_PREVIEW")
+        if (preview) rail.grabToImage(result => result.saveToFile(preview))
+      } else if (test.phase === 11) {
+        var button = test.find(test.find(rail,"codeAttachment-0"),"removeCodeAttachment")
+        keys.mouseMove(button,14,14,0,Qt.NoButton,Qt.NoModifier)
+        keys.mouseClick(button,14,14,Qt.LeftButton,Qt.NoModifier,0)
+        test.check(rail.codeAttachments.length === 1, "badge close button did not remove its attachment")
+        rail.clearCode()
+      } else if (test.phase === 12) {
+        if (test.find(rail,"composerAttachments").height >= 1) return
+        test.check(test.find(rail,"composerAttachments").height < 1, "empty attachments left a layout gap")
+        test.check(test.grewSmoothly && test.shrankSmoothly, "attachment height jumped instead of transitioning both ways")
         test.attach(); rail.scopeMode = "work"
         test.check(rail.codeAttachments.length === 0 && test.attach() !== "accepted", "attachment leaked across scopes")
-        console.log("PASS: code handoff/tag/removal, exact send and queue payloads, draft isolation, plan menu and safeguards")
+        console.log("PASS: code badges, animated height/wrapping, mouse removal, payloads, draft isolation, plan menu and focus round-trips")
         Qt.quit()
       }
       test.phase++

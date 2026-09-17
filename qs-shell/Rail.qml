@@ -3531,38 +3531,65 @@ Item {
         }
       }
 
-      Flow {
+      Item {
+        id: attachments
+        objectName: "composerAttachments"
         Layout.fillWidth: true
-        visible: rail.codeAttachments.length > 0 || rail.planDraft !== null
-        spacing: 6
-        Rectangle {
-          visible: rail.planDraft !== null
-          width: planDraftLabel.implicitWidth + 20; height: 24; radius: 8
-          color: Theme.bg_alt; border.color: Theme.hairline
-          Text { id: planDraftLabel; anchors.centerIn: parent; text: (rail.planDraft ? rail.planDraft.title : "") + " ×"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
-          TapHandler { onTapped: rail.removePlanDraft() }
+        Layout.maximumWidth: chinCol.width
+        Layout.topMargin: -chinCol.spacing
+        readonly property bool populated: rail.codeAttachments.length > 0 || rail.planDraft !== null
+        implicitHeight: populated ? attachmentFlow.implicitHeight + chinCol.spacing : 0
+        clip: true
+        Behavior on implicitHeight {
+          NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad }
         }
-        Repeater {
-          model: rail.codeAttachments
+        Flow {
+          id: attachmentFlow
+          y: chinCol.spacing; width: parent.width; spacing: 6
           Rectangle {
-            required property var modelData
-            required property int index
-            objectName: "codeAttachment-" + index
-            width: Math.min(codeLabel.implicitWidth + 36, rail.width - 48); height: 24
-            radius: 8; color: Theme.bg_alt; border.color: Theme.hairline
-            Text {
-              id: codeLabel
-              anchors { left: parent.left; leftMargin: 8; right: removeCodeButton.left; verticalCenter: parent.verticalCenter }
-              text: String(modelData.path).split("/").pop() + ":" + modelData.l1 + "-" + modelData.l2
-              textFormat: Text.PlainText; elide: Text.ElideMiddle
-              color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-            }
-            Item {
-              id: removeCodeButton
-              anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-              width: 24; height: 24
-              Text { anchors.centerIn: parent; text: "×"; color: Theme.fg_muted }
-              TapHandler { onTapped: rail.removeCode(index) }
+            visible: rail.planDraft !== null
+            width: planDraftLabel.implicitWidth + 24; height: 28; radius: 14
+            color: Theme.surface1; border.color: Theme.hairlineSoft
+            Text { id: planDraftLabel; anchors.centerIn: parent; text: (rail.planDraft ? rail.planDraft.title : "") + " ×"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
+            TapHandler { onTapped: rail.removePlanDraft() }
+          }
+          Repeater {
+            model: rail.codeAttachments
+            Rectangle {
+              required property var modelData
+              required property int index
+              objectName: "codeAttachment-" + index
+              width: Math.min(codeLabel.implicitWidth + codeRange.implicitWidth + 74, attachmentFlow.width)
+              height: 28; radius: height / 2
+              color: Theme.surface1; border.color: Theme.hairlineSoft
+              Icon {
+                id: codeIcon
+                anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+                name: "file-content--outline--18"; width: 14; height: 14; color: Theme.fg_muted
+              }
+              Text {
+                id: codeLabel
+                anchors { left: codeIcon.right; leftMargin: 6; right: codeRange.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+                text: String(modelData.path).split("/").pop()
+                textFormat: Text.PlainText; elide: Text.ElideMiddle
+                color: Theme.fg; font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 500 }
+              }
+              Text {
+                id: codeRange
+                anchors { right: removeCodeButton.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
+                text: ":" + modelData.l1 + (modelData.l1 === modelData.l2 ? "" : "–" + modelData.l2)
+                color: Theme.fg_muted; font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2 }
+              }
+              Item {
+                id: removeCodeButton
+                objectName: "removeCodeAttachment"
+                anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
+                width: 28; height: 28
+                Rectangle { anchors.centerIn: parent; width: 20; height: 20; radius: 10; color: closeHover.hovered ? Theme.hover : "transparent" }
+                Icon { anchors.centerIn: parent; name: "xmark--glyph--12"; width: 10; height: 10; color: closeHover.hovered ? Theme.fg : Theme.fg_muted }
+                HoverHandler { id: closeHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: rail.removeCode(index) }
+              }
             }
           }
         }
