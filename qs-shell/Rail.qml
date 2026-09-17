@@ -926,7 +926,8 @@ Item {
     var lua = '(function() local p=' + JSON.stringify(p) + '; local alt=' + JSON.stringify(alternate)
       + '; if vim.fn.filereadable(p)~=1 and alt~="" and vim.fn.filereadable(alt)==1 then p=alt end'
       + '; if vim.fn.filereadable(p)~=1 then vim.notify("file no longer exists: "..p, vim.log.levels.WARN); return "" end'
-      + '; vim.cmd.edit(vim.fn.fnameescape(p)); vim.api.nvim_win_set_cursor(0, {' + row + ',' + (col - 1) + '}); return "" end)()'
+      + '; vim.cmd.CockpitEdit(p); if vim.api.nvim_buf_get_name(0)~=p then return "" end'
+      + '; vim.api.nvim_win_set_cursor(0, {' + row + ',' + (col - 1) + '}); return "" end)()'
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
     rail.focusNvim()
   }
