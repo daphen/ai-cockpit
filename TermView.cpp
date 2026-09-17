@@ -68,7 +68,8 @@ public:
         return socket_ == socket && liveNvimSocket(socket);
       pid_ = -1;
     }
-    if (liveNvimSocket(socket)) return false;
+    // Native :restart replaces our child while preserving the socket we own.
+    if (liveNvimSocket(socket)) return socket_ == socket;
     const QByteArray path = socket.toUtf8();
     ::unlink(path.constData());
 
