@@ -940,7 +940,7 @@ Item {
     if (latest && latest.charAt(0) !== "/") latest = localCwd + "/" + latest
     if (!nvimSock.length) return
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
+      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || "")].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
   }
   function showWorkspace(view) {
     landNvim(selectedRaw, view)
@@ -969,7 +969,7 @@ Item {
       if (!rail.nvimSock.length) return
       var ss = rail._sessionOf(sessionName)
       var local = rail._localPath(remoteCwd)
-      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", ""].map(JSON.stringify).join(",")
+      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", "", String(ss.profile || "")].map(JSON.stringify).join(",")
       var lua = '(function() local m=require("cockpit"); local d=m.dashboard_snapshot(); if d.active and d.model.cwd=='
         + JSON.stringify(local) + ' then m.workspace(' + args + ') end; require("cockpit.chin").refresh(); return "" end)()'
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
