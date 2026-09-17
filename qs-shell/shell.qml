@@ -213,6 +213,7 @@ ShellRoot {
       // `i` on the nvim dashboard: jump straight into the rail composer instead of
       // erroring on the read-only buffer. callLater lets the pane switch settle first.
       function focusComposer(): string { win.pane = "rail"; Qt.callLater(rail.enterInsert); return "ok" }
+      function editorContext(path: string): string { return rail.receiveEditorContext(path) }
       // Super+T's whole in-window decision as ONE call (it was pane + railState +
       // focusRoster — three qs spawns): land on this window's roster unless the cursor
       // is genuinely parked there in normal mode, in which case report "parked" so the
@@ -245,7 +246,7 @@ ShellRoot {
       function railState(): string {
         return JSON.stringify({ cur: rail.cur, rSize: rail.rSize, navTotal: rail.navTotal,
                                 view: rail.view, mode: rail.scrollMode,
-                                sel: rail.selectedRaw, key: rail.cursorKey,
+                                sel: rail.selectedRaw, scopeMode: win.scopeMode, key: rail.cursorKey,
                                 ins: rail.insert, ask: !!rail.pendingAsk, askDeferred: rail.askDeferred, stale: !!rail.staleAsk,
                                 q: rail.agentd ? rail.agentd.queuedFor(rail.selectedRaw) : 0,
                                 hint: rail.hinting, yank: rail.yankMode, labels: rail.hintLabels.length,

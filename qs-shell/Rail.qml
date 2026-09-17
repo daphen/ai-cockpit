@@ -719,11 +719,87 @@ Item {
   // (via the mirror for remote work) so mutagen carries it to the box and pi can
   // actually open it — a local /tmp path would not exist over there.
   property var pastedImages: []   // filenames pasted this session, shown as composer chips
+  readonly property string composerKey: scopeMode + "/" + selectedRaw
+  property var codeDrafts: ({})
+  property var planDrafts: ({})
+  readonly property var planDraft: planDrafts[composerKey] || null
+  property var planMenu: null
+  property int planChoice: 0
+  onComposerKeyChanged: planMenu = null
+  readonly property var codeAttachments: codeDrafts[composerKey] || []
+  FileView { id: editorContextFile; preload: false; blockAllReads: true; printErrors: false }
+  function receiveEditorContext(path) {
+    editorContextFile.path = path
+    var data
+    try { data = JSON.parse(editorContextFile.text()) } catch (e) { return "could not read editor context" }
+    if (data.session !== selectedRaw || data.mode !== scopeMode) return "selected session changed; attach again"
+    if (data.kind === "menu") {
+      planMenu = data; planChoice = 0; exitInsert(); requestFocus()
+      return "accepted"
+    }
+    if (data.kind === "compose") {
+      if (planDraft) return "finish or remove the current plan draft first"
+      var plans = Object.assign({}, planDrafts); plans[composerKey] = data; planDrafts = plans
+    } else if (data.kind === "code") {
+      var drafts = Object.assign({}, codeDrafts)
+      drafts[composerKey] = codeAttachments.concat([data]); codeDrafts = drafts
+    } else return "unsupported editor context"
+    requestFocus(); enterInsert()
+    return "accepted"
+  }
+  function removeCode(index) {
+    var drafts = Object.assign({}, codeDrafts), items = codeAttachments.slice()
+    items.splice(index, 1); drafts[composerKey] = items; codeDrafts = drafts
+  }
+  function clearCode(key) {
+    var drafts = Object.assign({}, codeDrafts); delete drafts[key || composerKey]; codeDrafts = drafts
+  }
+  function removePlanDraft(key) {
+    var drafts = Object.assign({}, planDrafts); delete drafts[key || composerKey]; planDrafts = drafts
+  }
+  function requestPlanMenu() {
+    if (!nvimSock) return
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval('require(\"plan-nvim\").menu()')"])
+  }
+  function choosePlan(index) {
+    if (!planMenu || !nvimSock) return
+    var action = planMenu.actions ? planMenu.actions[index] : index + 1
+    var lua = 'require("plan-nvim").menu(' + JSON.stringify(action) + ',' + JSON.stringify(planMenu.path) + ')'
+    planMenu = null
+    if (action === "cancel") return
+    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
+  }
+  FileView {
+    id: planSubmitFile
+    path: Quickshell.env("XDG_RUNTIME_DIR") + "/cockpit-plan-submit-" + rail.instanceName + ".json"
+    blockWrites: true
+  }
+  Process {
+    id: planSubmit
+    property string key: ""
+    property string draftText: ""
+    property var codes: []
+    stdout: StdioCollector { id: planSubmitOutput }
+    onExited: (code, status) => {
+      if (code !== 0 || planSubmitOutput.text.trim() !== "sent") { feedbackPill.show("Plan action was not sent; reopen its menu"); return }
+      rail.removePlanDraft(key)
+      if (rail.codeDrafts[key] === codes) rail.clearCode(key)
+      if (rail.composerKey === key && composerInput.text === draftText) composerInput.text = ""
+    }
+  }
+  function sendPlanDraft() {
+    if (planSubmit.running || !planDraft || !nvimSock) return
+    planSubmit.key = composerKey; planSubmit.draftText = composerText; planSubmit.codes = codeDrafts[composerKey]
+    planSubmitFile.setText(JSON.stringify({ id: planDraft.id, text: attachRefs(composerText) }))
+    var lua = 'require("plan-nvim").submit_compose(' + JSON.stringify(planSubmitFile.path) + ')'
+    planSubmit.command = ["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"]
+    planSubmit.running = true
+  }
   // pi needs @references in the prompt: each [image N] token is replaced IN PLACE
   // by its file ref at send time. A token the user deleted sends nothing — deletion
   // is the drop gesture.
   function attachRefs(t) {
-    return String(t || "").replace(/\[(img\d+)\]/g, function (all, stem) {
+    var text = String(t || "").replace(/\[(img\d+)\]/g, function (all, stem) {
       var f = ""
       for (var i = 0; i < pastedImages.length; i++)
         if (String(pastedImages[i]).indexOf(stem + ".") === 0) { f = pastedImages[i]; break }
@@ -733,6 +809,14 @@ Item {
       return pasteRemote ? "@.heidr-pastes/" + f
                          : "@" + Quickshell.env("HOME") + "/.cache/heidr-pastes/" + f
     })
+    for (var code of codeAttachments) {
+      var fence = "```"
+      while (code.text.indexOf(fence) >= 0) fence += "`"
+      text += "\n\nSelected code: " + _remotePath(code.path) + ":" + code.l1 + "-" + code.l2
+        + "\n" + fence + (code.lang || "") + "\n" + code.text + "\n" + fence
+        + (code.fromPlan ? "\nAnswer in chat; do not edit the plan." : "")
+    }
+    return text
   }
   // Local vs remote pastes are DIFFERENT problems. A remote (VM) session needs the
   // file inside the worktree so mutagen/scp can carry it to the box, and the @ref
@@ -1976,6 +2060,7 @@ Item {
       return true
     }
     if (ctrl && e.key === Qt.Key_M) { toggleModelPicker(); return true }
+    if (ctrl && e.key === Qt.Key_P) { requestPlanMenu(); return true }
     // Ctrl+T = the in-app Super+T: open the roster and park on the active row;
     // pressed again while parked, put it away and return to the composer.
     if (ctrl && e.key === Qt.Key_T) {
@@ -2138,6 +2223,13 @@ Item {
   Keys.onPressed: (e) => {
     _klog(e)
     if (keyGlobal(e)) { e.accepted = true; return }
+    if (planMenu) {
+      if (e.key === Qt.Key_Escape) planMenu = null
+      else if (e.key === Qt.Key_J || e.key === Qt.Key_Down) planChoice = Math.min(planMenu.labels.length - 1, planChoice + 1)
+      else if (e.key === Qt.Key_K || e.key === Qt.Key_Up) planChoice = Math.max(0, planChoice - 1)
+      else if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) choosePlan(planChoice)
+      e.accepted = true; return
+    }
     if (modelOpen && keyModelPicker(e)) { e.accepted = true; return }
     if (fileSelectOpen && keyFileSelection(e)) { e.accepted = true; return }
     // Insert: the focused input owns the keyboard — except a blocking confirm/
@@ -3439,6 +3531,43 @@ Item {
         }
       }
 
+      Flow {
+        Layout.fillWidth: true
+        visible: rail.codeAttachments.length > 0 || rail.planDraft !== null
+        spacing: 6
+        Rectangle {
+          visible: rail.planDraft !== null
+          width: planDraftLabel.implicitWidth + 20; height: 24; radius: 8
+          color: Theme.bg_alt; border.color: Theme.hairline
+          Text { id: planDraftLabel; anchors.centerIn: parent; text: (rail.planDraft ? rail.planDraft.title : "") + " ×"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+          TapHandler { onTapped: rail.removePlanDraft() }
+        }
+        Repeater {
+          model: rail.codeAttachments
+          Rectangle {
+            required property var modelData
+            required property int index
+            objectName: "codeAttachment-" + index
+            width: Math.min(codeLabel.implicitWidth + 36, rail.width - 48); height: 24
+            radius: 8; color: Theme.bg_alt; border.color: Theme.hairline
+            Text {
+              id: codeLabel
+              anchors { left: parent.left; leftMargin: 8; right: removeCodeButton.left; verticalCenter: parent.verticalCenter }
+              text: String(modelData.path).split("/").pop() + ":" + modelData.l1 + "-" + modelData.l2
+              textFormat: Text.PlainText; elide: Text.ElideMiddle
+              color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            }
+            Item {
+              id: removeCodeButton
+              anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+              width: 24; height: 24
+              Text { anchors.centerIn: parent; text: "×"; color: Theme.fg_muted }
+              TapHandler { onTapped: rail.removeCode(index) }
+            }
+          }
+        }
+      }
+
       // Queued-message pill: Ctrl+Enter holds a message for the turn's end; without a
       // visible trace it reads as "my message vanished".
       Rectangle {
@@ -3885,6 +4014,7 @@ Item {
             // TextArea has no onAccepted — plain Enter routes here from Keys below.
             // Shift+Enter falls through to the default handler = a newline.
             function sendNow() {
+              if (rail.planDraft && !rail.pendingAsk) { rail.sendPlanDraft(); return }
               if (rail.askDeferred) return
               var pa = rail.pendingAsk
               // /goal — rail-intercepted (never reaches pi): pins a watchdog goal
@@ -3926,6 +4056,7 @@ Item {
                 // Judge the OUTGOING message: a pasted-then-token-deleted image must
                 // not fire a blank prompt just because pastedImages is non-empty.
                 rail.agentd.submit(rail.selectedRaw, rail.attachRefs(text))
+                rail.clearCode()
                 rail.rosterOverride = false   // sending = focus the conversation; roster compacts
               }
               rail.pastedImages = []      // attachments belong to the message just sent
@@ -3941,6 +4072,7 @@ Item {
             }
             Keys.onPressed: (e) => {
               var ctrl = (e.modifiers & Qt.ControlModifier)
+              if (ctrl && e.key === Qt.Key_P) { rail.requestPlanMenu(); e.accepted = true; return }
               // The old TextInput let C-d bubble to the rail's stale-notice dismiss;
               // the Controls TextArea consumes it, so handle it here explicitly.
               if (ctrl && e.key === Qt.Key_D && rail.staleAsk) {
@@ -3970,8 +4102,10 @@ Item {
               // aborted), then send it as a fresh prompt. Plain Enter steers the live
               // turn instead — see onAccepted / submit().
               if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
+                if (rail.planDraft) { feedbackPill.show("Use Enter to send a plan action"); e.accepted = true; return }
                 if (rail.agentd && rail.selectedRaw && rail.attachRefs(text).trim().length) {
                   rail.agentd.enqueue(rail.selectedRaw, rail.attachRefs(text))
+                  rail.clearCode()
                   rail.rosterOverride = false
                   rail.pastedImages = []
                   text = ""
@@ -4249,6 +4383,19 @@ Item {
     }
   }
 
+  Column {
+    visible: rail.planMenu !== null
+    anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
+    spacing: 6
+    Text { text: rail.planMenu ? rail.planMenu.title : ""; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+    InlinePicker {
+      objectName: "planActionMenu"
+      width: Math.min(420, rail.width - 40)
+      entries: rail.planMenu ? rail.planMenu.labels : []
+      choice: rail.planChoice; prefix: ""; rowIcon: "clipboard-check"
+      onPicked: index => rail.choosePlan(index)
+    }
+  }
   InlinePicker {
     id: modelPalette
     objectName: "modelPalette"
