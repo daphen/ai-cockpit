@@ -29,11 +29,8 @@ export function Feed({ items, pinToEnd = false }: { items?: FeedItem[]; pinToEnd
       following.current = true
       requestAnimationFrame(scrollToEnd)
     }
-    const viewportChanged = (event: Event) => {
-      const keyboardOpen = Boolean((event as CustomEvent<{ keyboardOpen?: boolean }>).detail?.keyboardOpen)
-      if (!following.current && !keyboardOpen) return
-      following.current = true
-      requestAnimationFrame(scrollToEnd)
+    const viewportChanged = () => {
+      if (following.current) requestAnimationFrame(scrollToEnd)
     }
     window.addEventListener("cockpit:message-sent", messageSent)
     window.addEventListener("cockpit:viewport-change", viewportChanged)
@@ -54,7 +51,7 @@ export function Feed({ items, pinToEnd = false }: { items?: FeedItem[]; pinToEnd
         aria-live="polite"
         onScroll={() => {
         const node = feed.current
-        if (node) following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 80
+        if (node) following.current = node.scrollHeight - node.scrollTop - node.clientHeight <= 1
       }}
     >
       <AnimatePresence initial={false}>

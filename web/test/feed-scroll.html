@@ -1,0 +1,44 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><title>Feed scroll behavior</title></head><body>
+<div id="fixture" style="width:390px;height:420px"></div><output id="result">RUNNING</output>
+<style>.feed-stage { height: 100%; } #result { position: fixed; top: 0; left: 0; z-index: 100; }</style>
+<script type="module">
+import React from 'react'
+import { createRoot } from 'react-dom/client'
+import { LazyMotion, domAnimation, MotionConfig } from 'motion/react'
+import { Feed } from '/src/Feed.tsx'
+import '/src/theme.css'
+const root = createRoot(document.getElementById('fixture'))
+let items = Array.from({length:50},(_,i)=>({kind:'user',key:String(i),text:'Message '+i+' — historical message content '.repeat(8)}))
+const frame = () => new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+const render = async () => { root.render(React.createElement(LazyMotion,{features:domAnimation},React.createElement(MotionConfig,{reducedMotion:'always'},React.createElement(Feed,{items})))); await frame() }
+const check = (value,message) => { if (!value) throw new Error(message) }
+const viewport = keyboardOpen => window.dispatchEvent(new CustomEvent('cockpit:viewport-change',{detail:{keyboardOpen}}))
+try {
+  await render()
+  const feed = document.querySelector('.feed')
+  const atEnd = () => feed.scrollHeight-feed.scrollTop-feed.clientHeight<=1
+  const scroll = async top => { feed.scrollTop=top; await frame() }
+  check(atEnd(),'initial messages did not follow the bottom')
+  await scroll(feed.scrollTop-20)
+  const slightlyUp = feed.scrollTop
+  items = [...items,{kind:'user',key:'new',text:'New incoming message'}]; await render()
+  check(Math.abs(feed.scrollTop-slightlyUp)<1,'incoming update snapped a small upward scroll back to the bottom')
+  await scroll(200)
+  viewport(true); await frame()
+  check(Math.abs(feed.scrollTop-200)<1,'keyboard-open viewport event stole the reading position')
+  document.getElementById('fixture').style.height='350px'
+  viewport(true); await frame()
+  check(Math.abs(feed.scrollTop-200)<1,'keyboard resize stole the reading position')
+  viewport(false); await frame()
+  check(Math.abs(feed.scrollTop-200)<1,'keyboard close stole the reading position')
+  window.dispatchEvent(new Event('cockpit:message-sent')); await frame()
+  check(atEnd(),'sending did not resume following')
+  items = [...items,{kind:'user',key:'follow',text:'Followed update'}]; await render()
+  check(atEnd(),'incoming message stopped following at the bottom')
+  await scroll(200); await scroll(feed.scrollHeight)
+  document.getElementById('fixture').style.height='300px'; viewport(true); await frame()
+  check(atEnd(),'manual return to bottom did not resume viewport following')
+  document.getElementById('result').textContent='PASS: 8 feed scrolling checks'
+} catch(error) { document.getElementById('result').textContent='FAIL: '+error.message; console.error(error) }
+</script></body></html>
