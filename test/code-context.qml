@@ -25,8 +25,23 @@ ShellRoot {
       'lua package.preload["plan-nvim"]=function() return {menu=function(i,p) vim.fn.writefile({vim.json.encode({choice=i,path=p})},os.getenv("HOME").."/menu-call") end,submit_compose=function(p) vim.fn.writefile(vim.fn.readfile(p),os.getenv("HOME").."/plan-submit-result"); return "sent" end} end']
   }
   FloatingWindow {
+    id: window
+    property string pane: "rail"
+    onPaneChanged: { if (pane === "nvim") editor.forceActiveFocus(); else rail.forceActiveFocus() }
     visible: true; implicitWidth: 720; implicitHeight: 800
-    Rail { id: rail; anchors.fill: parent; agentd: state; scopeMode: "personal"; instanceName: "code-context-test"; nvimSock: Quickshell.env("HOME") + "/nvim.sock"; focused: true; TestEvent { id: keys } }
+    Item {
+      id: editor
+      onActiveFocusChanged: if (activeFocus) window.pane = "nvim"
+      Keys.onPressed: event => { if (event.key === Qt.Key_L && (event.modifiers & Qt.ControlModifier)) { window.pane = "rail"; event.accepted = true } }
+    }
+    Rail {
+      id: rail; anchors.fill: parent; agentd: state; scopeMode: "personal"; instanceName: "code-context-test"; nvimSock: Quickshell.env("HOME") + "/nvim.sock"
+      focused: window.pane === "rail"
+      onFocusNvim: window.pane = "nvim"
+      onRequestFocus: window.pane = "rail"
+      onActiveFocusChanged: if (activeFocus) window.pane = "rail"
+      TestEvent { id: keys }
+    }
   }
   function check(value, message) { if (!value) throw new Error(message) }
   function find(item, name) {
@@ -99,6 +114,18 @@ ShellRoot {
         submitted.reload()
         test.check(rail.planDraft === null && rail.composerText === "", "confirmed plan submission did not clear its draft")
         test.check(JSON.parse(submitted.text()).text === "Existing question", "plan submit did not preserve the user's text")
+        rail.prefillComposer("keep draft")
+        test.press(Qt.Key_H, Qt.ControlModifier)
+        test.check(window.pane === "nvim", "Ctrl+H did not leave the composer")
+      } else if (test.phase === 8) {
+        test.check(editor.activeFocus, "editor did not receive focus")
+        test.press(Qt.Key_L, Qt.ControlModifier)
+      } else if (test.phase === 9) {
+        test.check(window.pane === "rail" && rail.insert, "Ctrl+L did not restore composer mode")
+        test.press(Qt.Key_X)
+        test.check(rail.composerText === "keep draftx", "returning to the rail stole focus from the input")
+        test.press(Qt.Key_H, Qt.ControlModifier)
+        test.check(window.pane === "nvim", "second Ctrl+H was trapped in the input")
         test.attach(); rail.scopeMode = "work"
         test.check(rail.codeAttachments.length === 0 && test.attach() !== "accepted", "attachment leaked across scopes")
         console.log("PASS: code handoff/tag/removal, exact send and queue payloads, draft isolation, plan menu and safeguards")
