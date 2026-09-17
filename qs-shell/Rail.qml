@@ -1287,10 +1287,15 @@ Item {
   }
   function _recomputeDefault() {
     if (!live || !agentd || !agentd.settled) { defaultRaw = ""; return }
-    if (defaultRaw && liveSessions.some(s => s.name === defaultRaw)) return
-    if (savedRaw && liveSessions.some(s => s.name === savedRaw)) { defaultRaw = savedRaw; return }
-    var roots = liveSessions.filter(s => !s.parent)
-    var pool = (roots.length ? roots : liveSessions).slice()
+    var ownerScope = recordedOrchScope || orchScope
+    var eligible = s => !(scopeMode === "work" && ownerScope && s.profile === "lovable-orchestrator" && s.scope !== ownerScope)
+    if (savedRaw && liveSessions.some(s => s.name === savedRaw && eligible(s))) { defaultRaw = savedRaw; return }
+    var owner = scopeMode === "work" ? liveSessions.find(s => s.profile === "lovable-orchestrator" && s.scope === ownerScope) : null
+    if (owner) { defaultRaw = owner.name; return }
+    if (defaultRaw && liveSessions.some(s => s.name === defaultRaw && eligible(s))) return
+    var available = liveSessions.filter(eligible)
+    var roots = available.filter(s => !s.parent)
+    var pool = (roots.length ? roots : available).slice()
     pool.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     defaultRaw = pool.length ? pool[0].name : ""
   }
@@ -1386,6 +1391,7 @@ Item {
   // goal cleared, so the rail showed the local session as orchestrator with the VM's
   // workers under it (David, 2026-08-26). The role now changes only when he toggles.
   property string recordedOrchScope: ""
+  onRecordedOrchScopeChanged: _recomputeDefault()
   FileView {
     path: Quickshell.env("HOME") + "/.local/state/cockpit/orchestrator-holder"
     watchChanges: true
