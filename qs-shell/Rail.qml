@@ -4093,13 +4093,11 @@ Item {
                 rail.rosterOverride = false   // sending = focus the conversation; roster compacts
               }
               rail.pastedImages = []      // attachments belong to the message just sent
-              // No settle burst on a send: the rows are already sized, so re-pinning
-              // 9x over ~540ms was visible as a flicker on the first message.
-              feedScroll.toEnd()
-              // Stay in insert after sending — you almost always have a follow-up,
-              // and dropping to normal mode meant pressing `i` again every time.
-              // Esc / Ctrl+h still leave. (An answered ask_user is done, so exit.)
               text = ""
+              feedDebounce.stop()
+              rail.feedTick++
+              rail._resyncFeed()
+              feedScroll.toEnd()
               if (pa && (pa.method === "input" || pa.method === "editor")) rail.exitInsert()
               else composerInput.forceActiveFocus()
             }
