@@ -184,6 +184,7 @@ ShellRoot {
     }
     onDashboardActiveChanged: {
       if (win.pane === "nvim") Qt.callLater(function() {
+        if (win.pane !== "nvim") return
         if (win.dashboardActive) dashboard.forceActiveFocus()
         else term.forceActiveFocus()
       })

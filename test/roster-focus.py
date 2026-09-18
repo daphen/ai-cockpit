@@ -31,7 +31,15 @@ probe = '''
           focusKeys.keyClick(Qt.Key_J, Qt.NoModifier, 0)
           win.focusCheck(rail.cur === 1, "reopened roster did not receive navigation")
           win.focusCheck(rail.composerText === "draft stays", "navigation edited the draft")
-          console.log("PASS: production roster IPC preserves draft and owns keyboard after parked hop and rapid reopen")
+          focusIpc.focusLeft()
+          chin.st = {dashboard:{active:true,model:{kind:"home",scope:"personal",identity:"HOME",cards:[],actions:[],tabs:[]}}}
+          win.focusCheck(win.dashboardActive, "dashboard transition did not occur")
+          focusIpc.rosterHop()
+        } else if (win.focusPhase === 3) {
+          win.focusCheck(win.pane === "rail", "late dashboard transition stole roster focus")
+          focusKeys.keyClick(Qt.Key_J, Qt.NoModifier, 0)
+          win.focusCheck(rail.cur === 1, "roster lost keyboard after dashboard transition")
+          console.log("PASS: production roster IPC owns keyboard after parked hop, rapid reopen and dashboard transition")
           running = false; Qt.quit()
         }
         win.focusPhase++
