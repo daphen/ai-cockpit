@@ -221,10 +221,9 @@ ShellRoot {
       function rosterHop(): string {
         const onRoster = win.pane === "rail" && !term.activeFocus
                        && !rail.insert && rail.cur < rail.rSize
-        if (onRoster) return "parked"
         win.pane = "rail"
         rail.focusRoster()
-        return "landed"
+        return onRoster ? "parked" : "landed"
       }
       // Super+T semantics = the in-app Ctrl+T: open the roster and park; pressed
       // again while parked, put it away. STRICTLY this window — no cockpit hop.
@@ -233,7 +232,9 @@ ShellRoot {
                        && !rail.insert && rail.cur < rail.rSize
         if (rail.rosterExpanded && onRoster) {
           rail.rosterOverride = false
-          Qt.callLater(rail.enterInsert)
+          Qt.callLater(function() {
+            if (!rail.rosterExpanded) rail.enterInsert()
+          })
           return "collapsed"
         }
         win.pane = "rail"
