@@ -15,9 +15,12 @@ cd "$(dirname "$0")"
 tmp=$(mktemp -d /tmp/qml-validate.XXXXXX)
 trap 'rm -rf "$tmp"' EXIT
 cp -r qs-shell "$tmp/shell"
+mkdir -m 700 "$tmp/runtime" "$tmp/home"
 
 log=$tmp/out.log
-QT_QPA_PLATFORM=offscreen \
+env -u WAYLAND_DISPLAY -u DISPLAY -u NVIM_LISTEN_ADDRESS -u COCKPIT_NVIM_SOCK -u HEIDR_NVIM_SOCK -u VIMINIT -u EXINIT \
+HOME="$tmp/home" XDG_RUNTIME_DIR="$tmp/runtime" \
+QT_QPA_PLATFORM=offscreen COCKPIT_INSTANCE="qml-validate-$$" COCKPIT_COCKPIT_CMD=cat COCKPIT_AGENTD_SOCKS="$tmp/absent.sock" \
 COCKPIT_TITLE="qml-validate-$$" \
 COCKPIT_SCOPE="${COCKPIT_SCOPE:-lovable}" \
 COCKPIT_ASSET_DIR="$PWD/assets" \
@@ -28,20 +31,23 @@ pid=$!
 
 # Errors surface within the first seconds; a clean load just keeps running.
 for _ in $(seq 1 40); do
-    if grep -qiE "ERROR|Syntax error|unavailable" "$log" 2>/dev/null; then
+    if grep -qE "ERROR|Syntax error|unavailable|^Error in VIMINIT" "$log" 2>/dev/null; then
         echo "FAIL — $(basename "$0"):"
         grep -iE "ERROR|Syntax error|unavailable|caused by" "$log" | head -8
         kill "$pid" 2>/dev/null
         wait "$pid" 2>/dev/null
         exit 1
     fi
-    grep -q "Shell ID" "$log" 2>/dev/null && break
+    grep -q "Configuration Loaded" "$log" 2>/dev/null && break
     sleep 0.25
 done
 
 kill "$pid" 2>/dev/null
 wait "$pid" 2>/dev/null
-if grep -qiE "ERROR|Syntax error|unavailable" "$log" 2>/dev/null; then
+if grep -qE "ERROR|Syntax error|unavailable|^Error in VIMINIT" "$log" 2>/dev/null; then
     echo "FAIL:"; grep -iE "ERROR|caused by" "$log" | head -8; exit 1
 fi
-echo "OK — shell parses (offscreen, running cockpit untouched)"
+if ! grep -q "Configuration Loaded" "$log"; then
+    echo "FAIL — configuration did not finish loading"; exit 1
+fi
+echo "OK — shell loaded (offscreen, isolated runtime)"

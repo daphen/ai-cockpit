@@ -2,6 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp=$(mktemp -d /tmp/cockpit-session-landing.XXXXXX)
+mkdir -m 700 "$tmp/runtime"
+export XDG_RUNTIME_DIR="$tmp/runtime"
 pid=""
 server_pid=""
 cleanup() {
