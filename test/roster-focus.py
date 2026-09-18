@@ -39,7 +39,22 @@ probe = '''
           win.focusCheck(win.pane === "rail", "late dashboard transition stole roster focus")
           focusKeys.keyClick(Qt.Key_J, Qt.NoModifier, 0)
           win.focusCheck(rail.cur === 1, "roster lost keyboard after dashboard transition")
-          console.log("PASS: production roster IPC owns keyboard after parked hop, rapid reopen and dashboard transition")
+          focusIpc.focusRoster(); focusDecoy.forceActiveFocus()
+          win.focusCheck(focusIpc.rosterToggle() === "landed", "logical roster position was mistaken for actual keyboard focus")
+          focusIpc.focusComposer()
+        } else if (win.focusPhase === 4) {
+          focusIpc.focusLeft()
+          win.focusCheck(focusIpc.rosterToggle() === "landed", "editor-to-roster action collapsed instead")
+          focusKeys.keyClick(Qt.Key_J, Qt.NoModifier, 0)
+          win.focusCheck(rail.cur === 1 && !rail.insert, "editor-to-roster action lost focus")
+          focusKeys.keyClick(Qt.Key_T, Qt.ControlModifier, 0)
+        } else if (win.focusPhase === 5) {
+          win.focusCheck(rail.insert, "Ctrl+T did not return to composer")
+          focusKeys.keyClick(Qt.Key_T, Qt.ControlModifier, 0)
+          focusKeys.keyClick(Qt.Key_J, Qt.NoModifier, 0)
+          win.focusCheck(rail.cur === 1 && !rail.insert, "Ctrl+T and IPC focus behavior diverged")
+          win.focusCheck(rail.composerText === "draft stays", "focus actions changed the draft")
+          console.log("PASS: one roster action works through IPC and Ctrl+T, from composer/editor/parked states and after deferred transitions")
           running = false; Qt.quit()
         }
         win.focusPhase++
@@ -50,6 +65,8 @@ with tempfile.TemporaryDirectory(prefix="cockpit-roster-offscreen-") as temporar
     path = Path(temporary)
     for file in (root / "qs-shell").glob("*.qml"):
         shutil.copy2(file, path / file.name)
+    if len(sys.argv) > 2:
+        shutil.copy2(sys.argv[2], path / "Rail.qml")
     text = source.read_text().replace("import QtQuick\n", "import QtQuick\nimport QtTest\n", 1)
     text = text.replace("id: win", "id: win" + probe, 1).replace("IpcHandler {", "IpcHandler { id: focusIpc", 1)
     (path / "shell.qml").write_text(text)

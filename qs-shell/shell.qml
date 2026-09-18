@@ -228,20 +228,7 @@ ShellRoot {
       }
       // Super+T semantics = the in-app Ctrl+T: open the roster and park; pressed
       // again while parked, put it away. STRICTLY this window — no cockpit hop.
-      function rosterToggle(): string {
-        const onRoster = win.pane === "rail" && !term.activeFocus
-                       && !rail.insert && rail.cur < rail.rSize
-        if (rail.rosterExpanded && onRoster) {
-          rail.rosterOverride = false
-          Qt.callLater(function() {
-            if (!rail.rosterExpanded) rail.enterInsert()
-          })
-          return "collapsed"
-        }
-        win.pane = "rail"
-        rail.focusRoster()
-        return "landed"
-      }
+      function rosterToggle(): string { return rail.toggleRoster() }
       // The rail's test interface (test/rail-nav.sh): cursor/scroll behaviour depends on
       // the roster and feed changing UNDER the cursor, which is only assertable from
       // outside the process.

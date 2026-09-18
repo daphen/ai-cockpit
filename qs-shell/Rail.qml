@@ -58,14 +58,23 @@ Item {
   }
   function focusRoster() {
     if (rosterOverride === false) rosterOverride = true
-    exitInsert()
     _wasInsert = false
     _blurFeedKey = ""   // explicit roster jump beats the blur-position restore
+    requestFocus()
+    exitInsert()
     // Land on the ACTIVE session's row, not row 0 — Super+T means "show me where I am",
     // and the top row was usually somebody else.
     var i = _rosterIndexOf(selectedRaw)
     cur = i >= 0 ? i : 0
-    requestFocus()
+  }
+  function toggleRoster() {
+    if (activeFocus && rosterExpanded && !insert && cur < rSize) {
+      rosterOverride = false
+      Qt.callLater(function() { if (rail.focused && !rail.rosterExpanded) rail.enterInsert() })
+      return "collapsed"
+    }
+    focusRoster()
+    return "landed"
   }
 
   // Cursor flows: roster (always) → the main area, whose view Tab toggles.
@@ -2069,15 +2078,7 @@ Item {
     if (ctrl && e.key === Qt.Key_P) { requestPlanMenu(); return true }
     // Ctrl+T = the in-app Super+T: open the roster and park on the active row;
     // pressed again while parked, put it away and return to the composer.
-    if (ctrl && e.key === Qt.Key_T) {
-      if (rosterExpanded && !insert && cur < rSize) {
-        rosterOverride = false
-        Qt.callLater(rail.enterInsert)
-      } else {
-        focusRoster()
-      }
-      return true
-    }
+    if (ctrl && e.key === Qt.Key_T) { toggleRoster(); return true }
     return false
   }
 
