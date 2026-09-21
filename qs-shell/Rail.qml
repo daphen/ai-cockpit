@@ -4096,8 +4096,8 @@ Item {
               text = ""
               feedDebounce.stop()
               rail.feedTick++
-              rail._resyncFeed()
               feedScroll.toEnd()
+              rail._resyncFeed()
               if (pa && (pa.method === "input" || pa.method === "editor")) rail.exitInsert()
               else composerInput.forceActiveFocus()
             }
