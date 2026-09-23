@@ -504,16 +504,9 @@ void TermView::pasteText(const QString &t) {
 // renderer positions is a multiple of cellW/cellH offset by the pads, so if those are
 // exact device-pixel multiples then every glyph origin is too — which is what keeps
 // stem weights identical across columns instead of alternating crisp/smeared.
-// QQuickPaintedItem's backing texture defaults to the item size in LOGICAL pixels,
-// so on a 1.5x/1.75x display everything we paint is rasterized into a texture smaller
-// than the physical pixels and then scaled UP by the compositor — a permanent softness
-// that no font/metric tuning can recover. Pin the texture to device pixels instead.
+// Qt applies DPR to textureSize itself; this API takes logical dimensions.
 void TermView::syncTextureSize(qreal dpr) {
   if (dpr <= 0) dpr = 1.0;
-  // qRound, not ceil: with a device-pixel-snapped item these are exact, and rounding
-  // keeps the painter's scale equal to dpr instead of a hair above it. A warning fires
-  // if the item is ever unsnapped again, because the symptom (slightly soft, unevenly
-  // weighted glyphs) is easy to misread as a font problem.
   const qreal wantW = width() * dpr, wantH = height() * dpr;
   const bool exact = std::abs(wantW - std::round(wantW)) <= 0.01 &&
                      std::abs(wantH - std::round(wantH)) <= 0.01;
@@ -529,8 +522,8 @@ void TermView::syncTextureSize(qreal dpr) {
                  "frames resample, glyph stems will look uneven", width(), height(), r);
     }, Qt::QueuedConnection);
   }
-  const int tw = std::max(1, (int)std::round(wantW));
-  const int th = std::max(1, (int)std::round(wantH));
+  const int tw = std::max(1, (int)std::round(width()));
+  const int th = std::max(1, (int)std::round(height()));
   if (textureSize() != QSize(tw, th)) setTextureSize(QSize(tw, th));
 }
 

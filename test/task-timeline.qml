@@ -134,13 +134,17 @@ ShellRoot {
         test.check(rail.scrollMode === "free", "last-row task jump unexpectedly enabled live follow")
         rail.debugNav("G")
         test.check(rail.scrollMode === "follow", "explicit bottom navigation did not restore follow")
-        var many = [test.marker("old",null,"switch","Outside window")], parent = "old"
+        var many = [], parent = null
+        for (var task = 0; task < 6; task++) {
+          var markerId = "old" + task
+          many.push(test.marker(markerId,parent,"switch","Outside window " + task)); parent = markerId
+        }
         for (var j = 0; j < 65; j++) { var id = "tail" + j; many.push(test.entry(id,parent,j%2 ? "assistant" : "user","Tail " + j)); parent = id }
         test.history(many,parent)
       } else if (test.phase === 7) {
-        if (!test.ready(rail.taskSegments.length === 0)) return
-        test.check(rail.taskSegments.length === 0 && rail.activeTask === "", "out-of-window task was fabricated")
-        test.check(!test.find(rail,"sessionTaskTimeline").visible, "empty timeline still visible")
+        if (!test.ready(rail.taskSegments.length === 6)) return
+        test.check(rail.taskSegments.length === 6 && rail.activeTask === "Outside window 5", "out-of-window tasks were dropped")
+        test.check(test.find(rail,"sessionTaskTimeline").visible, "retained task timeline is hidden")
         test.history([test.marker("clipped","missing-parent","switch","Available tail"), test.entry("last","clipped","assistant","Tail result")],"last")
       } else if (test.phase === 8) {
         if (!test.ready(rail.activeTask === "Available tail")) return

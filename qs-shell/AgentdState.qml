@@ -140,6 +140,7 @@ Item {
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
   // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
   signal editSeen(string sid, string path, string needleB64, bool historical)
+  signal sessionSettled(string sid)
   signal modelChangeResult(string sid, bool success, string detail)
   signal openInNvimRequested(string sid, string path, int line, int column)
   // The edit's most distinctive inserted line (longest trimmed, >=3 chars),
@@ -256,6 +257,7 @@ Item {
   // Per-session changed-files (from the daemon's `changes` diff broadcast).
   property var changes: ({})       // sid -> [{path, add, del}]
   property var changesCwd: ({})    // sid -> cwd (to resolve absolute paths)
+  property var changeErrors: ({})
   property int changesGen: 0
   function changesFor(sid)    { return (changes[sid] || []).slice() }
   function changesCwdFor(sid) { return changesCwd[sid] || "" }
@@ -588,36 +590,12 @@ Item {
     refreshChanges(sid)
   }
 
-  // Populate the files view on demand by running the session's branch diff
-  // locally (the roster carries each session's cwd). Works for local worktrees
-  // without an agentd round-trip; the turn_end broadcast keeps it fresh after.
-  property string _pendingChangesSid: ""
-  // cwdOverride: a REMOTE session's cwd is a VM path that no local git can read, so
-  // the caller passes the vm-sync mirror instead (only Rail knows that mapping).
-  function refreshChanges(sid, cwdOverride) {
-    var cwd = cwdOverride || ""
-    for (var i = 0; !cwd && i < sessions.length; i++)
-      if (sessions[i].id === sid || sessions[i].name === sid) { cwd = sessions[i].cwd; break }
-    if (!cwd) return
-    _pendingChangesSid = sid
-    gitProc.cwdArg = cwd
-    gitProc.running = false
-    gitProc.running = true
-  }
-  Process {
-    id: gitProc
-    property string cwdArg: ""
-    // Diff from the MERGE-BASE, not origin/main itself: a two-dot diff against a
-    // moving main counts every unrelated commit main gained since the fork as this
-    // session's changes (584 phantom files on a branch with zero work).
-    command: ["sh", "-c",
-      "cd " + JSON.stringify(cwdArg) + " 2>/dev/null && { b=$(git merge-base origin/main HEAD 2>/dev/null || git rev-parse -q --verify HEAD 2>/dev/null || echo 4b825dc642cb6eb9a060e54bf8d69288fbee4904); git diff --no-color --no-ext-diff --unified=0 \"$b\" 2>/dev/null; git ls-files --others --exclude-standard 2>/dev/null | grep -v '^\\.heidr-pastes/' | while IFS= read -r f; do printf 'diff --git a/%s b/%s\\n+++ b/%s\\n' \"$f\" \"$f\" \"$f\"; n=$(wc -l < \"$f\" 2>/dev/null || echo 0); i=0; while [ $i -lt $n ] && [ $i -lt 500 ]; do printf '+\\n'; i=$((i+1)); done; done; }"]
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var sid = root._pendingChangesSid
-        if (sid) { root.changes[sid] = root._parseChanges(this.text); root.changesCwd[sid] = gitProc.cwdArg; root.changesGen++ }
-      }
-    }
+  function refreshChanges(sid) {
+    if (!sid) return
+    changes[sid] = []
+    changeErrors[sid] = send({ type: "get_changes", session: sid })
+      ? "Waiting for source diff…" : "Diff unavailable: daemon disconnected"
+    changesGen++
   }
 
   // Expand an assistant message's content blocks into feed items (mirror of the
@@ -702,7 +680,7 @@ Item {
       var _from = items.length
       if (msg.role === "sessionTask") {
         items.push({ kind: "sys", tool: "task", taskAction: msg.action, taskTitle: msg.title,
-                     outcome: msg.outcome, timestamp: msg.timestamp,
+                     outcome: msg.outcome, timestamp: msg.timestamp, clipped: msg._clipped === true,
                      text: (msg.action === "switch" ? "Task · " : "Finished · ") + msg.title + (msg.outcome ? " — " + msg.outcome : "") })
       } else if (msg.role === "userBashApproval") {
         items.push({ kind: "cmd", tool: "ask",
@@ -838,8 +816,12 @@ Item {
       }
     }
     var CHAT_CAP = 60
-    return _msgsToFeed(msgs.slice(Math.max(0, msgs.length - CHAT_CAP)), toolErrs, _feedSid, toolResults)
-    return _coalesce(items)
+    var capStart = Math.max(0, msgs.length - CHAT_CAP)
+    var visibleMsgs = []
+    for (var mi = 0; mi < capStart; mi++)
+      if (msgs[mi].role === "sessionTask") visibleMsgs.push(Object.assign({}, msgs[mi], { _clipped: true }))
+    visibleMsgs = visibleMsgs.concat(msgs.slice(capStart))
+    return _msgsToFeed(visibleMsgs, toolErrs, _feedSid, toolResults)
   }
 
   // Collapse runs of 3+ consecutive same-tool calls into one group item.
@@ -887,6 +869,8 @@ Item {
       if (String(m.health || "") !== String(hh[si] || "")) { hh[si] = String(m.health || ""); _health = hh; healthGen++ }
       _noteReported(si)
       _rebuildSessions()
+      if (selectedSession && _sockOf[selectedSession] === si && !(feeds[selectedSession] || []).length)
+        refreshEntries(selectedSession)
       _reconcileCurrentTools()
       // Rosters are authoritative for asks: clearing used to depend solely on
       // catching the ask_answered event, so a rail that was relaunching or
@@ -1037,8 +1021,12 @@ Item {
       // notify / setStatus / setWidget etc. are UI directives, not questions.
       return
     }
-    if (t === "changes") {
-      changes[sid] = _parseChanges(m.diff || "")
+    if (t === "changes" || (t === "response" && m.command === "get_changes" && !m.success)) {
+      if (_sockOf[sid] !== (sockIdx || 0)) return
+      for (var ci = 0; ci < sessions.length; ci++)
+        if ((sessions[ci].id === sid || sessions[ci].name === sid) && m.cwd && sessions[ci].cwd !== m.cwd) return
+      changeErrors[sid] = m.error ? "Diff unavailable: " + m.error : ""
+      changes[sid] = m.error ? [] : (m.files || _parseChanges(m.diff || ""))
       changesCwd[sid] = m.cwd || ""
       changesGen++
       return
@@ -1133,7 +1121,8 @@ Item {
         feeds[sid] = arr; feedGen++
       }
     } else if (t === "agent_end" && sid === selectedSession) {
-      select(sid)
+      refreshEntries(sid)
+      sessionSettled(sid)
     }
   }
 

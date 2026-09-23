@@ -1,0 +1,107 @@
+<!doctype html>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Composer stacking</title></head><body>
+<div id="fixture"></div><output id="result">RUNNING</output>
+<style>#result { position: fixed; top: 0; left: 0; z-index: 100; pointer-events: none; }</style>
+<script type="module">
+import React, { useState } from 'react'
+import { createRoot } from 'react-dom/client'
+import { LazyMotion, domAnimation, MotionConfig } from 'motion/react'
+import { Composer } from '/src/Composer.tsx'
+import { AskCard } from '/src/AskCard.tsx'
+import { Feed } from '/src/Feed.tsx'
+import '/src/theme.css'
+const h = React.createElement
+const root = createRoot(document.getElementById('fixture'))
+const wait = () => new Promise(resolve => setTimeout(resolve, 600))
+const check = (value, message) => { if (!value) throw new Error(message) }
+const mobile = matchMedia('(max-width: 720px)').matches
+const ask = { method: 'confirm', title: 'Approve this change?', message: 'Details requiring your approval. '.repeat(mobile ? 60 : 2) }
+function Fixture({ queue, question, error }) {
+  const [expanded, setExpanded] = useState(false)
+  return h(LazyMotion, { features: domAnimation }, h(MotionConfig, { reducedMotion: 'always' },
+    h('main', { className: 'app session-open' }, h('aside', { className: 'roster-pane' }), h('div', { className: 'session-stage' },
+      h('section', { className: 'session-pane' },
+        h('header', { className: 'session-header' }, 'Agent'),
+        error && h('div', { className: 'error-banner' }, 'Connection error'),
+        h(Feed, { items: [{ kind: 'user', key: '1', text: 'Conversation content. '.repeat(100) }] }),
+        question && h(AskCard, { ask: question, onAnswer: () => {} }),
+        h(Composer, {
+          sessionName: 'Test agent', activeKey: 'personal/test', fleet: [], busy: false,
+          queue, disabled: Boolean(question), onSubmit: () => {}, onUploadImage: async () => '/test.png',
+          onSteerQueued: () => {}, onInterrupt: () => {}, rosterExpanded: expanded,
+          onRosterExpandedChange: setExpanded, rosterKey: 'private', rosterFeatured: null,
+          rosterHeader: h('nav', { className: 'group-tabs' }, h('button', { type: 'button' }, 'Private')),
+          roster: h('div', { className: 'roster' }, Array.from({ length: 8 }, (_, i) => h('button', { key: i, type: 'button' }, `Agent ${i}`))),
+        })
+      )
+    ))
+  ))
+}
+const failures = []
+let checks = 0
+try {
+  for (const height of mobile ? [844, 340] : [844]) {
+    for (const queued of [false, true]) {
+      document.documentElement.style.setProperty('--app-height', `${height}px`)
+      document.documentElement.style.setProperty('--app-safe-bottom', '20px')
+      const label = `height=${height}, queue=${queued}`
+      const props = { key: label, queue: queued ? ['Queued one', 'Queued two', 'Queued three'] : [], error: height === 340 }
+      root.render(h(Fixture, props))
+      await wait()
+      const record = (value, message) => { checks++; if (!value) failures.push(`${label}: ${message}`) }
+      const feedBottom = document.querySelector('.feed-stage').getBoundingClientRect().bottom
+      record(feedBottom <= document.querySelector('.composer-glance').getBoundingClientRect().top + 1, 'feed overlaps collapsed composer')
+      root.render(h(Fixture, { ...props, question: ask }))
+      await wait()
+      const card = document.querySelector('.ask-card')
+      const glance = document.querySelector('.composer-glance')
+      const input = document.querySelector('.composer-pill')
+      const bounds = () => card.getBoundingClientRect()
+      record(input.getBoundingClientRect().bottom <= height, 'input is outside the visible viewport')
+      record(bounds().bottom <= glance.getBoundingClientRect().top + 1, 'approval overlaps collapsed composer')
+      card.scrollTop = card.scrollHeight
+      const approve = card.querySelector('button')
+      const buttonRect = approve.getBoundingClientRect()
+      record(document.elementFromPoint(buttonRect.x + buttonRect.width / 2, buttonRect.y + buttonRect.height / 2) === approve, 'approval action is obscured')
+      const feedHeight = document.querySelector('.feed-stage').getBoundingClientRect().height
+      glance.click()
+      await wait()
+      if (mobile) record(Math.abs(document.querySelector('.feed-stage').getBoundingClientRect().height - feedHeight) < 1, 'opening the mobile roster reflows the feed')
+      for (const node of [glance, input]) {
+        const rect = node.getBoundingClientRect()
+        record(node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)), 'card paints above expanded composer')
+      }
+      glance.click()
+      await wait()
+      root.render(h(Fixture, props))
+      await wait()
+      const fileInput = document.querySelector('.image-input')
+      const files = new DataTransfer()
+      files.items.add(new File([Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7i8AAAAASUVORK5CYII='), c => c.charCodeAt(0))], 'test.png', { type: 'image/png' }))
+      fileInput.files = files.files
+      fileInput.dispatchEvent(new Event('change', { bubbles: true }))
+      await wait()
+      root.render(h(Fixture, { ...props, question: ask }))
+      await wait()
+      const attachedCard = document.querySelector('.ask-card')
+      record(Boolean(document.querySelector('.attachment-chip')), 'attachment was not added')
+      record(attachedCard.getBoundingClientRect().bottom <= glance.getBoundingClientRect().top + 1, 'attachment makes approval overlap composer')
+      attachedCard.scrollTop = attachedCard.scrollHeight
+      const action = attachedCard.querySelector('button')
+      const rect = action.getBoundingClientRect()
+      record(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === action, 'approval action is obscured with an attachment')
+      record(input.getBoundingClientRect().bottom <= height, 'attachment pushes input outside the viewport')
+      const extras = document.querySelector('.composer-extras')
+      extras.scrollTop = extras.scrollHeight
+      const remove = document.querySelector('.attachment-chip button')
+      const removeRect = remove.getBoundingClientRect()
+      record(document.elementFromPoint(removeRect.x + removeRect.width / 2, removeRect.y + removeRect.height / 2) === remove, 'attachment removal is obscured')
+      remove.click()
+      await wait()
+      record(!document.querySelector('.attachment-chip'), 'attachment could not be removed')
+    }
+  }
+  check(!failures.length, failures.join('; '))
+  document.getElementById('result').textContent = `PASS: ${checks} composer stacking checks`
+} catch (error) { document.getElementById('result').textContent = 'FAIL: ' + error.message; console.error(error) }
+</script></body></html>

@@ -1,0 +1,6 @@
+[Unit]
+Description=Expire Cockpit screenshots older than 24 hours
+
+[Service]
+Type=oneshot
+ExecStart=systemd-tmpfiles --user --clean %h/.config/user-tmpfiles.d/heidr-pastes.conf

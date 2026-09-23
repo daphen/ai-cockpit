@@ -10,7 +10,7 @@ import json, os, socket, sys, threading, time
 
 SOCK = sys.argv[1] if len(sys.argv) > 1 else "/tmp/fake-agentd.sock"
 
-BASE = ["alpha-1000", "every-9001", "zulu-9999"]
+BASE = sys.argv[2:] or ["alpha-1000", "every-9001", "zulu-9999"]
 state = {"names": list(BASE), "streaming": None, "extra_turns": 0, "entry_delay": 0.0, "transcript_ask": None,
          "live_ask": None, "user_bash": None}
 clients = []
@@ -23,7 +23,7 @@ def sessions():
         session = {
             "name": n,
             "status": "streaming" if n == state["streaming"] else "idle",
-            "cwd": f"/home/daphen/work/lovable.daphen-{n}",
+            "cwd": os.environ.get("FAKE_AGENTD_CWD", f"/home/daphen/work/lovable.daphen-{n}"),
         }
         if n == "every-9001" and state["live_ask"]:
             session["ask"] = state["live_ask"]
@@ -154,6 +154,17 @@ def serve(conn):
                 broadcast(answered)
                 broadcast({"type": "turn_end", "session": sid})
                 push_roster()
+            if t == "get_changes":
+                sid = m.get("session", "")
+                print(json.dumps(m), flush=True)
+                if sid == "broken-worker":
+                    send(conn, {"type": "changes", "session": sid, "error": "invalid Git HEAD"})
+                else:
+                    send(conn, {"type": "changes", "session": sid,
+                                "cwd": os.environ.get("FAKE_AGENTD_CWD", ""),
+                                "files": [{"path": "source.txt" if sid == "remote-worker" else "wrong-scope.txt",
+                                           "oldPath": "old.txt", "add": 7, "del": 2, "binary": True}]})
+                continue
             if t == "get_entries":
                 sid = m.get("session")
 

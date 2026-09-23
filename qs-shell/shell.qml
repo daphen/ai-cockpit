@@ -25,8 +25,15 @@ ShellRoot {
       return raw ? raw.split(",").map(p => p.trim()).filter(p => p.length > 0) : null
     }
     function pathsFor(mode) {
-      var custom = mode === startupMode ? envSockPaths() : null
-      if (custom) return custom
+      var custom = envSockPaths()
+      if (custom) {
+        var personal = p => /-personal\.sock$/.test(p)
+        var work = p => /-(work|lovable)\.sock$/.test(p)
+        // Keep custom sockets, but never place a known other-scope socket in this roster.
+        if (mode === startupMode) return custom.filter(p => !(mode === "work" ? personal(p) : work(p)))
+        var matching = custom.filter(mode === "work" ? work : personal)
+        if (matching.length) return matching
+      }
       return mode === "work"
         ? [runtimeDir + "/agentd-lovable.sock", runtimeDir + "/agentd-work.sock"]
         : [runtimeDir + "/agentd-personal.sock"]

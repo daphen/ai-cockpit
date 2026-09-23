@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import "."
 
 ShellRoot {
@@ -10,7 +11,7 @@ ShellRoot {
   property bool online: true
   AgentdState {
     id: backend
-    configuredSockPaths: []
+    configuredSockPaths: [Quickshell.env("XDG_RUNTIME_DIR") + "/agentd-work.sock"]
     selectedSession: "ticket-a"
     function send(message) {
       if (!test.online) return false
@@ -19,6 +20,20 @@ ShellRoot {
       return true
     }
     onEditSeen: (sid, path, needle, historical) => test.seen.push({ sid: sid, path: path, historical: historical })
+  }
+  Component { id: landingRail; Rail { agentd: backend; scopeMode: "work"; nvimSock: "/tmp/landing-test.sock" } }
+  FileView { id: nvimCalls; path: Quickshell.env("HOME") + "/nvim-calls" }
+  Timer {
+    interval: 30; repeat: true; running: true
+    onTriggered: {
+      nvimCalls.reload()
+      var calls = nvimCalls.text()
+      if (!calls.length) return
+      check(calls.indexOf(',"work","/home/david_karlsson_lovable_dev/src/lovable-every-1")') >= 0,
+            "workspace handoff lost VM scope/directory: " + calls)
+      console.log("PASS: history, interruption, streaming, and source-scoped editor handoff")
+      Qt.quit()
+    }
   }
   function check(ok, message) { if (!ok) throw new Error(message) }
   function receive(message) { backend.onLine(JSON.stringify(message), 0) }
@@ -30,6 +45,9 @@ ShellRoot {
         }) } }] } })
   }
   Component.onCompleted: {
+    receive({ type: "roster", sessions: [{ id: "ticket-a", name: "ticket-a", status: "idle", cwd: "/tmp/ticket-a" }] })
+    check(historyRequests.length === 1 && historyRequests[0] === "ticket-a", "first roster hydrates an already-selected empty feed")
+    historyRequests = []
     history("ticket-a", ["src/old.ts", "src/latest.ts", ".plans/TICKET-A.md", ".plans/TICKET-A.progress.json"])
     check(backend.lastEditFor("ticket-a") === "src/latest.ts", "history must skip plan bookkeeping")
     check(seen.length === 1 && seen[0].historical && seen[0].sid === "ticket-a", "late history must notify editor")
@@ -86,6 +104,9 @@ ShellRoot {
     history("ticket-a", ["another.ts"])
     receive({ type: "message_update", session: "ticket-a", assistantMessageEvent: { type: "text_delta", delta: "hidden" } })
     check(backend.feedFor("ticket-a").length === before, "inactive replies do not churn the feed")
-    console.log("PASS: session landing history, interruption, and streaming (21 checks)")
+    var rail = landingRail.createObject(test)
+    receive({ type: "roster", sessions: [{ name: "vm", id: "vm", status: "idle",
+      cwd: "/home/david_karlsson_lovable_dev/src/lovable-every-1" }] })
+    rail.landNvim("vm", "diff")
   }
 }

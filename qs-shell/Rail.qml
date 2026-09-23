@@ -217,16 +217,67 @@ Item {
       if (liveSessions[n].name !== excluding) return liveSessions[n].name
     return ""
   }
+  property var lifecycleTarget: null
+  property bool lifecycleConfirm: false
+  property string lifecycleMessage: ""
+  readonly property var lifecycleEntries: lifecycleConfirm
+    ? ["Cancel", "CONFIRM REAP " + (lifecycleTarget ? lifecycleTarget.ticket : "") + " — remove worktree and exclusive caches"]
+    : ["Turn off — keep files", "REAP — remove worktree and exclusive caches"]
+  function _ticketLifecycle(name) {
+    var ss = _sessionOf(name)
+    if (!ss || ss.parent || !_isRemote(ss.cwd)) return null
+    var role = String(ss.profile || ss.role || "")
+    if (role.indexOf("orchestrator") >= 0 || String(ss.cwd || "").indexOf("/src/lovable") < 0) return null
+    var match = String(ss.cwd || "").match(/(?:^|[-.])(every-\d+)(?:-|$)/i)
+    return match ? { session: String(ss.name || name), ticket: match[1].toUpperCase() } : null
+  }
   function stopSession(name) {
     var target = String(name || "")
     if (!target || !agentd) return
+    var action = _ticketLifecycle(target)
+    if (action) {
+      lifecycleTarget = action; lifecycleConfirm = false
+      requestFocus(); return
+    }
     if (target === selectedRaw) {
       var fallback = recentFallback(target)
-      activeRaw = fallback
-      defaultRaw = fallback
+      activeRaw = fallback; defaultRaw = fallback
     }
     recentSelections = recentSelections.filter(x => x !== target)
     agentd.stop(target)
+  }
+  function closeLifecycle() { lifecycleTarget = null; lifecycleConfirm = false }
+  function chooseLifecycle(index) {
+    if (!lifecycleTarget || lifecycleProc.running) return
+    if (lifecycleConfirm) {
+      if (index === 1) runLifecycle("reap"); else closeLifecycle()
+    } else if (index === 0) runLifecycle("off")
+    else lifecycleConfirm = true
+  }
+  function runLifecycle(action) {
+    var target = lifecycleTarget
+    lifecycleProc.action = action; lifecycleProc.ticket = target.ticket; lifecycleProc.session = target.session
+    lifecycleProc.command = [Quickshell.env("HOME") + "/.config/niri/scripts/vm-wt", "--" + action, target.ticket]
+    if (action === "reap") {
+      var mirror = _localPath(_sessionCwdOf(target.session)), parentRepo = mirror.replace(/\.[^/]+$/, "")
+      if (!nvimSock.length || parentRepo === mirror) {
+        lifecycleMessage = "REAP " + target.ticket + " blocked: bound editor or parent repo unavailable"
+        feedbackPill.show(lifecycleMessage); closeLifecycle(); return
+      }
+      var lua = '(function() local m=' + JSON.stringify(mirror) + '; local p=' + JSON.stringify(parentRepo)
+        + '; for _,b in ipairs(vim.api.nvim_list_bufs()) do local n=vim.api.nvim_buf_get_name(b); if n~="" and vim.bo[b].modified and (n==m or n:sub(1,#m+1)==m.."/") then return "BLOCK modified file: "..n end end'
+        + '; local cwd=(vim.uv or vim.loop).cwd(); if cwd==m or cwd:sub(1,#m+1)==m.."/" then vim.cmd("noautocmd cd "..vim.fn.fnameescape(p)) end; return "OK" end)()'
+      lifecycleProc.command = ["sh", "-c", 'r=$(nvim --server "$1" --remote-expr "$2" 2>&1); c=$?; if [ "$c" -ne 0 ] || [ "$r" != OK ]; then echo "$r" >&2; exit 125; fi; exec "$HOME/.config/niri/scripts/vm-wt" --reap "$3"', "reap-check", nvimSock, "luaeval(" + JSON.stringify(lua) + ")", target.ticket]
+    }
+    lifecycleMessage = (action === "reap" ? "REAP " : "Turn off ") + target.ticket + "…"
+    closeLifecycle(); lifecycleProc.running = true
+  }
+  function keyLifecycle(e) {
+    if (e.key === Qt.Key_Escape || (lifecycleConfirm && e.key === Qt.Key_N)) { closeLifecycle(); return true }
+    if (lifecycleConfirm && e.key === Qt.Key_Y) { chooseLifecycle(1); return true }
+    if (e.key === Qt.Key_1) { chooseLifecycle(0); return true }
+    if (e.key === Qt.Key_2 && !lifecycleConfirm) { chooseLifecycle(1); return true }
+    return true
   }
   // Roster starts expanded and stays however you leave it — Ctrl+t toggles the
   // full list vs the single-row glance, and the choice persists across focus
@@ -714,10 +765,6 @@ Item {
     return s
   }
   // ── image paste ─────────────────────────────────────────────────────────────
-  // pi takes images as `@path` references in the prompt, so a pasted image becomes
-  // a file plus an @mention. The file is written into the SELECTED SESSION's cwd
-  // (via the mirror for remote work) so mutagen carries it to the box and pi can
-  // actually open it — a local /tmp path would not exist over there.
   property var pastedImages: []   // filenames pasted this session, shown as composer chips
   readonly property string composerKey: scopeMode + "/" + selectedRaw
   property var codeDrafts: ({})
@@ -804,8 +851,7 @@ Item {
       for (var i = 0; i < pastedImages.length; i++)
         if (String(pastedImages[i]).indexOf(stem + ".") === 0) { f = pastedImages[i]; break }
       if (!f) return all
-      // Remote: worktree-relative (the box's absolute path differs from ours).
-      // Local: the cache dir's absolute path — the project stays untouched.
+      if (pasteViaSsh) return "@" + vmPasteDir + "/" + f
       return pasteRemote ? "@.heidr-pastes/" + f
                          : "@" + Quickshell.env("HOME") + "/.cache/heidr-pastes/" + f
     })
@@ -818,25 +864,24 @@ Item {
     }
     return text
   }
-  // Local vs remote pastes are DIFFERENT problems. A remote (VM) session needs the
-  // file inside the worktree so mutagen/scp can carry it to the box, and the @ref
-  // must be worktree-relative (the box path differs). A LOCAL pi reads any absolute
-  // path — its pastes live in ~/.cache/heidr-pastes and never touch the project.
   readonly property bool pasteRemote: {
     var cwd = _sessionCwdOf(selectedRaw)
     return _isRemote(cwd)
   }
+  readonly property bool pasteViaSsh: pasteRemote && _sessionCwdOf(selectedRaw).indexOf(
+    "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/") === 0
+  readonly property string vmPasteDir: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/.cache/heidr-pastes"
   property string pasteDirFor: {
-    var cwd = _sessionCwdOf(selectedRaw)
-    if (!_isRemote(cwd)) return Quickshell.env("HOME") + "/.cache/heidr-pastes"
-    return rail._localPath(cwd) + "/.heidr-pastes"
+    if (!pasteRemote || pasteViaSsh) return Quickshell.env("HOME") + "/.cache/heidr-pastes"
+    return rail._localPath(_sessionCwdOf(selectedRaw)) + "/.heidr-pastes"
   }
   Process {
     id: pasteProc
     stdout: StdioCollector {
       onStreamFinished: {
         var out = String(this.text || "").trim()
-        if (!out || out === "NOIMAGE") { composerInput.paste(); return }   // no image → normal text paste
+        if (!out) { feedbackPill.show("Screenshot capture failed"); return }
+        if (out === "NOIMAGE") { composerInput.paste(); return }
         // A short [image N] token lands AT THE CARET — the reference then replaces it
         // in place at send time (attachRefs), so the image sits where you pasted it,
         // for you and for the agent. Deleting the token drops the image from the send.
@@ -848,24 +893,16 @@ Item {
       }
     }
   }
-  // A paste for a REMOTE session rides two channels: the @reference goes with the prompt
-  // (milliseconds) while the file itself waits for mutagen's watch→scan→ship cycle
-  // (~1-3s) — so paste-and-Enter-immediately could reach pi before its file existed.
-  // Push the file up eagerly over the same ControlMaster socket vm-sync keeps warm
-  // (~150ms; a cold dial still beats typing the message). mutagen syncing it again a
-  // moment later is a harmless no-op — identical content resolves clean.
+  // VM caches do not depend on a ticket mirror and cannot enter a project commit.
   function _pushPasteRemote(name) {
-    var cwd = _sessionCwdOf(selectedRaw)
-    if (!_isRemote(cwd)) return
+    if (!pasteViaSsh) return
     var vmuser = cockpitEnv("VM_USER") || "david_karlsson_lovable_dev"
-    // Only the dev VM speaks plain ssh/scp; a lovbox mirror keeps mutagen as its carrier.
-    if (cwd.indexOf("/home/" + vmuser + "/") !== 0) return
     var host = cockpitEnv("VM_HOST")
              || ((cockpitEnv("VM") || "dev-heidr-2a39") + ".workstation.lovable.net")
     var ssh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
             + " -o ControlMaster=auto -o ControlPath=" + Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-vm-cm"
             + " -o ControlPersist=600 -o ConnectTimeout=15"
-    var rdir = cwd + "/.heidr-pastes"
+    var rdir = vmPasteDir
     var local = pasteDirFor + "/" + name
     Quickshell.execDetached(["sh", "-c",
       ssh + " " + vmuser + "@" + host + " 'mkdir -p " + JSON.stringify(rdir) + "' && "
@@ -885,10 +922,10 @@ Item {
       't=$(wl-paste --list-types 2>/dev/null | grep -m1 "^image/"); ' +
       '[ -n "$t" ] || { echo NOIMAGE; exit 0; }; ' +
       'e=${t#image/}; [ "$e" = jpeg ] && e=jpg; [ "$e" = svg+xml ] && e=svg; ' +
-      // Sequential img1/img2/… per session: the reference has to be readable in the
-      // sentence ("before: @img1.png, after: @img2.png"), and a timestamped name made
-      // two pastes indistinguishable at a glance.
-      'n=$(ls "$d" 2>/dev/null | grep -c "^img[0-9]"); n=$((n+1)); ' +
+      // The counter survives expiry; its lock serializes captures across windows.
+      'exec 9<>"$d/.sequence" || exit 1; flock 9 || exit 1; ' +
+      'n=$(cat "$d/.sequence"); if [ -z "$n" ]; then n=$(ls "$d" | grep -oE "^img[0-9]+" | cut -c4- | sort -n | tail -n1); fi; ' +
+      'n=$((${n:-0}+1)); printf "%s\\n" "$n" > "$d/.sequence" || exit 1; ' +
       'f="$d/img$n.$e"; ' +
       'wl-paste --type "$t" > "$f" 2>/dev/null && echo "img$n.$e" || echo NOIMAGE']
     pasteProc.running = true
@@ -940,7 +977,7 @@ Item {
     if (latest && latest.charAt(0) !== "/") latest = localCwd + "/" + latest
     if (!nvimSock.length) return
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || "")].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
+      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
   }
   function showWorkspace(view) {
     landNvim(selectedRaw, view)
@@ -966,10 +1003,11 @@ Item {
         console.warn("mirror preparation failed for " + sessionName + ": " + detail)
         return
       }
-      if (!rail.nvimSock.length) return
       var ss = rail._sessionOf(sessionName)
       var local = rail._localPath(remoteCwd)
-      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", "", String(ss.profile || "")].map(JSON.stringify).join(",")
+      if (rail.agentd) rail.agentd.refreshChanges(sessionName)
+      if (!rail.nvimSock.length) return
+      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", "", String(ss.profile || ""), String(ss.scope || ""), remoteCwd].map(JSON.stringify).join(",")
       var lua = '(function() local m=require("cockpit"); local d=m.dashboard_snapshot(); if d.active and d.model.cwd=='
         + JSON.stringify(local) + ' then m.workspace(' + args + ') end; require("cockpit.chin").refresh(); return "" end)()'
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
@@ -1031,7 +1069,6 @@ Item {
     var s = String(l || "")
     return /^\s*[✦✧⟢⟣✤◆❉]/.test(s) || /\bnext\s+(question|action)\s*:/i.test(s)
   }
-  // Thinking blocks — shown inline (the visible thought-process trail).
   function turnThinks(items) { return (items || []).filter(x => x.kind === "think") }
   function turnUserBash(items) { return (items || []).filter(x => x.kind === "userbash") }
   function isPlanMetadataEdit(item) {
@@ -1225,6 +1262,9 @@ Item {
   readonly property color selectedTurnBorder: Theme.mode === "light"
     ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.42)
     : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
+  readonly property color bevelBorder: Theme.mode === "dark" ? Theme.hairline : "#C8C8C6"
+  readonly property color bevelTop: Theme.mode === "dark" ? Theme.surface3 : "#F5F5F3"
+  readonly property color bevelBottom: Theme.mode === "dark" ? Theme.surface0 : "#D8D8D6"
   // One colour vocabulary for BOTH roster states: the collapsed dots and the expanded
   // rows now read identically, so "what is this session doing" is the same glance either
   // way. Working is the orb, never a dot.
@@ -1799,6 +1839,26 @@ Item {
     closeNew()
   }
   Process { id: vmWt; running: false }
+  Process {
+    id: lifecycleProc
+    property string action: ""
+    property string ticket: ""
+    property string session: ""
+    stdout: StdioCollector { id: lifecycleOut }
+    stderr: StdioCollector { id: lifecycleErr }
+    onExited: (code, status) => {
+      var label = action === "reap" ? "REAP " : "Turn off "
+      var detail = [lifecycleOut.text, lifecycleErr.text].filter(x => String(x || "").trim().length).join("\n").trim()
+      if (!detail.length) detail = code === 0 ? "completed" : "no output"
+      rail.lifecycleMessage = code === 0 ? label + ticket + ": " + detail
+        : label + ticket + " failed (exit " + code + "): " + detail
+      feedbackPill.show(rail.lifecycleMessage)
+      if (code === 0 && action === "reap" && session === rail.selectedRaw) {
+        var fallback = rail.recentFallback(session)
+        if (fallback.length) { rail.activeRaw = fallback; rail.defaultRaw = fallback }
+      }
+    }
+  }
   // Per-session reading position: the message key you were parked on, remembered only when
   // you had actually scrolled away from the live edge. Switching back restores it; a session
   // you were following (or have never opened) still lands on its newest message.
@@ -1900,6 +1960,11 @@ Item {
     function onOpenInNvimRequested(sid, path, line, column) {
       rail.openRequestedFile(sid, path, line, column)
     }
+    function onSessionSettled(sid) {
+      var cwd = rail._sessionCwdOf(sid)
+      if (cwd && rail._isRemote(cwd)) rail._alignMirror(sid)
+      else if (rail.agentd) rail.agentd.refreshChanges(sid, cwd)
+    }
     function onEditHunk(sid, path, line) {
       if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
       var cwd = rail._sessionCwdOf(sid)
@@ -1947,6 +2012,7 @@ Item {
   function toggleGroupKey(k) { toggleGroup(k) }   // string-keyed groups (turn activity)
   // Focus follows whichever field is VISIBLE: with a question up, the composer is
   // hidden and typing belongs to the ask, so `i` must land there instead.
+  readonly property bool onSteamDeck: Quickshell.env("COCKPIT_DECK") === "1"
   readonly property bool askWantsText: pendingAsk && (pendingAsk.method === "input" || pendingAsk.method === "editor")
   property bool askDeferred: false
   function enterInsert() {
@@ -2010,7 +2076,7 @@ Item {
   function toggleCurBash() {
     if (view !== "chat" || cur < rSize) return
     var l = curLocal(), it = groupedFeed[l]
-    if (it && turnBashItems(it.items).length)
+    if (it && (turnActivitySummary(it.items).length || turnThinks(it.items).length))
       toggleGroupKey("turn-" + (it.key || l))
   }
   // Is the cursor'd feed card at least partly in the viewport?
@@ -2156,8 +2222,8 @@ Item {
       return true
     }
     if (pm === "confirm") {
-      if (e.key === Qt.Key_Y) { answerAsk({ confirmed: true });  return true }
-      if (e.key === Qt.Key_N) { answerAsk({ confirmed: false }); return true }
+      if (e.key === Qt.Key_Y || e.key === Qt.Key_1) { answerAsk({ confirmed: true });  return true }
+      if (e.key === Qt.Key_N || e.key === Qt.Key_2) { answerAsk({ confirmed: false }); return true }
     } else if (pm === "select" && pendingAsk.options) {
       var d = e.key - Qt.Key_0
       if (d >= 1 && d <= Math.min(9, pendingAsk.options.length)) { answerAsk({ value: pendingAsk.options[d - 1] }); return true }
@@ -2229,6 +2295,7 @@ Item {
   Keys.onPressed: (e) => {
     _klog(e)
     if (keyGlobal(e)) { e.accepted = true; return }
+    if (lifecycleTarget && keyLifecycle(e)) { e.accepted = true; return }
     if (planMenu) {
       if (e.key === Qt.Key_Escape) planMenu = null
       else if (e.key === Qt.Key_J || e.key === Qt.Key_Down) planChoice = Math.min(planMenu.labels.length - 1, planChoice + 1)
@@ -2494,8 +2561,14 @@ Item {
         chunked = false
         // A user message whose visible text stripped to nothing (system-reminder
         // only, or a bare sender stamp) rendered as a blank card — skip it.
-        if (!String(it.text || "").trim().length) continue
-        out.push({ kind: "user", text: it.text, mid: it.mid, steered: it.steered === true, sender: it.sender || "", key: it.mid || _contentKey("user", it.text) })
+        var text = String(it.text || ""), sender = it.sender || ""
+        if (!sender && text.indexOf("\u21c4 ") === 0) {
+          var nl = text.indexOf("\n")
+          sender = (nl > 0 ? text.slice(2, nl) : text.slice(2)).trim()
+          text = nl > 0 ? text.slice(nl + 1).trim() : ""
+        }
+        if (!text.trim().length) continue
+        out.push({ kind: "user", text: text, mid: it.mid, steered: it.steered === true, sender: sender, key: it.mid || _contentKey("user", it.text) })
       } else if (it.kind === "sys") {
         // Housekeeping (compaction) gets its OWN card so it never colors the
         // neighboring turn's errors.
@@ -2505,7 +2578,7 @@ Item {
         if (it.tool === "task") {
           if (it.taskAction === "switch") {
             if (segment) segment.end = out.length - 1
-            segment = { key: it.mid, title: it.taskTitle, timestamp: it.timestamp, row: out.length, end: out.length, outcome: "", finishedAt: "" }
+            segment = { key: it.mid, title: it.taskTitle, timestamp: it.timestamp, row: out.length, end: out.length, outcome: "", finishedAt: "", clipped: it.clipped === true }
             segments.push(segment)
             active = it.taskTitle
           } else if (it.taskAction === "finish" && it.taskTitle === active) {
@@ -2547,6 +2620,10 @@ Item {
     }
     if (segment) segment.end = out.length - 1
     for (var si = 0; si < segments.length; si++) {
+      if (segments[si].clipped && segments[si].end < segments[si].row) {
+        segments[si].row = out.length ? Math.min(segments[si].row, out.length - 1) : -1
+        segments[si].end = segments[si].row
+      }
       segments[si].active = segments[si] === segment
     }
     return { rows: out, segments: segments.filter(s => s.end >= s.row), active: active }
@@ -2613,7 +2690,16 @@ Item {
       clip: true
       activeFocusOnTab: false
       model: rail.changesList
-      header: Item { width: changesView.width; height: 12 }
+      header: Text {
+        width: changesView.width
+        text: rail.agentd && rail.agentd.changesGen >= 0
+          ? String((rail.agentd.changeErrors || {})[rail.selectedRaw] || "") : ""
+        height: text.length ? implicitHeight + 12 : 12
+        wrapMode: Text.Wrap
+        color: Theme.fg_muted
+        font.family: Theme.fontFamily
+        font.pixelSize: rail.fsMeta
+      }
       boundsBehavior: Flickable.StopAtBounds
       ScrollFeel { flick: changesView }
       delegate: Rectangle {
@@ -2737,22 +2823,77 @@ Item {
         readonly property bool compactUser: isUser && rail.compactUserMessage(turn.text)
         readonly property string userFoldKey: "user-" + (turn.key || rowIndex)
         readonly property bool userExpanded: compactUser && rail.expandedGroups[userFoldKey] === true
-        readonly property var userStats: rail.userMessageStats(isUser ? turn.text : "")
         // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
         readonly property bool isSys: turnDel.turn.sys === true
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
+        readonly property color userContentColor: Theme.fg
+        readonly property color messageSurface: isUser
+          ? (Theme.mode === "dark" ? Theme.surface1 : Theme.surface0)
+          : (Theme.mode === "dark" ? Theme.surface0 : Theme.surface1)
 
         Rectangle {
           id: card
           anchors { left: parent.left; right: parent.right }
           implicitHeight: cardCol.implicitHeight + 36
           radius: 14
-          // Fill-only separation, verified against the reference UI by sampling it:
-          // ground 10,10,10 → card 23,23,23 → inner element 31,31,31, and NO borders
-          // anywhere. The step sizes carry it; an added hairline just muddies them.
-          color: turnDel.cursor ? rail.selectedTurnSurface : Theme.bg
-          border.width: turnDel.cursor ? 2 : (Theme.mode === "light" ? 1 : 0)
-          border.color: turnDel.cursor ? rail.selectedTurnBorder : Theme.hairline
+          color: "transparent"
+          Rectangle {
+            width: parent.width
+            height: parent.height
+            y: 3
+            radius: card.radius
+            visible: Theme.mode === "light"
+            color: Qt.rgba(0, 0, 0, 0.018)
+          }
+          Rectangle {
+            width: parent.width
+            height: parent.height
+            y: 1
+            radius: card.radius
+            visible: Theme.mode === "light"
+            color: Qt.rgba(0, 0, 0, 0.04)
+          }
+          Rectangle {
+            anchors.fill: parent
+            radius: card.radius
+            border.width: 1
+            border.color: rail.bevelBorder
+            gradient: Gradient {
+              orientation: Gradient.Vertical
+              GradientStop { position: 0; color: rail.bevelTop }
+              GradientStop { position: 1; color: rail.bevelBottom }
+            }
+            Rectangle {
+              anchors.fill: parent
+              anchors.margins: 2
+              radius: Math.max(0, parent.radius - 2)
+              gradient: Gradient {
+                orientation: Gradient.Vertical
+                GradientStop {
+                  position: 0
+                  color: turnDel.isSys
+                    ? (turnDel.cursor ? rail.selectedTurnSurface : Theme.bg)
+                    : turnDel.isUser
+                      ? (Theme.mode === "dark" ? "#2B2B2B" : "#FFFFFF")
+                      : turnDel.messageSurface
+                }
+                GradientStop {
+                  position: 1
+                  color: turnDel.isSys
+                    ? (turnDel.cursor ? rail.selectedTurnSurface : Theme.bg)
+                    : turnDel.messageSurface
+                }
+              }
+            }
+          }
+          Rectangle {
+            anchors.fill: parent
+            radius: card.radius
+            visible: turnDel.cursor
+            color: "transparent"
+            border.width: 2
+            border.color: rail.selectedTurnBorder
+          }
           HoverHandler { id: fhov }
           TapHandler { onTapped: rail.clickAt(rail.rSize + turnDel.rowIndex) }
 
@@ -2773,8 +2914,8 @@ Item {
                 color: turnDel.isUser ? Theme.orange : Theme.electric
               }
               Text {
-                text: turnDel.isUser ? (turnDel.turn.sender || "you") : "agent"
-                color: Theme.fg
+                text: turnDel.isUser ? (turnDel.turn.sender ? "From " + turnDel.turn.sender : "you") : "agent"
+                color: turnDel.isUser ? turnDel.userContentColor : Theme.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
                 anchors.verticalCenter: parent.verticalCenter
               }
@@ -2830,9 +2971,9 @@ Item {
               width: Math.min(cardCol.width, pastedTextRow.implicitWidth + 16)
               implicitHeight: 26
               radius: 7
-              color: Theme.surface0
+              color: Qt.rgba(turnDel.userContentColor.r, turnDel.userContentColor.g, turnDel.userContentColor.b, 0.08)
               border.width: 1
-              border.color: Theme.hairline
+              border.color: Qt.rgba(turnDel.userContentColor.r, turnDel.userContentColor.g, turnDel.userContentColor.b, 0.18)
               Row {
                 id: pastedTextRow
                 anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
@@ -2843,17 +2984,28 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
-                  text: "Pasted text · " + turnDel.userStats.lines + " lines · " + turnDel.userStats.chars + " chars"
-                  color: Theme.fg_muted
+                  text: turnDel.userExpanded ? "Hide full message" : "Show full message"
+                  color: turnDel.userContentColor
+                  opacity: 0.72
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Icon {
                   name: turnDel.userExpanded ? "chevron-down" : "chevron-right"
-                  width: 11; height: 11; color: Theme.fg_muted
+                  width: 11; height: 11; color: turnDel.userContentColor; opacity: 0.72
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
+            }
+
+            Text {
+              visible: turnDel.compactUser && !turnDel.userExpanded
+              width: cardCol.width
+              text: String(turnDel.turn.text || "").replace(/\s+/g, " ").trim()
+              textFormat: Text.PlainText
+              color: turnDel.userContentColor
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+              wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
             }
 
             Loader {
@@ -2865,7 +3017,7 @@ Item {
               property int sourceEntry: 0
               property int sourceOffset: 0
               property int rowIndex: turnDel.rowIndex
-              property color bodyColor: Theme.fg
+              property color bodyColor: turnDel.userContentColor
               property bool agentAuthored: false
             }
 
@@ -2881,30 +3033,16 @@ Item {
               }
             }
 
-            // Thought process — visible inline. Each block shows its short header;
-            // tap to reveal the full reasoning.
             Repeater {
-              model: turnDel.isUser ? [] : rail.turnThinks(turnDel.turn.items)
-              Loader {
-                id: thoughtLoader
+              model: turnDel.isUser ? [] : (turnDel.turn.items || []).filter(item => item.kind === "cmd" && item.tool === "error")
+              Text {
                 width: cardCol.width
-                sourceComponent: thinkRow
-                opacity: 0
-                property real introBlur: 0.125
-                property real introY: 4
-                transform: Translate { y: thoughtLoader.introY }
-                layer.enabled: thoughtIntro.running
-                layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: thoughtLoader.introBlur }
-                Component.onCompleted: thoughtIntro.start()
-                ParallelAnimation {
-                  id: thoughtIntro
-                  NumberAnimation { target: thoughtLoader; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.InOutQuad }
-                  NumberAnimation { target: thoughtLoader; property: "introY"; from: 4; to: 0; duration: 150; easing.type: Easing.OutCubic }
-                  NumberAnimation { target: thoughtLoader; property: "introBlur"; from: 0.125; to: 0; duration: 150; easing.type: Easing.InOutQuad }
-                }
-                property var entry: modelData
-                property string gkey: "think-" + turnDel.rowIndex + "-" + index
-                property bool expanded: rail.expandedGroups[gkey] === true
+                text: modelData.text || ""
+                textFormat: Text.PlainText
+                color: Theme.red
+                font.family: Theme.fontFamily
+                font.pixelSize: rail.fsBody
+                wrapMode: Text.Wrap
               }
             }
 
@@ -2943,11 +3081,11 @@ Item {
 
             // Compact counts, always-visible edited files, and optional Bash details.
             Loader {
-              active: !turnDel.isUser && rail.turnActivitySummary(turnDel.turn.items).length > 0
+              active: !turnDel.isUser && (rail.turnActivitySummary(turnDel.turn.items).length > 0 || rail.turnThinks(turnDel.turn.items).length > 0)
               visible: active
               width: cardCol.width
               sourceComponent: activityRow
-              property var items: turnDel.isUser ? [] : rail.turnActivityItems(turnDel.turn.items)
+              property var items: turnDel.isUser ? [] : turnDel.turn.items
               property string summary: active ? rail.turnActivitySummary(turnDel.turn.items) : ""
               // Keyed on the row's stable identity, not its index: a group you expanded
               // otherwise collapsed (and its neighbour opened) as the window slid.
@@ -2985,7 +3123,12 @@ Item {
     anchors.leftMargin: 8; anchors.rightMargin: 8
     anchors.bottomMargin: -radius
     radius: 20 + 8
-    border.color: Theme.hairlineSoft; border.width: 1
+    border.color: rail.bevelBorder; border.width: 1
+    gradient: Gradient {
+      orientation: Gradient.Vertical
+      GradientStop { position: 0; color: rail.bevelTop }
+      GradientStop { position: 1; color: rail.bevelBottom }
+    }
     // 108 = composer + hints + padding, stable across the insert toggle. A pending
     // ask_user expands the chin to hold it, so the question takes over the input
     // instead of floating over the feed — animated so the jump is legible.
@@ -2995,10 +3138,17 @@ Item {
     // fudge factors, which is how the new-session card ended up overflowing.)
     clip: true
     height: chinCol.implicitHeight + 26 + radius   // 14 top pad + 12 visible bottom pad
-    color: Theme.surface0
+
+    Rectangle {
+      anchors.fill: parent
+      anchors.margins: 2
+      radius: Math.max(0, chin.radius - 2)
+      color: Theme.surface0
+    }
 
     ColumnLayout {
       id: chinCol
+      objectName: "chinContent"
       // Bottom-anchored so the composer + hints stay put and the roster grows UPWARD
       // when it expands (the sheet's top edge rises; the input never moves).
       // 12 visible: with the 16px hint row the old 6px left the caps flush with
@@ -3467,11 +3617,8 @@ Item {
                     anchors.centerIn: parent
                     visible: sessRow.hasAsk && (modelData.depth || 0) > 0
                     width: 9; height: 9; radius: 4.5; color: Theme.orange
-                    SequentialAnimation on opacity {
-                      running: visible; loops: Animation.Infinite
-                      NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-                      NumberAnimation { to: 1.0;  duration: 600; easing.type: Easing.InOutQuad }
-                    }
+                    readonly property real pulsePhase: (OrbClock.now % 1200) / 1200
+                    opacity: visible ? 0.675 + 0.325 * Math.cos(pulsePhase * 2 * Math.PI) : 1
                   }
                 }
               }
@@ -3527,11 +3674,8 @@ Item {
               anchors.centerIn: parent
               visible: sharedRosterOrb.hasAsk
               width: 9; height: 9; radius: 4.5; color: Theme.orange
-              SequentialAnimation on opacity {
-                running: visible; loops: Animation.Infinite
-                NumberAnimation { to: 0.35; duration: 600; easing.type: Easing.InOutQuad }
-                NumberAnimation { to: 1.0; duration: 600; easing.type: Easing.InOutQuad }
-              }
+              readonly property real pulsePhase: (OrbClock.now % 1200) / 1200
+              opacity: visible ? 0.675 + 0.325 * Math.cos(pulsePhase * 2 * Math.PI) : 1
             }
           }
         }
@@ -3695,7 +3839,7 @@ Item {
     // ask_user card — mirrors the nvim rail's "needs your input" approval: a
     // bordered card that TAKES OVER the composer's slot — same bottom edge as the input,
     // growing upward as it gets taller. confirm → y/n; select → 1–9;
-    // input/editor → i to type. Answered via the rail's Keys / the composer.
+    // input/editor → i to type. Answered via keys, clickable options, or the composer.
     Rectangle {
       id: askCard
       readonly property var ask: rail.pendingAsk
@@ -3747,43 +3891,59 @@ Item {
                    && !String(askCard.ask.title || "").length
                    && !askCard.prompt.length
           width: parent.width; wrapMode: Text.Wrap
-          text: "the agent asked for input without saying why — press t to make it explain, or esc to cancel the question"
+          text: rail.onSteamDeck
+              ? "the agent asked for input without saying why — press B to cancel the question"
+              : "the agent asked for input without saying why — press t to make it explain, or esc to cancel the question"
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           font.italic: true
         }
 
         // select → one keycap-numbered row per option
         Column {
+          width: askCol.width
           spacing: 6
           visible: askCard.ask && askCard.ask.method === "select"
           Repeater {
             model: (askCard.ask && askCard.ask.method === "select") ? askCard.ask.options : []
-            Row {
-              spacing: 9
-              KeyCap { text: String(index + 1); anchors.verticalCenter: parent.verticalCenter }
-              Text {
-                text: modelData; color: Theme.fg; width: askCol.width - 40; wrapMode: Text.Wrap
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-                anchors.verticalCenter: parent.verticalCenter
+            Rectangle {
+              id: optionRow
+              width: askCol.width
+              implicitHeight: Math.max(30, optionText.implicitHeight + 8)
+              radius: 8
+              color: optionHover.hovered ? Theme.hover : "transparent"
+              Row {
+                anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
+                spacing: 9
+                KeyCap { id: optionCap; text: rail.onSteamDeck && index < 4 ? "RT+" + ["A", "B", "X", "Y"][index] : String(index + 1); anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                  id: optionText
+                  text: modelData; color: Theme.fg; width: parent.width - optionCap.width - 9; wrapMode: Text.Wrap
+                  font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+                  anchors.verticalCenter: parent.verticalCenter
+                }
               }
+              HoverHandler { id: optionHover; cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: rail.answerAsk({ value: modelData }) }
             }
           }
         }
 
         // confirm → y / n
-        Row {
-          spacing: 20
+        Flow {
+          width: askCol.width
+          spacing: 10
           visible: askCard.ask && askCard.ask.method === "confirm"
-          Row { spacing: 8; KeyCap { text: "y"; anchors.verticalCenter: parent.verticalCenter }
+          Row { spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+A" : "y"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: askCard.userBash ? "Run" : "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: rail.answerAsk({ confirmed: true }) } }
-          Row { spacing: 8; KeyCap { text: "n"; anchors.verticalCenter: parent.verticalCenter }
+          Row { spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+B" : "n"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: askCard.userBash ? "Decline" : "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: rail.answerAsk({ confirmed: false }) } }
           // Neither yes nor no: release the agent from the question and open the composer,
           // for the common case where the question itself is the thing worth discussing.
           Row { visible: !askCard.userBash; spacing: 8; KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter } }
+            Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+            TapHandler { onTapped: { rail.answerAsk({ cancelled: true, discussing: true }); Qt.callLater(rail.enterInsert) } } }
         }
 
         // input/editor → answer HERE, in the card, not in the composer below
@@ -3827,11 +3987,17 @@ Item {
         }
 
         Text {
+          width: askCol.width; wrapMode: Text.Wrap
           readonly property bool hasUrl: askCard.ask && rail.firstUrl(String(askCard.ask.title || "") + "\n" + askCard.prompt).length > 0
-          text: (hasUrl ? "ctrl+o opens link · " : "") + (rail.askDeferred ? "finish typing · esc to answer"
+          text: (hasUrl ? (rail.onSteamDeck ? "tap link · " : "ctrl+o opens link · ") : "") + (rail.askDeferred ? "finish typing · esc to answer"
+              : rail.onSteamDeck && askCard.ask && askCard.ask.method === "select"
+                ? "hold RT + A/B/X/Y for options 1–4 · tap any option · B cancels"
+              : rail.onSteamDeck && askCard.ask && askCard.ask.method === "confirm"
+                ? "hold RT + A for yes · RT + B for no · B cancels"
+              : rail.onSteamDeck ? "press X for keyboard · B cancels"
               : askCard.userBash ? "click Run · y runs · n declines · esc cancels"
               : (askCard.ask && askCard.ask.method === "select")
-                ? "press a number · t to talk · esc cancels" : "t to talk · esc cancels")
+                ? "click an option or press a number · t to talk · esc cancels" : "t to talk · esc cancels")
           color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
       }
@@ -3996,7 +4162,9 @@ Item {
       // ask is pending: the question TAKES OVER the input rather than floating above a
       // composer that still looks ready for an unrelated message.
       Rectangle {
+        objectName: "composerFrame"
         Layout.fillWidth: true
+        Layout.minimumWidth: 0
         visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
         // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
         // Flickable scrolls the caret into view.
@@ -4193,7 +4361,9 @@ Item {
       // send/steer/queue grammar (which used to be crammed into the placeholder), an ask
       // shows its answer keys, and normal mode differs between a roster and a feed cursor.
       RowLayout {
+        objectName: "composerHints"
         Layout.fillWidth: true
+        Layout.minimumWidth: 0
         transform: Translate { y: 6 }
         spacing: 6
 
@@ -4244,7 +4414,7 @@ Item {
         Rectangle {
           id: goalPill
           Layout.alignment: Qt.AlignVCenter
-          visible: rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator
+          visible: !rail.onSteamDeck && (rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator)
           readonly property bool armed: rail.selectedGoal.length > 0
           readonly property color tint: armed ? Theme.green : Theme.orange
           readonly property bool expanded: goalHover.hovered
@@ -4309,6 +4479,7 @@ Item {
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: rail.selectedModelLabel
+              visible: rail.onSteamDeck || chinCol.width >= 300
               color: modelPill.tint
               font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
             }
@@ -4320,6 +4491,7 @@ Item {
         Item { Layout.fillWidth: true }   // push hint chips to the right
         Repeater {
           model: {
+            if (rail.onSteamDeck || chinCol.width < 520) return []
             if (rail.pendingAsk && !rail.insert) {
               var pm = rail.pendingAsk.method
               if (pm === "confirm") return [{ k: "y", l: "yes" }, { k: "n", l: "no" },
@@ -4427,6 +4599,15 @@ Item {
       onPicked: index => rail.choosePlan(index)
     }
   }
+  InlinePicker {
+    objectName: "lifecyclePicker"
+    visible: rail.lifecycleTarget !== null
+    anchors { left: parent.left; bottom: chin.top; leftMargin: 20; bottomMargin: 6 }
+    width: Math.min(520, rail.width - 40); z: 20
+    entries: rail.lifecycleEntries; choice: 0; prefix: ""; rowIcon: "bolt-lightning"
+    onPicked: index => rail.chooseLifecycle(index)
+  }
+
   InlinePicker {
     id: modelPalette
     objectName: "modelPalette"
@@ -4544,7 +4725,6 @@ Item {
   }
   Component {
     id: activityRow
-    // Edited files stay visible; Ctrl+Enter toggles only the Bash calls.
     Column {
       id: actCol
       width: parent ? parent.width : 400
@@ -4553,19 +4733,29 @@ Item {
       readonly property var bashItems: rail.turnBashItems(items)
       Row {
         spacing: 7
+        TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey) }
         Icon {
-          visible: actCol.bashItems.length > 0
           name: expanded ? "chevron-down" : "chevron-right"
           width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter
         }
         Text {
-          text: summary; color: Theme.fg_muted
+          text: "Details" + (summary ? " · " + summary : ""); color: Theme.fg_muted
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           anchors.verticalCenter: parent.verticalCenter
         }
       }
       Repeater {
-        model: actCol.editItems.length
+        model: expanded ? rail.turnThinks(items) : []
+        Loader {
+          width: actCol.width
+          sourceComponent: thinkRow
+          property var entry: modelData
+          property string gkey: ekey + "-think-" + index
+          property bool expanded: rail.expandedGroups[gkey] === true
+        }
+      }
+      Repeater {
+        model: expanded ? actCol.editItems.length : 0
         Loader {
           width: actCol.width
           property var entry: actCol.editItems[index]

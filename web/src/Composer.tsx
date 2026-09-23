@@ -97,6 +97,8 @@ export function Composer({ sessionName, activeKey, currentTool, fleet, busy, que
   const rosterExtentAnimation = useRef<ReturnType<typeof animate> | null>(null)
   const rosterShellHeight = useTransform(() => compositorTray ? rosterExtent.get() : rosterProgress.get() * rosterExtent.get())
   const trayOffset = useTransform(() => compositorTray ? (1 - rosterProgress.get()) * rosterExtent.get() : 0)
+  // The full tray stays transformable, but only the collapsed composer reserves layout space.
+  const sheetMarginTop = useTransform(() => compositorTray ? -rosterExtent.get() : 0)
   const rosterClip = useTransform(() => `inset(0 0 ${(1 - rosterProgress.get()) * 100}% 0)`)
   const rosterOpacity = useTransform(rosterProgress, [0, 0.35, 1], [0, 0.35, 1])
   const fleetOpacity = useTransform(rosterProgress, [0, 0.6], [1, 0])
@@ -258,7 +260,7 @@ export function Composer({ sessionName, activeKey, currentTool, fleet, busy, que
   })
 
   return (
-    <form className="composer-sheet" onSubmit={event => { event.preventDefault(); send() }}>
+    <m.form className="composer-sheet" style={{ marginTop: sheetMarginTop }} onSubmit={event => { event.preventDefault(); send() }}>
       <m.div className="composer-surface" aria-hidden="true" style={{ y: trayOffset }} />
       <m.div className="roster-region" style={{ y: trayOffset }}>
         <button
@@ -312,6 +314,7 @@ export function Composer({ sessionName, activeKey, currentTool, fleet, busy, que
         </div>
         </m.div>
       </m.div>
+      <div className="composer-extras">
       <AnimatePresence initial={false}>
         {!!queue.length && (
           <m.ol className="queued-messages" aria-label="Queued messages" variants={panelSwap} initial="initial" animate="animate" exit="exit">
@@ -337,6 +340,7 @@ export function Composer({ sessionName, activeKey, currentTool, fleet, busy, que
           ))}
         </div>
       )}
+      </div>
       <div className="composer-pill">
         <input ref={imageInput} className="image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple onChange={event => addImages(event.target.files)} />
         <button type="button" className="attach-button" aria-label="Attach images" disabled={disabled || images.length >= 4} onPointerDown={event => event.preventDefault()} onClick={() => imageInput.current?.click()}>
@@ -394,6 +398,6 @@ export function Composer({ sessionName, activeKey, currentTool, fleet, busy, que
           </m.div>
         )}
       </AnimatePresence>
-    </form>
+    </m.form>
   )
 }

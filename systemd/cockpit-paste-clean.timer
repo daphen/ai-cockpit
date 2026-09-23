@@ -1,0 +1,9 @@
+[Unit]
+Description=Check Cockpit screenshot expiry hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
