@@ -758,10 +758,13 @@ Item {
           }
         }
       }
-      for (var ti = _from; ti < items.length; ti++)
+      for (var ti = _from; ti < items.length; ti++) {
+        if (msg.role === "assistant" && msg.model && !items[ti].model)
+          items[ti].model = String(msg.model)
         // (message id, nth item OF THAT MESSAGE) — `ti` alone is the index into the
         // whole items array, which slides with the window and is not an identity.
         if (msg._mid && !items[ti].mid) items[ti].mid = msg._mid + ":" + (ti - _from)
+      }
     }
     return _coalesce(items)
   }
@@ -835,7 +838,7 @@ Item {
         if (j - i >= 3) {
           var cmds = []
           for (var k = i; k < j; k++) cmds.push({ text: items[k].text, command: items[k].command || "" })
-          out.push({ kind: "group", tool: it.tool, cmds: cmds, mid: it.mid })
+          out.push({ kind: "group", tool: it.tool, cmds: cmds, mid: it.mid, model: it.model || "" })
           i = j
           continue
         }

@@ -24,7 +24,7 @@ FocusScope {
     ? selectable[Math.max(0, Math.min(cursor, selectable.length - 1))] : ""
 
   function tone(name) {
-    if (name === "accent") return Theme.electric
+    if (name === "accent") return "#C4B5FD"
     if (name === "error") return Theme.red
     if (name === "success") return Theme.green
     if (name === "muted") return Theme.fg_muted

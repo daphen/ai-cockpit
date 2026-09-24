@@ -13,8 +13,16 @@ import QsLib
 Rectangle {
   id: chin
   implicitHeight: 36
-  color: Theme.bgDim
+  color: Theme.canvas
 
+  readonly property color fg: Theme.mode === "light" ? "#23272B" : "#FAFAFA"
+  readonly property color muted: Theme.mode === "light" ? "#747D84" : "#909090"
+  readonly property color hairline: Theme.mode === "light" ? Qt.rgba(0.14, 0.14, 0.13, 0.16) : Qt.rgba(1, 1, 1, 0.14)
+  readonly property color red: Theme.mode === "light" ? "#B94545" : "#FF7B72"
+  readonly property color orange: Theme.mode === "light" ? "#D75A13" : "#FF570D"
+  readonly property color gold: Theme.mode === "light" ? "#9A6500" : "#F2C572"
+  readonly property color green: Theme.mode === "light" ? "#4B8069" : "#97B5A6"
+  readonly property color sky: Theme.mode === "light" ? "#287FA6" : "#7DD3FC"
   property var st: ({})
   readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE")
       || Quickshell.env("HEIDR_INSTANCE") || "main"
@@ -26,7 +34,7 @@ Rectangle {
   component Swap: Item {
     id: sw
     property string value: ""
-    property color tint: Theme.fg
+    property color tint: chin.fg
     property int px: 16
     property bool bold: false
     property bool pop: false
@@ -66,7 +74,7 @@ Rectangle {
     id: stat
     property string icon: ""
     property int value: 0
-    property color tint: Theme.fg
+    property color tint: chin.fg
     visible: value > 0
     implicitWidth: body.implicitWidth + 8
     implicitHeight: 18
@@ -93,29 +101,27 @@ Rectangle {
     }
   }
 
-  Rectangle { anchors { top: parent.top; left: parent.left; right: parent.right } height: 1; color: Theme.hairline }
-
   Row {
     id: left
     anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.path || ""); tint: Theme.fg; bold: true }
+           value: String(chin.st.path || ""); tint: chin.fg; bold: true }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
-           value: chin._n(chin.st.err)  > 0 ? "✗ " + chin.st.err  : ""; tint: Theme.red }
+           value: chin._n(chin.st.err)  > 0 ? "✗ " + chin.st.err  : ""; tint: chin.red }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
-           value: chin._n(chin.st.warn) > 0 ? "▲ " + chin.st.warn : ""; tint: Theme.yellow }
+           value: chin._n(chin.st.warn) > 0 ? "▲ " + chin.st.warn : ""; tint: chin.gold }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
-           value: chin._n(chin.st.info) > 0 ? "● " + chin.st.info : ""; tint: Theme.sky }
+           value: chin._n(chin.st.info) > 0 ? "● " + chin.st.info : ""; tint: chin.sky }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.search || ""); tint: Theme.fg_muted }
+           value: String(chin.st.search || ""); tint: chin.muted }
     // Macro-recording pill — lualine's red REC block, popping in/out.
     Rectangle {
       anchors.verticalCenter: parent.verticalCenter
       radius: 4
       width: recText.implicitWidth + 14; height: 24
-      color: Theme.red
+      color: chin.red
       opacity: chin.st.rec ? 1 : 0
       scale: chin.st.rec ? 1 : 0.6
       visible: opacity > 0.01
@@ -125,7 +131,7 @@ Rectangle {
         id: recText
         anchors.centerIn: parent
         text: "REC @" + String(chin.st.rec || "").toUpperCase()
-        color: Theme.bg
+        color: chin.color
         font { family: Theme.fontFamily; pixelSize: 16; bold: true }
       }
     }
@@ -147,29 +153,29 @@ Rectangle {
         anchors.left: parent.left
         anchors.verticalCenter: parent.verticalCenter
         name: "file-content"
-        color: Theme.fg_muted
+        color: chin.muted
         width: 16
         height: 16
       }
     }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.ft || ""); tint: Theme.fg_muted }
-    DiffStat { anchors.verticalCenter: parent.verticalCenter; icon: "square-plus"; value: chin._n(chin.st.add); tint: Theme.green }
-    DiffStat { anchors.verticalCenter: parent.verticalCenter; icon: "square-minus"; value: chin._n(chin.st.del); tint: Theme.red }
+           value: String(chin.st.ft || ""); tint: chin.muted }
+    DiffStat { anchors.verticalCenter: parent.verticalCenter; icon: "square-plus"; value: chin._n(chin.st.add); tint: chin.green }
+    DiffStat { anchors.verticalCenter: parent.verticalCenter; icon: "square-minus"; value: chin._n(chin.st.del); tint: chin.red }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.plan || ""); tint: Theme.fg }
+           value: String(chin.st.plan || ""); tint: chin.fg }
     Swap { anchors.verticalCenter: parent.verticalCenter
-           value: chin.st.root ? " " + chin.st.root : ""; tint: Theme.fg }
+           value: chin.st.root ? " " + chin.st.root : ""; tint: chin.fg }
     Rectangle {
       anchors.verticalCenter: parent.verticalCenter
       width: 18; height: 18; radius: 5
-      color: Theme.surface0
+      color: Theme.mode === "light" ? "#F4F6F8" : "#2D2D2D"
       border.width: 1
-      border.color: Theme.hairline
+      border.color: chin.hairline
       Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter
         width: 10; height: 2
-        color: Theme.orange
+        color: chin.orange
         readonly property real targetY: 2 + (parent.height - height - 4)
           * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
         property real animatedY: targetY

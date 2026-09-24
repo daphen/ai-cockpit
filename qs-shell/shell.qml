@@ -332,6 +332,7 @@ ShellRoot {
         id: paneLayout
         anchors.fill: parent
         readonly property real splitX: Math.round(width * 0.6 * win.termDpr) / win.termDpr
+        readonly property real terminalCornerRadius: 10
 
         Column {
           id: termCol
@@ -371,6 +372,28 @@ ShellRoot {
                 }
               }
             }
+            Canvas {
+              id: terminalCorner
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              width: paneLayout.terminalCornerRadius
+              height: paneLayout.terminalCornerRadius
+              z: 2
+              readonly property color maskColor: Theme.canvas
+              onMaskColorChanged: requestPaint()
+              onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = terminalCorner.maskColor
+                ctx.beginPath()
+                ctx.moveTo(width, 0)
+                ctx.lineTo(width, height)
+                ctx.lineTo(0, height)
+                ctx.quadraticCurveTo(width, height, width, 0)
+                ctx.closePath()
+                ctx.fill()
+              }
+            }
           }
           // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the
           // window's true bottom edge, so the terminal grid's row slack hides at this
@@ -379,7 +402,18 @@ ShellRoot {
             id: chin
             width: parent.width
             height: parent.height - renderStack.height
+            color: Theme.canvas
           }
+        }
+
+        // Fill only the divider lane below the chin corner. Keeping this separate
+        // prevents DPR overscan from extending the chin's hairline and right content.
+        Rectangle {
+          x: paneLayout.splitX
+          y: parent.height - chin.height
+          width: 1 + 2 / win.termDpr
+          height: chin.height
+          color: Theme.canvas
         }
 
         // Divider stops at the chin's top hairline — the two meet in a clean
@@ -390,7 +424,7 @@ ShellRoot {
           width: 1
           height: parent.height - chin.height
           opacity: win.railReveal
-          color: Theme.hairline
+          color: Theme.canvas
         }
 
         Rail {

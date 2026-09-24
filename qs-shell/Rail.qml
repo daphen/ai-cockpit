@@ -675,17 +675,44 @@ Item {
     return source
   }
   function hasImageAttachments(text) {
-    return /@?[\w~./-]*heidr-pastes\/[^\s"']+/.test(String(text || ""))
+    return /@?[\w~./-]*heidr-pastes\/[^\s"']+|(?:^|[\s`(])[\w@.-]+\.(?:png|jpe?g|gif|webp|bmp|svg)(?=$|[\s`),.;:!?])/i.test(String(text || ""))
+  }
+  function imageAttachmentLabel(text, number) {
+    var source = String(text || "").trim().replace(/[),.;:!?]+$/, "").replace(/^`+|`+$/g, "")
+    if (source.indexOf("heidr-pastes/") >= 0) return "Image " + number
+    return source.split("/").pop()
+  }
+  function fileBadgeName(text) {
+    var match = String(text || "").trim().match(/^`([A-Za-z0-9_][\w.@-]*\.([A-Za-z][A-Za-z0-9]{0,7}))`[),.;:!?]*$/)
+    if (!match) return ""
+    var extensions = [
+      "c", "cc", "cpp", "css", "desktop", "fish", "go", "h", "hpp", "html",
+      "js", "json", "jsonc", "jsx", "kdl", "lua", "md", "nix", "py", "qml",
+      "rs", "scss", "service", "sh", "toml", "ts", "tsx", "yaml", "yml"
+    ]
+    return extensions.indexOf(match[2].toLowerCase()) >= 0 ? match[1] : ""
+  }
+  function hasFileBadges(text) {
+    var candidates = String(text || "").match(/`[^`\s]+`[),.;:!?]*/g) || []
+    for (var i = 0; i < candidates.length; i++) if (fileBadgeName(candidates[i])) return true
+    return false
+  }
+  function hasInlineBadges(text) {
+    return hasImageAttachments(text) || hasFileBadges(text)
   }
   function inlineAttachmentLines(text) {
     var number = 0
     return String(text || "").split("\n").map(function (line) {
-      var tokens = [], re = /@?[\w~./-]*heidr-pastes\/[^\s"']+[ \t]*|[^\s]+[ \t]*/g, match
+      var tokens = [], re = /@?[\w~./-]*heidr-pastes\/[^\s"']+[ \t]*|`[^`\n]+`[ \t]*|[^\s]+[ \t]*/g, match
       while ((match = re.exec(line)) !== null) {
-        var raw = match[0], attachment = hasImageAttachments(raw)
-        if (attachment) number++
-        tokens.push({ kind: attachment ? "attachment" : "text",
-                      text: raw, number: number, trailing: /[ \t]$/.test(raw) })
+        var raw = match[0], image = hasImageAttachments(raw)
+        var fileName = image ? "" : fileBadgeName(raw)
+        var codeMatch = (!image && !fileName) ? String(raw).trim().match(/^`([^`]+)`[),.;:!?]*$/) : null
+        if (image) number++
+        tokens.push({ kind: image ? "image" : (fileName ? "file" : (codeMatch ? "code" : "text")),
+                      text: raw, number: number,
+                      label: image ? imageAttachmentLabel(raw, number) : (fileName || (codeMatch ? codeMatch[1] : "")),
+                      trailing: /[ \t]$/.test(raw) })
       }
       return tokens
     })
@@ -1179,6 +1206,14 @@ Item {
   readonly property int fsName:   Theme.fontSize + 2
   readonly property int fsBody:   Theme.fontSize + 1
   readonly property int fsMeta:   Theme.fontSize
+  readonly property string messageFontFamily: "Inter"
+  readonly property int messageBodyWeight: 450
+  readonly property int messageMetaWeight: 500
+  readonly property color lavenderAccent: Theme.mode === "light" ? "#7C68C9" : "#C4B5FD"
+  readonly property color skyAccent: Theme.mode === "light" ? "#287FA6" : "#7DD3FC"
+  readonly property color silverAccent: Theme.mode === "light" ? "#6F777C" : "#C2C8CC"
+  readonly property color mintAccent: Theme.mode === "light" ? "#3F8C69" : "#86D7B0"
+  readonly property color goldAccent: Theme.mode === "light" ? "#9A6500" : "#F2C572"
 
   // Turn-recap summary hue — electric, brightened + desaturated, with the hue
   // nudged off electric's blue-violet toward sky's blue so it doesn't read pink.
@@ -1187,11 +1222,11 @@ Item {
   //   summaryLight  >1 brightens toward white
   readonly property real summaryHueMix: 0.6
   readonly property real summarySat: 0.5
-  readonly property real summaryLight: 1.3
+  readonly property real summaryLight: Theme.mode === "light" ? 0.72 : 1.3
   readonly property color summaryColor: Qt.hsla(
-    Theme.electric.hslHue * (1 - summaryHueMix) + Theme.sky.hslHue * summaryHueMix,
-    Math.max(0, Math.min(1, Theme.electric.hslSaturation * summarySat)),
-    Math.max(0, Math.min(1, Theme.electric.hslLightness * summaryLight)),
+    lavenderAccent.hslHue * (1 - summaryHueMix) + Theme.sky.hslHue * summaryHueMix,
+    Math.max(0, Math.min(1, lavenderAccent.hslSaturation * summarySat)),
+    Math.max(0, Math.min(1, lavenderAccent.hslLightness * summaryLight)),
     1.0)
 
   // COCKPIT_DEMO=1 (or legacy HEIDR_DEMO) forces the mock showcase so every
@@ -1252,19 +1287,7 @@ Item {
   // Composer chrome color is FIXED per theme, not action-reactive — the input
   // frame recoloring with every tool change was too much motion. Light rides
   // ink (not electric); dark keeps the pale azure "thinking" tint.
-  readonly property color activeRing: Theme.mode === "light"
-    ? Theme.ink
-    : Qt.hsla(0.583, 0.29, 0.90, 1)
-  // A light-mode gray fill either disappeared or read disabled, so focus moves to a cool outline.
-  readonly property color selectedTurnSurface: Theme.mode === "light"
-    ? Theme.bg
-    : Theme.surface
-  readonly property color selectedTurnBorder: Theme.mode === "light"
-    ? Qt.rgba(Theme.ink.r, Theme.ink.g, Theme.ink.b, 0.42)
-    : Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.45)
-  readonly property color bevelBorder: Theme.mode === "dark" ? Theme.hairline : "#C8C8C6"
-  readonly property color bevelTop: Theme.mode === "dark" ? Theme.surface3 : "#F5F5F3"
-  readonly property color bevelBottom: Theme.mode === "dark" ? Theme.surface0 : "#D8D8D6"
+  readonly property color activeRing: Theme.mode === "light" ? "#242424" : "#FAFAFA"
   // One colour vocabulary for BOTH roster states: the collapsed dots and the expanded
   // rows now read identically, so "what is this session doing" is the same glance either
   // way. Working is the orb, never a dot.
@@ -1362,10 +1385,17 @@ Item {
       if (liveSessions[mi].name === selectedRaw) return String(liveSessions[mi].model || "")
     return ""
   }
-  readonly property string selectedModelLabel: {
-    var id = selectedModelId.split("/").pop()
+  function modelLabel(modelId) {
+    var id = String(modelId || "").split("/").pop()
     return id.toUpperCase().replace(/-/g, " ")
   }
+  function messageModelLabel(modelId) {
+    var id = String(modelId || "").toLowerCase()
+    if (/(^|-)sol($|-)/.test(id)) return "Sol"
+    if (/(^|-)astra($|-)/.test(id)) return "Astra"
+    return "agent"
+  }
+  readonly property string selectedModelLabel: modelLabel(selectedModelId)
   property bool modelOpen: false
   property var modelEntries: []
   property int modelCur: 0
@@ -2398,9 +2428,32 @@ Item {
       if (featuredStreaming && agentd && selectedRaw) agentd.abortTool(selectedRaw)
     }
   }
-  // The rail's own ground: one step darker than the editor side (Theme.bgDim), so the
-  // two panes read as distinct layers without a divider doing the work.
-  Rectangle { anchors.fill: parent; color: Theme.bgDim; z: -1 }
+  readonly property color railGroundColor: Theme.canvas
+  Rectangle { anchors.fill: parent; color: rail.railGroundColor; z: -1 }
+  Canvas {
+    id: dotGrid
+    anchors.fill: parent
+    z: -0.5
+    visible: rail.view === "chat"
+    readonly property color dotColor: Theme.mode === "light"
+      ? Qt.rgba(0.14, 0.14, 0.13, 0.07)
+      : Qt.rgba(1, 1, 1, 0.08)
+    onWidthChanged: requestPaint()
+    onHeightChanged: requestPaint()
+    onVisibleChanged: if (visible) requestPaint()
+    onDotColorChanged: if (visible) requestPaint()
+    onPaint: {
+      var ctx = getContext("2d")
+      ctx.clearRect(0, 0, width, height)
+      ctx.fillStyle = dotGrid.dotColor
+      for (var y = 16; y < height; y += 32)
+        for (var x = 16; x < width; x += 32) {
+          ctx.beginPath()
+          ctx.arc(x, y, 1.2, 0, Math.PI * 2)
+          ctx.fill()
+        }
+    }
+  }
 
   // Daemon health banner (boot self-check failed): the whole scope is broken, not
   // one session — pin it above everything so it can't be scrolled away or missed.
@@ -2664,12 +2717,7 @@ Item {
     anchors.margins: 0
     // Breathing room at the window's top edge — cards used to start at y=0
     // with their first line clipped against the bezel.
-    anchors.topMargin: 16
-    // The feed ENDS at the sheet's top — no slide-under. Sliding beneath the rounded
-    // corners forced the fade to a full-opacity band across the notch zone, and that
-    // band smoked the text above the sheet; ending here leaves clean ground behind
-    // the corner arcs and lets the fade stay a gentle dissolve.
-    anchors.bottomMargin: 0
+    anchors.topMargin: Theme.mode === "light" ? 0 : 16
     spacing: 0
 
     Crossfade {
@@ -2730,9 +2778,14 @@ Item {
     // Chat view — the activity feed.
     second: ListView {
       id: feedView
-      anchors.fill: parent
+      readonly property int shadowGutter: 18
+      anchors {
+        fill: parent
+        leftMargin: -shadowGutter
+        rightMargin: -shadowGutter
+      }
       enabled: rail.view === "chat"
-      clip: true
+      clip: false
       spacing: 18
       model: feedModel
       boundsBehavior: Flickable.StopAtBounds
@@ -2751,34 +2804,11 @@ Item {
         flick: feedView
         onScrolled: (up) => feedScroll.userScrolled(up)
       }
-      // At-rest content clears the sheet (radius + one gap); SCROLLED content slides up
-      // underneath it — the header scrolls with the feed, which is the whole trick.
+      // The viewport follows chin.top, preserving the pane's existing animated height.
+      // Unclipped delegates may paint beneath the transparent wrapper, while the rounded
+      // ContrastCard itself covers them; no gutter or footer geometry has to track it.
       header: Item { width: feedView.width; height: feedView.spacing }
-      footer: Item { width: feedView.width; height: 56 }   // bottom scroll padding above the fade/pill
-      // Edge fades, fixed to the view (non-delegate children of a ListView paint above
-      // its content). The top one is opaque through the sheet's corner-notch zone — the
-      // curve then sits on clean ground — and dissolves below it; the bottom one mirrors
-      // above the composer, only while content remains below the viewport.
-      Rectangle {
-        anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: 44
-        z: 2
-        gradient: Gradient {
-          GradientStop { position: 0.0; color: Theme.bgDim }
-          GradientStop { position: 1.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
-        }
-      }
-      Rectangle {
-        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-        height: 44
-        z: 2
-        opacity: (feedView.originY + feedView.contentHeight - feedView.height - feedView.contentY) > 8 ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 150 } }
-        gradient: Gradient {
-          GradientStop { position: 0.0; color: Qt.rgba(Theme.bgDim.r, Theme.bgDim.g, Theme.bgDim.b, 0) }
-          GradientStop { position: 1.0; color: Theme.bgDim }
-        }
-      }
+      footer: Item { width: feedView.width; height: 56 }
       onCountChanged: feedScroll.contentChanged()
       // Streaming content arrived as a hard pop. Fade added rows in — short enough
       // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
@@ -2826,81 +2856,65 @@ Item {
         // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
         readonly property bool isSys: turnDel.turn.sys === true
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
-        readonly property color userContentColor: Theme.fg
-        readonly property color messageSurface: isUser
-          ? (Theme.mode === "dark" ? Theme.surface1 : Theme.surface0)
-          : (Theme.mode === "dark" ? Theme.surface0 : Theme.surface1)
-
+        readonly property color cardContentColor: Theme.mode === "light" ? "#23272B" : "#FAFAFA"
+        readonly property color cardBodyColor: Theme.mode === "light" ? "#343A3F" : "#EDEDED"
+        readonly property color cardMutedColor: Theme.mode === "light" ? "#747D84" : "#909090"
+        readonly property color userContentColor: cardBodyColor
+        readonly property color cardAccent: isUser ? Theme.orange : (isSys ? rail.silverAccent : rail.lavenderAccent)
+        readonly property string agentModelLabel: {
+          var items = turnDel.turn.items || []
+          for (var ai = 0; ai < items.length; ai++)
+            if (items[ai].model) return rail.messageModelLabel(items[ai].model)
+          return rail.messageModelLabel(rail.selectedModelId)
+        }
         Rectangle {
           id: card
-          anchors { left: parent.left; right: parent.right }
-          implicitHeight: cardCol.implicitHeight + 36
-          radius: 14
+          anchors {
+            left: parent.left
+            right: parent.right
+            leftMargin: feedView.shadowGutter
+            rightMargin: feedView.shadowGutter
+          }
+          implicitHeight: cardCol.implicitHeight + 28
+          radius: 18
           color: "transparent"
-          Rectangle {
-            width: parent.width
-            height: parent.height
-            y: 3
-            radius: card.radius
-            visible: Theme.mode === "light"
-            color: Qt.rgba(0, 0, 0, 0.018)
-          }
-          Rectangle {
-            width: parent.width
-            height: parent.height
-            y: 1
-            radius: card.radius
-            visible: Theme.mode === "light"
-            color: Qt.rgba(0, 0, 0, 0.04)
+          ContrastCard {
+            anchors.fill: parent
+            cardRadius: card.radius
+            rimTop: fhov.hovered
+              ? (Theme.mode === "light" ? "#FFFFFF" : "#34313A")
+              : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B")
+            outlineColor: fhov.hovered
+              ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.42)
+              : (Theme.mode === "light" ? "#C4CBD2" : "#282828")
+            Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
           Rectangle {
             anchors.fill: parent
             radius: card.radius
+            color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.05)
             border.width: 1
-            border.color: rail.bevelBorder
-            gradient: Gradient {
-              orientation: Gradient.Vertical
-              GradientStop { position: 0; color: rail.bevelTop }
-              GradientStop { position: 1; color: rail.bevelBottom }
-            }
-            Rectangle {
-              anchors.fill: parent
-              anchors.margins: 2
-              radius: Math.max(0, parent.radius - 2)
-              gradient: Gradient {
-                orientation: Gradient.Vertical
-                GradientStop {
-                  position: 0
-                  color: turnDel.isSys
-                    ? (turnDel.cursor ? rail.selectedTurnSurface : Theme.bg)
-                    : turnDel.isUser
-                      ? (Theme.mode === "dark" ? "#2B2B2B" : "#FFFFFF")
-                      : turnDel.messageSurface
-                }
-                GradientStop {
-                  position: 1
-                  color: turnDel.isSys
-                    ? (turnDel.cursor ? rail.selectedTurnSurface : Theme.bg)
-                    : turnDel.messageSurface
-                }
-              }
-            }
+            border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.36)
+            opacity: fhov.hovered && !turnDel.cursor ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
           Rectangle {
             anchors.fill: parent
             radius: card.radius
-            visible: turnDel.cursor
             color: "transparent"
             border.width: 2
-            border.color: rail.selectedTurnBorder
+            border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.92)
+            opacity: turnDel.cursor ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
           HoverHandler { id: fhov }
           TapHandler { onTapped: rail.clickAt(rail.rSize + turnDel.rowIndex) }
 
           Column {
             id: cardCol
-            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 18; rightMargin: 18; topMargin: 18 }
-            spacing: 13
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 18; rightMargin: 18; topMargin: 14 }
+            spacing: 10
 
             // Turn header — the Nucleo glyph is the ONLY colored signifier;
             // the label stays neutral and a touch bigger than the body text.
@@ -2911,12 +2925,12 @@ Item {
                 name: turnDel.isUser ? "paper-plane-2" : "sparkle-3"
                 variantSize: turnDel.isUser ? 12 : 0   // paper-plane-2--glyph--12 for "you"
                 width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter
-                color: turnDel.isUser ? Theme.orange : Theme.electric
+                color: turnDel.isUser ? Theme.orange : rail.lavenderAccent
               }
               Text {
-                text: turnDel.isUser ? (turnDel.turn.sender ? "From " + turnDel.turn.sender : "you") : "agent"
-                color: turnDel.isUser ? turnDel.userContentColor : Theme.fg
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsName; font.bold: true
+                text: turnDel.isUser ? (turnDel.turn.sender ? "From " + turnDel.turn.sender : "You") : turnDel.agentModelLabel
+                color: turnDel.cardContentColor
+                font.family: rail.messageFontFamily; font.pixelSize: rail.fsName; font.weight: 600
                 anchors.verticalCenter: parent.verticalCenter
               }
               // A steer redirected a LIVE turn — visibly different from a normal
@@ -2932,7 +2946,7 @@ Item {
                   id: steerCap; anchors.centerIn: parent
                   text: "steer"
                   color: Theme.orange
-                  font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 3; font.bold: true
+                  font.family: rail.messageFontFamily; font.pixelSize: Theme.fontSize - 3; font.bold: true
                 }
               }
             }
@@ -2955,13 +2969,13 @@ Item {
               Spinner {
                 visible: rail.featuredStreaming
                 anchors.verticalCenter: parent.verticalCenter
-                running: visible; color: Theme.fg_muted; dotSize: 1.6
+                running: visible; color: turnDel.cardMutedColor; dotSize: 1.6
               }
               Text {
                 text: rail.featuredStreaming ? "thinking — nothing streamed yet"
                                              : "· turn ended without visible output"
-                color: Theme.fg_muted
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                color: turnDel.cardMutedColor
+                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
                 anchors.verticalCenter: parent.verticalCenter
               }
             }
@@ -2987,7 +3001,7 @@ Item {
                   text: turnDel.userExpanded ? "Hide full message" : "Show full message"
                   color: turnDel.userContentColor
                   opacity: 0.72
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                  font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Icon {
@@ -3004,7 +3018,7 @@ Item {
               text: String(turnDel.turn.text || "").replace(/\s+/g, " ").trim()
               textFormat: Text.PlainText
               color: turnDel.userContentColor
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+              font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
               wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
             }
 
@@ -3012,7 +3026,7 @@ Item {
               active: turnDel.isUser && (!turnDel.compactUser || turnDel.userExpanded)
               visible: active
               width: cardCol.width
-              sourceComponent: rail.hasImageAttachments(sourceText) ? inlineAttachmentContent : markdownContent
+              sourceComponent: rail.hasInlineBadges(sourceText) ? inlineAttachmentContent : markdownContent
               property string sourceText: turnDel.isUser ? String(turnDel.turn.text || "") : ""
               property int sourceEntry: 0
               property int sourceOffset: 0
@@ -3028,8 +3042,8 @@ Item {
               Text {
                 width: cardCol.width
                 text: rail.turnInfos(turnDel.turn.items)[index] || ""
-                color: Theme.fg_muted
-                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                color: turnDel.cardMutedColor
+                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
               }
             }
 
@@ -3040,8 +3054,9 @@ Item {
                 text: modelData.text || ""
                 textFormat: Text.PlainText
                 color: Theme.red
-                font.family: Theme.fontFamily
+                font.family: rail.messageFontFamily
                 font.pixelSize: rail.fsBody
+                font.weight: rail.messageBodyWeight
                 wrapMode: Text.Wrap
               }
             }
@@ -3054,6 +3069,8 @@ Item {
                 property var entry: modelData
                 property int entryIndex: index
                 property int rowIndex: turnDel.rowIndex
+                property color bodyColor: turnDel.cardBodyColor
+                property color mutedColor: turnDel.cardMutedColor
                 sourceComponent: proseRow
               }
             }
@@ -3063,9 +3080,10 @@ Item {
               Text {
                 width: cardCol.width
                 text: modelData.text || ""
-                color: Theme.fg_muted
-                font.family: Theme.fontFamily
+                color: turnDel.cardMutedColor
+                font.family: rail.messageFontFamily
                 font.pixelSize: rail.fsMeta
+                font.weight: rail.messageMetaWeight
                 wrapMode: Text.WordWrap
               }
             }
@@ -3091,6 +3109,8 @@ Item {
               // otherwise collapsed (and its neighbour opened) as the window slid.
               property string ekey: "turn-" + (turnDel.turn.key || turnDel.rowIndex)
               property bool expanded: rail.expandedGroups[ekey] === true
+              property color textColor: turnDel.cardBodyColor
+              property color mutedColor: turnDel.cardMutedColor
             }
 
             // Chunked mid-turn cut: say the turn continues, so a header-less next
@@ -3098,8 +3118,8 @@ Item {
             Text {
               visible: !turnDel.isUser && turnDel.turn.cont === true
               text: "⋯ continues"
-              color: Theme.fg_muted
-              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              color: turnDel.cardMutedColor
+              font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
             }
           }
         }
@@ -3112,23 +3132,38 @@ Item {
 
 
   // Chin: the bottom SHEET — roster + composer in one container, anchored to the
-  // rail bottom. Bleeds 1px past the sides and one radius below the window, so only
-  // the rounded TOP corners and their hairline are visible (mirror of the old top
-  // sheet). The feed is bounded to chin.top, so chat rows can never bleed under it.
+  // rail bottom. The feed continues behind it; this later sibling paints above the
+  // cards, while the feed footer keeps the final row reachable above the pane.
   Rectangle {
     id: chin
+    readonly property bool lightMode: Theme.mode === "light"
+    readonly property color fg: lightMode ? "#23272B" : "#FAFAFA"
+    readonly property color muted: lightMode ? "#747D84" : "#858585"
+    readonly property color baseSurface: lightMode ? "#F7F9FA" : "#141414"
+    readonly property color raisedSurface: lightMode ? "#EEF2F5" : "#141414"
+    readonly property color cardSurface: lightMode ? "#F4F6F8" : "#141414"
+    readonly property color hairline: lightMode ? Qt.rgba(0.14, 0.14, 0.13, 0.16) : Qt.rgba(1, 1, 1, 0.14)
+    readonly property color softHairline: lightMode ? Qt.rgba(0.14, 0.14, 0.13, 0.11) : Qt.rgba(1, 1, 1, 0.10)
+    readonly property color itemCursor: lightMode ? Theme.itemCursor : Qt.rgba(1, 1, 1, 0.14)
+    readonly property color itemSelected: lightMode ? Theme.itemSelected : Qt.rgba(1, 1, 1, 0.10)
+    readonly property color itemHover: lightMode ? Theme.itemHover : Qt.rgba(1, 1, 1, 0.07)
+    readonly property color decisionOrange: lightMode ? "#D75A13" : "#FF570D"
+    readonly property color decisionGreen: lightMode ? "#4B8069" : "#97B5A6"
+    readonly property color decisionRed: lightMode ? "#B94545" : "#FF7B72"
+    component ChinKeyCap: KeyCap {
+      color: chin.lightMode ? "#F7F9FA" : "#2D2D2D"
+      border.color: chin.lightMode ? "#C9D1D8" : "#4A4A4A"
+      textColor: chin.lightMode ? "#4F5961" : "#B5B9BB"
+    }
+    component ChinCapLabel: CapLabel { color: chin.lightMode ? "#747D84" : "#9AA2A7" }
     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+    z: 5
     // Inset from the sides so the sheet's own hairline never doubles up against the
     // term/rail divider; still bleeds one radius below the window for a square bottom.
-    anchors.leftMargin: 8; anchors.rightMargin: 8
+    anchors.leftMargin: 18; anchors.rightMargin: 18
     anchors.bottomMargin: -radius
     radius: 20 + 8
-    border.color: rail.bevelBorder; border.width: 1
-    gradient: Gradient {
-      orientation: Gradient.Vertical
-      GradientStop { position: 0; color: rail.bevelTop }
-      GradientStop { position: 1; color: rail.bevelBottom }
-    }
+    color: "transparent"
     // 108 = composer + hints + padding, stable across the insert toggle. A pending
     // ask_user expands the chin to hold it, so the question takes over the input
     // instead of floating over the feed — animated so the jump is legible.
@@ -3136,14 +3171,12 @@ Item {
     // contains — composer, ask card, new-session panel — it grows upward from a fixed
     // bottom edge with no arithmetic. (This used to be a hardcoded 108 plus per-panel
     // fudge factors, which is how the new-session card ended up overflowing.)
-    clip: true
+    clip: false
     height: chinCol.implicitHeight + 26 + radius   // 14 top pad + 12 visible bottom pad
 
-    Rectangle {
+    ContrastCard {
       anchors.fill: parent
-      anchors.margins: 2
-      radius: Math.max(0, chin.radius - 2)
-      color: Theme.surface0
+      cardRadius: chin.radius
     }
 
     ColumnLayout {
@@ -3206,7 +3239,7 @@ Item {
             // not the pill's border box — lands on the rows' 14px column.
             anchors { left: parent.left; leftMargin: 5 }
             y: ((rail.activeTask.length ? 44 : glanceCol.height) - height) / 2
-            spacing: 12
+            spacing: 0
             // On the ORCHESTRATOR this icon is also the handover switch — it already
             // says which host runs the role, so a second pill was a duplicate. Hover
             // expands it into a labelled control; elsewhere it stays a plain marker.
@@ -3215,8 +3248,15 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               readonly property bool isSwitch: rail.selectedIsOrchestrator
               readonly property bool onVm: rail.orchScope === "work"
-              readonly property color tint: isSwitch
-                ? (Theme.mode === "dark" ? Theme.sky : Theme.electric) : Theme.fg
+              readonly property bool remote: {
+                if (isSwitch) return onVm
+                var arr = rail.liveSessions
+                for (var i = 0; i < arr.length; i++)
+                  if (arr[i].name === rail.selectedRaw) return rail._isRemote(arr[i].cwd)
+                return false
+              }
+              readonly property color locationTint: remote ? rail.skyAccent : rail.silverAccent
+              readonly property color tint: isSwitch ? (onVm ? rail.skyAccent : Theme.orange) : locationTint
               readonly property bool expanded: isSwitch && (locHover.hovered || busy)
               property bool busy: false
               onOnVmChanged: busy = false
@@ -3253,15 +3293,8 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   visible: !locSlot.busy
                   width: 15; height: 15
-                  name: {
-                    if (locSlot.isSwitch) return locSlot.onVm ? "cloud--outline--18" : "laptop--outline--18"
-                    var arr = rail.liveSessions
-                    for (var i = 0; i < arr.length; i++)
-                      if (arr[i].name === rail.selectedRaw)
-                        return rail._isRemote(arr[i].cwd) ? "cloud--outline--18" : "laptop--outline--18"
-                    return "laptop--outline--18"
-                  }
-                  color: locSlot.tint
+                  name: locSlot.remote ? "cloud--outline--18" : "laptop--outline--18"
+                  color: locSlot.locationTint
                 }
                 Icon {
                   anchors.verticalCenter: parent.verticalCenter
@@ -3302,7 +3335,7 @@ Item {
                   anchors.verticalCenter: parent.verticalCenter
                   visible: rail.selectedParent.length > 0
                   text: rail.shortName(rail.selectedParent).toUpperCase()
-                  color: Theme.fg_muted
+                  color: chin.muted
                   font { family: Theme.fontFamily; pixelSize: rail.fsMeta; weight: 600 }
                 }
                 Icon {
@@ -3310,12 +3343,12 @@ Item {
                   visible: rail.selectedParent.length > 0
                   name: "chevron-right"
                   width: 11; height: 11
-                  color: Theme.fg_muted
+                  color: chin.muted
                 }
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
-                  color: Theme.fg
+                  color: chin.fg
                   font { family: Theme.fontFamily; pixelSize: rail.fsName; bold: true }
                 }
                 Text {
@@ -3325,14 +3358,14 @@ Item {
                   width: Math.min(implicitWidth, 240)
                   elide: Text.ElideMiddle
                   text: rail.selectedPlan
-                  color: Theme.fg_muted
+                  color: chin.muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 }
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   visible: text.length > 0
                   text: rail.runningToolLabel(rail.selectedRaw)
-                  color: Theme.fg_muted
+                  color: chin.muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 }
               }
@@ -3348,7 +3381,7 @@ Item {
             text: rail.activeTask
             textFormat: Text.PlainText
             elide: Text.ElideRight
-            color: Theme.fg_muted
+            color: chin.muted
             font.family: Theme.fontFamily
             font.pixelSize: rail.fsMeta - 1
             HoverHandler { id: taskHover; cursorShape: Qt.PointingHandCursor }
@@ -3466,9 +3499,9 @@ Item {
               rail.agentd ? rail.agentd.askGen : 0
               return rail.agentd ? rail.agentd.askFor(modelData.rawName || modelData.name) !== null : false
             }
-              color: cursor ? Theme.itemCursor
-                   : selected ? Theme.itemSelected
-                   : hov.hovered ? Theme.itemHover : "transparent"
+              color: cursor ? chin.itemCursor
+                   : selected ? chin.itemSelected
+                   : hov.hovered ? chin.itemHover : "transparent"
               HoverHandler { id: hov }
               // Collapsed: index doesn't map to the full list → just focus/expand.
               TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
@@ -3478,7 +3511,7 @@ Item {
                 // Nesting connector for spawned subagents.
                 Text {
                   visible: (modelData.depth || 0) > 0
-                  text: "↳"; color: Theme.fg_muted
+                  text: "↳"; color: chin.muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                   Layout.alignment: Qt.AlignVCenter
                 }
@@ -3492,7 +3525,7 @@ Item {
                   width: 14; height: 14
                   Layout.preferredWidth: 14; Layout.preferredHeight: 14
                   Layout.alignment: Qt.AlignVCenter
-                  color: Theme.fg
+                  color: modelData.remote ? rail.skyAccent : rail.silverAccent
                 }
                 Text {
                   text: modelData.name
@@ -3510,7 +3543,7 @@ Item {
                   Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20
                                                 - (roleBadge.visible ? roleBadge.width + 8 : 0))
                   elide: Text.ElideRight
-                  color: Theme.fg
+                  color: chin.fg
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsName
                   // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
                   // meant two rows shouting at once with no way to tell which you were on.
@@ -3519,7 +3552,7 @@ Item {
                 // Role badge (agentd profiles): orchestrator / worker / reviewer / watcher.
                 // The daemon reports "profile" like "lovable-orchestrator" — show the last
                 // segment, muted, so identity reads without shouting over the name.
-                CapLabel {
+                ChinCapLabel {
                   id: roleBadge
                   visible: text.length > 0
                   text: {
@@ -3528,7 +3561,7 @@ Item {
                     var seg = p.split("-")
                     return seg[seg.length - 1]
                   }
-                  color: Theme.fg_muted
+                  color: chin.muted
                 }
                 // Spinner immediately right of the name. The slot is reserved even when idle
                 // so nothing shifts as a session starts or stops working. 20px is free (the
@@ -3576,7 +3609,7 @@ Item {
                   // against the orb and read as one glued token. 18 clears the orb's 12px
                   // overhang past its column with a real gap left over.
                   Layout.rightMargin: 18
-                  color: Theme.fg_muted
+                  color: chin.muted
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                 }
                 // Connection trouble is the only thing that earns an icon here: a worker
@@ -3605,7 +3638,7 @@ Item {
                     nodes: 13
                     glow: rail.actionGlow(modelData.rawName || modelData.name)
                     seedKey: modelData.rawName || modelData.name
-                    invertRing: false
+                    invertRing: Theme.mode === "light"
                   }
                   Rectangle {
                     anchors.centerIn: parent
@@ -3699,8 +3732,8 @@ Item {
           Rectangle {
             visible: rail.planDraft !== null
             width: planDraftLabel.implicitWidth + 24; height: 28; radius: 14
-            color: Theme.surface1; border.color: Theme.hairlineSoft
-            Text { id: planDraftLabel; anchors.centerIn: parent; text: (rail.planDraft ? rail.planDraft.title : "") + " ×"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
+            color: chin.raisedSurface; border.color: chin.softHairline
+            Text { id: planDraftLabel; anchors.centerIn: parent; text: (rail.planDraft ? rail.planDraft.title : "") + " ×"; color: chin.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
             TapHandler { onTapped: rail.removePlanDraft() }
           }
           Repeater {
@@ -3711,24 +3744,24 @@ Item {
               objectName: "codeAttachment-" + index
               width: Math.min(codeLabel.implicitWidth + codeRange.implicitWidth + 74, attachmentFlow.width)
               height: 28; radius: height / 2
-              color: Theme.surface1; border.color: Theme.hairlineSoft
+              color: chin.raisedSurface; border.color: Qt.alpha(rail.goldAccent, 0.38)
               Icon {
                 id: codeIcon
                 anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
-                name: "file-content--outline--18"; width: 14; height: 14; color: Theme.fg_muted
+                name: "file-content--outline--18"; width: 14; height: 14; color: rail.goldAccent
               }
               Text {
                 id: codeLabel
                 anchors { left: codeIcon.right; leftMargin: 6; right: codeRange.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
                 text: String(modelData.path).split("/").pop()
                 textFormat: Text.PlainText; elide: Text.ElideMiddle
-                color: Theme.fg; font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 500 }
+                color: chin.fg; font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 1; weight: 500 }
               }
               Text {
                 id: codeRange
                 anchors { right: removeCodeButton.left; rightMargin: 6; verticalCenter: parent.verticalCenter }
                 text: ":" + modelData.l1 + (modelData.l1 === modelData.l2 ? "" : "–" + modelData.l2)
-                color: Theme.fg_muted; font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2 }
+                color: Qt.alpha(rail.goldAccent, 0.72); font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2 }
               }
               Item {
                 id: removeCodeButton
@@ -3736,7 +3769,7 @@ Item {
                 anchors { right: parent.right; rightMargin: 4; verticalCenter: parent.verticalCenter }
                 width: 28; height: 28
                 Rectangle { anchors.centerIn: parent; width: 20; height: 20; radius: 10; color: closeHover.hovered ? Theme.hover : "transparent" }
-                Icon { anchors.centerIn: parent; name: "xmark--glyph--12"; width: 10; height: 10; color: closeHover.hovered ? Theme.fg : Theme.fg_muted }
+                Icon { anchors.centerIn: parent; name: "xmark--glyph--12"; width: 10; height: 10; color: closeHover.hovered ? chin.fg : chin.muted }
                 HoverHandler { id: closeHover; cursorShape: Qt.PointingHandCursor }
                 TapHandler { onTapped: rail.removeCode(index) }
               }
@@ -3752,15 +3785,15 @@ Item {
         Layout.fillWidth: true
         implicitHeight: 26
         radius: 6
-        color: Theme.surface0
-        border.width: 1; border.color: Theme.hairline
+        color: chin.baseSurface
+        border.width: 1; border.color: chin.hairline
         RowLayout {
           anchors { left: parent.left; right: parent.right; leftMargin: 10; rightMargin: 10
                     verticalCenter: parent.verticalCenter }
           spacing: 8
           Icon {
             name: "alarm-clock--outline--18"
-            width: 13; height: 13; color: Theme.fg_muted
+            width: 13; height: 13; color: chin.muted
             Layout.preferredWidth: 13; Layout.preferredHeight: 13
             Layout.alignment: Qt.AlignVCenter
           }
@@ -3778,7 +3811,7 @@ Item {
               return qn + " queued — sends when the turn ends: “"
                   + (rail.agentd ? rail.agentd.queuedFirst(rail.selectedRaw) : "").slice(0, 60) + "”"
             }
-            color: Theme.fg_muted
+            color: chin.muted
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             elide: Text.ElideRight
           }
@@ -3793,9 +3826,9 @@ Item {
       Layout.fillWidth: true
       implicitHeight: staleCol.implicitHeight + 20
       radius: 12
-      color: Theme.surface
+      color: chin.cardSurface
       border.width: 1
-      border.color: Theme.hairline
+      border.color: chin.hairline
       z: 11
 
       ColumnLayout {
@@ -3810,23 +3843,23 @@ Item {
             width: 13; height: 13
             Layout.preferredWidth: 13; Layout.preferredHeight: 13
             Layout.alignment: Qt.AlignVCenter
-            color: Theme.fg_muted
+            color: chin.muted
           }
           Text {
             Layout.fillWidth: true
             text: "stopped on a question — send a prompt with your answer to continue"
-            color: Theme.fg_muted
+            color: chin.muted
             font.pixelSize: rail.fsMeta
             font.family: Theme.fontFamily
             elide: Text.ElideRight
           }
-          KeyCap { small: true; text: "C-d" }
-          CapLabel { text: "dismiss" }
+          ChinKeyCap { small: true; text: "C-d" }
+          ChinCapLabel { text: "dismiss" }
         }
         Text {
           Layout.fillWidth: true
           text: rail.staleAsk ? rail.staleAsk.title : ""
-          color: Theme.fg
+          color: chin.fg
           font.pixelSize: rail.fsBody
           font.family: Theme.fontFamily
           wrapMode: Text.WordWrap
@@ -3850,14 +3883,14 @@ Item {
       Layout.fillWidth: true
       implicitHeight: askCol.implicitHeight + 28
       radius: 14
-      color: Theme.surface
+      color: chin.cardSurface
       border.width: 1
-      border.color: Theme.orange
+      border.color: chin.decisionOrange
       z: 12
 
       Rectangle {   // left attention accent
         anchors { left: parent.left; top: parent.top; bottom: parent.bottom; topMargin: 12; bottomMargin: 12 }
-        width: 2; radius: 1; color: Theme.orange
+        width: 2; radius: 1; color: chin.decisionOrange
       }
 
       Column {
@@ -3868,13 +3901,13 @@ Item {
 
         Text {
           text: askCard.userBash ? "run as you" : "needs your input"
-          color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+          color: chin.decisionOrange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
         }
         Text {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
           text: askCard.userBash ? ("! " + String(askCard.userBash.command || ""))
                                  : (askCard.ask ? (askCard.ask.title || "") : "")
-          color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+          color: chin.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         }
         Text {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
@@ -3882,7 +3915,7 @@ Item {
               ? (String(askCard.userBash.reason || "") + "\n" + String(askCard.userBash.host || "") + ":" + String(askCard.userBash.cwd || ""))
               : rail.colorizeLinks(askCard.prompt)
           textFormat: askCard.userBash ? Text.PlainText : Text.MarkdownText
-          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          color: chin.muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           onLinkActivated: (url) => Quickshell.execDetached(["xdg-open", url])
         }
         // An ask with NO title and NO message is unanswerable as posed — say so
@@ -3895,7 +3928,7 @@ Item {
           text: rail.onSteamDeck
               ? "the agent asked for input without saying why — press B to cancel the question"
               : "the agent asked for input without saying why — press t to make it explain, or esc to cancel the question"
-          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          color: chin.muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           font.italic: true
         }
 
@@ -3911,15 +3944,15 @@ Item {
               width: askCol.width
               implicitHeight: Math.max(askCard.largeTargets ? 48 : 30, optionText.implicitHeight + (askCard.largeTargets ? 16 : 8))
               radius: 8
-              color: optionHover.hovered ? Theme.hover : "transparent"
-              border.width: 1; border.color: Theme.hairlineSoft
+              color: optionHover.hovered ? chin.itemHover : "transparent"
+              border.width: 1; border.color: chin.softHairline
               Row {
                 anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
                 spacing: 9
-                KeyCap { id: optionCap; text: rail.onSteamDeck && index < 4 ? "RT+" + ["A", "B", "X", "Y"][index] : String(index + 1); anchors.verticalCenter: parent.verticalCenter }
+                ChinKeyCap { id: optionCap; text: rail.onSteamDeck && index < 4 ? "RT+" + ["A", "B", "X", "Y"][index] : String(index + 1); anchors.verticalCenter: parent.verticalCenter }
                 Text {
                   id: optionText
-                  text: modelData; color: Theme.fg; width: parent.width - optionCap.width - 9; wrapMode: Text.Wrap
+                  text: modelData; color: chin.fg; width: parent.width - optionCap.width - 9; wrapMode: Text.Wrap
                   font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
                   anchors.verticalCenter: parent.verticalCenter
                 }
@@ -3936,19 +3969,19 @@ Item {
           spacing: 10
           visible: askCard.ask && askCard.ask.method === "confirm"
           Row { width: askCard.largeTargets ? (askCol.width - 10) / 2 : implicitWidth; height: askCard.largeTargets ? 48 : implicitHeight
-            spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+A" : "y"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: askCard.userBash ? "Run" : "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+            spacing: 8; ChinKeyCap { text: rail.onSteamDeck ? "RT+A" : "y"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: askCard.userBash ? "Run" : "yes"; color: chin.decisionGreen; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: rail.answerAsk({ confirmed: true }) } }
           Row { width: askCard.largeTargets ? (askCol.width - 10) / 2 : implicitWidth; height: askCard.largeTargets ? 48 : implicitHeight
-            spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+B" : "n"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: askCard.userBash ? "Decline" : "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+            spacing: 8; ChinKeyCap { text: rail.onSteamDeck ? "RT+B" : "n"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: askCard.userBash ? "Decline" : "no"; color: chin.decisionRed; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: rail.answerAsk({ confirmed: false }) } }
           // Neither yes nor no: release the agent from the question and open the composer,
           // for the common case where the question itself is the thing worth discussing.
           Row { visible: !askCard.userBash; width: askCard.largeTargets ? askCol.width : implicitWidth
             height: askCard.largeTargets ? 48 : implicitHeight; spacing: 8
-            KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
+            ChinKeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "talk about this"; color: chin.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: { rail.answerAsk({ cancelled: true, discussing: true }); Qt.callLater(rail.enterInsert) } } }
         }
 
@@ -3959,17 +3992,17 @@ Item {
           implicitHeight: 44
           height: implicitHeight
           radius: 10
-          color: Theme.surface0
-          border.color: rail.insert ? Theme.orange : Theme.hairline
+          color: chin.baseSurface
+          border.color: rail.insert ? chin.decisionOrange : chin.hairline
           border.width: 1
           RowLayout {
             anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
             spacing: 8
-            Icon { name: "chevron-right"; width: 14; height: 14; color: Theme.orange }
+            Icon { name: "chevron-right"; width: 14; height: 14; color: chin.decisionOrange }
             TextInput {
               id: askInput
               Layout.fillWidth: true
-              color: Theme.fg
+              color: chin.fg
               font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
               clip: true
               verticalAlignment: TextInput.AlignVCenter
@@ -3986,7 +4019,7 @@ Item {
             Text {
               visible: !rail.insert
               text: "i to answer"
-              color: Theme.fg_muted
+              color: chin.muted
               font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             }
           }
@@ -4004,7 +4037,7 @@ Item {
               : askCard.userBash ? "click Run · y runs · n declines · esc cancels"
               : (askCard.ask && askCard.ask.method === "select")
                 ? "click an option or press a number · t to talk · esc cancels" : "t to talk · esc cancels")
-          color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          color: chin.muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
       }
     }
@@ -4017,9 +4050,9 @@ Item {
         visible: rail.newOpen
         implicitHeight: newCol.implicitHeight + 24
         radius: 14
-        color: Theme.surface
+        color: chin.cardSurface
         border.width: 1
-        border.color: Theme.electric
+        border.color: rail.lavenderAccent
         Column {
           id: newCol
           anchors { left: parent.left; right: parent.right; top: parent.top
@@ -4030,14 +4063,14 @@ Item {
                 : rail.newSpawnPending && rail.newSpawnPending.rebind ? ("bind plan · " + rail.shortName(rail.newSpawnPending.session))
                 : rail.newSpawnPending ? ("new session · " + rail.newFolder.split("/").pop() + " — do you have a plan?")
                 : rail.newFolder.length ? ("new session · " + rail.newFolder.split("/").pop()) : "new session — pick a folder"
-            color: Theme.electric
+            color: rail.lavenderAccent
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
           }
           // Pane 1 — folders (recent-first, fuzzy-filtered by typing).
           Text {
             visible: rail.newMode !== "remote" && rail.newMode !== "plan-new" && (!rail.newFolder.length || !!rail.newSpawnPending) && rail.newFilter.length > 0
             text: "filter: " + rail.newFilter
-            color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            color: chin.muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
           Column {
             width: newCol.width
@@ -4047,18 +4080,18 @@ Item {
               model: rail.newFolderRows.slice(rail.newWinStart, rail.newWinStart + 12)
               Rectangle {
                 width: parent.width; implicitHeight: 30; radius: 8
-                color: (rail.newWinStart + index) === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                color: (rail.newWinStart + index) === rail.newCur ? chin.itemCursor : "transparent"
                 Row {
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   spacing: 8
-                  Text { text: modelData.name; color: Theme.fg
+                  Text { text: modelData.name; color: chin.fg
                          font.family: Theme.fontFamily; font.pixelSize: rail.fsBody }
                   Text {
                     // how many sessions already live there — the resume signal
                     text: { rail.agentd ? rail.agentd.sessions.length : 0
                             var c = rail.sessionsIn(modelData.path).length
                             return c > 0 ? c + " session" + (c > 1 ? "s" : "") : "" }
-                    color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+                    color: chin.muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
                     anchors.verticalCenter: parent.verticalCenter
                   }
                 }
@@ -4075,7 +4108,7 @@ Item {
               model: rail.newWhichRows
               Rectangle {
                 width: parent.width; implicitHeight: 30; radius: 8
-                color: index === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                color: index === rail.newCur ? chin.itemCursor : "transparent"
                 Row {
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   spacing: 8
@@ -4083,8 +4116,8 @@ Item {
                     text: modelData.kind === "new"   ? "+ new session (" + rail.newSessionName(rail.newFolder) + ")"
                         : modelData.kind === "adopt" ? "adopt orphaned transcript · " + (modelData.stamp || modelData.id.slice(0, 19))
                         : (modelData.sess.name + "  ·  " + (modelData.sess.status || "?"))
-                    color: modelData.kind === "new" ? Theme.electric
-                         : modelData.kind === "adopt" ? Theme.fg_muted : Theme.fg
+                    color: modelData.kind === "new" ? rail.lavenderAccent
+                         : modelData.kind === "adopt" ? chin.muted : chin.fg
                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
                   }
                 }
@@ -4101,15 +4134,15 @@ Item {
               model: rail.newPlanRows.slice(rail.newPlanWinStart, rail.newPlanWinStart + 12)
               Rectangle {
                 width: parent.width; implicitHeight: 30; radius: 8
-                color: (rail.newPlanWinStart + index) === rail.newCur ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.10) : "transparent"
+                color: (rail.newPlanWinStart + index) === rail.newCur ? chin.itemCursor : "transparent"
                 Row {
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   spacing: 8
                   Text {
                     text: modelData.newPlan ? "new plan…"
                         : modelData.none ? "no plan" : modelData.slug
-                    color: modelData.none ? Theme.fg_muted
-                         : modelData.newPlan ? Theme.electric : Theme.fg
+                    color: modelData.none ? chin.muted
+                         : modelData.newPlan ? rail.lavenderAccent : chin.fg
                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
                   }
                 }
@@ -4122,8 +4155,8 @@ Item {
             visible: rail.newMode === "remote" || rail.newMode === "plan-new"
             implicitHeight: 44; height: implicitHeight
             radius: 10
-            color: Theme.surface0
-            border.color: rail.insert ? rail.activeRing : Theme.hairline
+            color: chin.baseSurface
+            border.color: rail.insert ? rail.activeRing : chin.hairline
             border.width: 2
             Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
             RowLayout {
@@ -4131,13 +4164,13 @@ Item {
               spacing: 8
               Icon {
                 name: "chevron-right"; width: 14; height: 14
-                color: rail.insert ? rail.activeRing : Theme.hairline
+                color: rail.insert ? rail.activeRing : chin.hairline
                 Behavior on color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
               }
               TextInput {
                 id: newInput
                 Layout.fillWidth: true
-                color: Theme.fg
+                color: chin.fg
                 font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
                 clip: true
                 verticalAlignment: TextInput.AlignVCenter
@@ -4159,7 +4192,7 @@ Item {
                 : rail.newSpawnPending      ? "type to filter plans · j/k + enter binds · esc back"
                 : rail.newFolder.length     ? "j/k + enter — resume or start new · esc back"
                 : "type a name or ~/path · zoxide matches · ↑/↓ picks · tab completes · enter opens" + (rail.remoteOffered ? " · r = remote VM" : "") + " · esc cancels"
-            color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            color: chin.muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           }
         }
       }
@@ -4176,10 +4209,21 @@ Item {
         // Flickable scrolls the caret into view.
         implicitHeight: Math.max(52, Math.min(composerInput.implicitHeight + 30, 94))
         radius: Math.min(height / 2, 26)   // pill at one line, rounded card when grown
-        color: Theme.bg
-        border.color: rail.insert ? rail.activeRing : Theme.hairline
-        border.width: 2
-        Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+        color: "transparent"
+        border.width: 0
+        ContrastCard {
+          anchors.fill: parent
+          cardRadius: parent.radius
+          elevated: false
+        }
+        Rectangle {
+          anchors.fill: parent
+          radius: parent.radius
+          color: "transparent"
+          border.color: rail.insert ? rail.activeRing : chin.hairline
+          border.width: rail.insert ? 2 : (chin.lightMode ? 1 : 2)
+          Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+        }
         RowLayout {
           anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
           spacing: 8
@@ -4187,7 +4231,7 @@ Item {
             name: "chevron-right"; width: 14; height: 14
             // Rides the outline exactly (same hue, same glide) so prompt + frame
             // read as one piece of chrome.
-            color: rail.insert ? rail.activeRing : Theme.hairline
+            color: rail.insert ? rail.activeRing : chin.hairline
             Behavior on color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
             // Centered on the FIRST text line, derived from the real line height
             // (cursorRectangle) instead of a hand-tuned constant — the guess drifted
@@ -4212,7 +4256,7 @@ Item {
             padding: 0
             background: null
             wrapMode: TextArea.Wrap
-            color: Theme.fg
+            color: chin.fg
             font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
             onCursorRectangleChanged: composerFlick.ensureVisible(cursorRectangle)
             onTextChanged: if (!text.length) feedDebounce.restart()
@@ -4355,7 +4399,7 @@ Item {
               text: (rail.pendingAsk && (rail.pendingAsk.method === "input" || rail.pendingAsk.method === "editor"))
                     ? "type your reply…   (⏎ to send · esc cancels)"
                     : "message " + rail.featured.name + "…"
-              color: Theme.fg_muted; font: composerInput.font
+              color: chin.muted; font: composerInput.font
             }
           }
           }
@@ -4377,7 +4421,7 @@ Item {
           id: scopeSwitch
           Layout.alignment: Qt.AlignVCenter
           Layout.rightMargin: -4
-          readonly property color tint: rail.scopeMode === "work" ? Theme.electric : Theme.orange
+          readonly property color tint: rail.scopeMode === "work" ? rail.skyAccent : Theme.orange
           readonly property bool expanded: scopeHover.hovered
           implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
           implicitHeight: 22
@@ -4463,7 +4507,7 @@ Item {
           Layout.alignment: Qt.AlignVCenter
           Layout.leftMargin: -4
           visible: rail.selectedModelLabel.length > 0
-          readonly property color tint: Theme.fg_muted
+          readonly property color tint: chin.muted
           implicitWidth: modelRow.implicitWidth + 12
           implicitHeight: 22
           radius: 11
@@ -4524,8 +4568,8 @@ Item {
           }
           RowLayout {
             spacing: 6
-            KeyCap { small: true; px: 11; text: modelData.k }
-            CapLabel { px: 12; text: modelData.l }
+            ChinKeyCap { small: true; px: 11; text: modelData.k }
+            ChinCapLabel { px: 12; text: modelData.l }
             Item { width: 6 }
           }
         }
@@ -4742,11 +4786,12 @@ Item {
         TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey) }
         Icon {
           name: expanded ? "chevron-down" : "chevron-right"
-          width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter
+          width: 12; height: 12; color: actCol.parent.mutedColor; anchors.verticalCenter: parent.verticalCenter
         }
         Text {
-          text: "Details" + (summary ? " · " + summary : ""); color: Theme.fg_muted
-          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+          text: "DETAILS" + (summary ? " · " + summary : ""); color: actCol.parent.mutedColor
+          opacity: 0.82
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
           anchors.verticalCenter: parent.verticalCenter
         }
       }
@@ -4758,6 +4803,7 @@ Item {
           property var entry: modelData
           property string gkey: ekey + "-think-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
+          property color mutedColor: actCol.parent.mutedColor
         }
       }
       Repeater {
@@ -4766,6 +4812,8 @@ Item {
           width: actCol.width
           property var entry: actCol.editItems[index]
           property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === ekey && rail.fileChoiceCur === index
+          property color textColor: actCol.parent.textColor
+          property color mutedColor: actCol.parent.mutedColor
           sourceComponent: editRow
         }
       }
@@ -4778,6 +4826,8 @@ Item {
           property var entry: actCol.bashItems[index]
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
+          property color textColor: actCol.parent.textColor
+          property color mutedColor: actCol.parent.mutedColor
           sourceComponent: bashRow
         }
       }
@@ -4789,13 +4839,13 @@ Item {
       spacing: 8
       Icon {
         name: "bolt-lightning"; width: 13; height: 13
-        color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter
+        color: mutedColor; Layout.alignment: Qt.AlignVCenter
       }
       Text {
         text: entry.command
           ? "bash " + String(entry.command).replace(/\s+/g, " ").trim()
           : (entry.text || "")
-        color: Theme.fg_secondary
+        color: textColor
         font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
         elide: Text.ElideRight; maximumLineCount: 1; Layout.fillWidth: true
       }
@@ -4875,12 +4925,12 @@ Item {
         Layout.preferredWidth: 13
         Layout.preferredHeight: Math.round(rail.fsBody * 1.3)
         Layout.alignment: Qt.AlignTop
-        Rectangle { width: 4; height: 4; radius: 2; color: Theme.fg_muted; anchors.centerIn: parent }
+        Rectangle { width: 4; height: 4; radius: 2; color: mutedColor; anchors.centerIn: parent }
       }
       Text {
         text: (typeof expanded !== "undefined" && expanded && entry.full) ? entry.full : entry.text
-        color: Theme.fg_muted
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        color: mutedColor
+        font.family: rail.messageFontFamily; font.pixelSize: rail.fsBody; font.weight: rail.messageMetaWeight
         wrapMode: Text.WordWrap; lineHeight: 1.3; Layout.fillWidth: true
         elide: (typeof expanded !== "undefined" && expanded) ? Text.ElideNone : Text.ElideRight
         maximumLineCount: (typeof expanded !== "undefined" && expanded) ? 9999 : 1
@@ -4895,6 +4945,7 @@ Item {
       width: parent ? parent.width : 400
       spacing: 2
       readonly property var lines: rail.inlineAttachmentLines(sourceText)
+      readonly property color contentColor: parent.bodyColor
       Repeater {
         model: attachmentLines.lines
         Flow {
@@ -4906,11 +4957,51 @@ Item {
             model: attachmentLine.tokens
             Loader {
               property var token: modelData
-              sourceComponent: token.kind === "attachment" ? inlineAttachmentChip : inlineAttachmentText
+              property color contentColor: attachmentLines.contentColor
+              sourceComponent: token.kind === "image" ? inlineAttachmentChip
+                : (token.kind === "file" ? inlineFileChip
+                : (token.kind === "code" ? inlineCodeText : inlineAttachmentText))
             }
           }
         }
       }
+    }
+  }
+  component MessageHintCap: Item {
+    property string text: ""
+    implicitWidth: Math.max(hintLetter.implicitWidth + 10, 20)
+    implicitHeight: 20
+    width: implicitWidth
+    height: implicitHeight
+    Rectangle {
+      anchors.fill: parent
+      radius: 6
+      border.width: 1
+      border.color: rail.goldAccent
+      gradient: Gradient {
+        orientation: Gradient.Vertical
+        GradientStop { position: 0; color: Theme.mode === "light" ? "#FFFFFF" : "#3B3B3B" }
+        GradientStop { position: 1; color: Theme.mode === "light" ? "#D5D3CF" : "#202020" }
+      }
+      Rectangle {
+        anchors.fill: parent
+        anchors.margins: 2
+        radius: 4
+        gradient: Gradient {
+          orientation: Gradient.Vertical
+          GradientStop { position: 0; color: Theme.mode === "light" ? "#FBFAF8" : "#1A1A1A" }
+          GradientStop { position: 1; color: Theme.mode === "light" ? "#F3F1ED" : "#090909" }
+        }
+      }
+    }
+    Text {
+      id: hintLetter
+      anchors.centerIn: parent
+      text: parent.text.toUpperCase()
+      color: Theme.mode === "light" ? "#242424" : "#FAFAFA"
+      font.family: Theme.fontFamily
+      font.pixelSize: 11
+      font.weight: 600
     }
   }
   Component {
@@ -4922,8 +5013,22 @@ Item {
         id: attachmentWord
         anchors.verticalCenter: parent.verticalCenter
         text: token.text
-        color: Theme.fg
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        color: contentColor
+        font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
+      }
+    }
+  }
+  Component {
+    id: inlineCodeText
+    Item {
+      width: codeWord.implicitWidth + (token.trailing ? 7 : 0)
+      height: 24
+      Text {
+        id: codeWord
+        anchors.verticalCenter: parent.verticalCenter
+        text: token.label
+        color: rail.goldAccent
+        font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
       }
     }
   }
@@ -4931,24 +5036,82 @@ Item {
     id: inlineAttachmentChip
     Item {
       width: imagePill.width + (token.trailing ? 7 : 0)
-      height: 24
+      height: 26
       Rectangle {
         id: imagePill
         width: imagePillRow.implicitWidth + 16
-        height: 24
-        radius: 7
-        color: Theme.surface0
+        height: 26
+        radius: height / 2
         border.width: 1
-        border.color: Theme.hairline
+        border.color: Theme.mode === "light" ? "#D8D8D5" : "#2B2B2B"
+        gradient: Gradient {
+          orientation: Gradient.Vertical
+          GradientStop { position: 0; color: Theme.mode === "light" ? "#FFFFFF" : "#3B3B3B" }
+          GradientStop { position: 1; color: Theme.mode === "light" ? "#D5D3CF" : "#202020" }
+        }
+        Rectangle {
+          anchors.fill: parent
+          anchors.margins: 2
+          radius: Math.max(0, parent.radius - 2)
+          gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0; color: Theme.mode === "light" ? "#FBFAF8" : "#1A1A1A" }
+            GradientStop { position: 0.28; color: Theme.mode === "light" ? "#FAF9F7" : "#0E0E0E" }
+            GradientStop { position: 1; color: Theme.mode === "light" ? "#F3F1ED" : "#060606" }
+          }
+        }
         Row {
           id: imagePillRow
           anchors.centerIn: parent
           spacing: 6
-          Icon { name: "image"; width: 12; height: 12; color: Theme.electric; anchors.verticalCenter: parent.verticalCenter }
+          Icon { name: "image"; width: 12; height: 12; color: rail.mintAccent; anchors.verticalCenter: parent.verticalCenter }
           Text {
-            text: "Image " + token.number
-            color: Theme.fg
-            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            text: token.label
+            color: Theme.mode === "light" ? "#343432" : "#D8D8D8"
+            font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+      }
+    }
+  }
+  Component {
+    id: inlineFileChip
+    Item {
+      width: filePill.width + (token.trailing ? 7 : 0)
+      height: 26
+      Rectangle {
+        id: filePill
+        width: filePillRow.implicitWidth + 16
+        height: 26
+        radius: height / 2
+        border.width: 1
+        border.color: Qt.rgba(rail.goldAccent.r, rail.goldAccent.g, rail.goldAccent.b, 0.45)
+        gradient: Gradient {
+          orientation: Gradient.Vertical
+          GradientStop { position: 0; color: Theme.mode === "light" ? "#FFFFFF" : "#3B3B3B" }
+          GradientStop { position: 1; color: Theme.mode === "light" ? "#D5D3CF" : "#202020" }
+        }
+        Rectangle {
+          anchors.fill: parent
+          anchors.margins: 2
+          radius: Math.max(0, parent.radius - 2)
+          gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0; color: Theme.mode === "light" ? "#FBFAF8" : "#1A1A1A" }
+            GradientStop { position: 0.28; color: Theme.mode === "light" ? "#FAF9F7" : "#0E0E0E" }
+            GradientStop { position: 1; color: Theme.mode === "light" ? "#F3F1ED" : "#060606" }
+          }
+        }
+        Row {
+          id: filePillRow
+          anchors.centerIn: parent
+          spacing: 6
+          Icon { name: "file-content"; width: 12; height: 12; color: rail.goldAccent; anchors.verticalCenter: parent.verticalCenter }
+          Text {
+            text: token.label
+            color: Theme.mode === "light" ? "#343432" : "#D8D8D8"
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
             anchors.verticalCenter: parent.verticalCenter
           }
         }
@@ -4990,24 +5153,21 @@ Item {
         activeFocusOnPress: false
         text: rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
         color: bodyColor
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+        font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
         wrapMode: TextEdit.WordWrap
         textFormat: TextEdit.MarkdownText
         onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
       }
       Repeater {
         model: rail.blockHints(block, rowIndex)
-        KeyCap {
+        MessageHintCap {
           readonly property string marker: "\u200B[" + modelData.label + "]\u200B"
           readonly property int markerPos: markdownText.getText(0, markdownText.length).indexOf(marker)
           readonly property rect markerRect: markerPos >= 0 ? markdownText.positionToRectangle(markerPos) : Qt.rect(-100, -100, 0, 0)
           x: markerRect.x
           y: markerRect.y + (markerRect.height - height) / 2
           z: 2
-          small: true
-          px: 10
           text: modelData.label
-          textColor: Theme.yellow
           TapHandler { onTapped: rail.hintKey(modelData.label) }
         }
       }
@@ -5044,18 +5204,16 @@ Item {
             font.underline: fence.requestsApproval
           }
           Item { Layout.fillWidth: true }
-          KeyCap {
+          MessageHintCap {
             visible: fence.activeHint !== null
-            small: true; px: 10
             text: fence.activeHint ? fence.activeHint.label : ""
-            textColor: Theme.yellow
             TapHandler { onTapped: if (fence.activeHint) rail.hintKey(fence.activeHint.label) }
           }
         }
         Text {
           width: parent.width
           text: String(block.code || "").replace(/\n$/, "")
-          color: fence.requestsApproval ? rail.summaryColor : Theme.fg_secondary
+          color: rail.goldAccent
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
           wrapMode: Text.WrapAnywhere; lineHeight: 1.35
         }
@@ -5075,13 +5233,15 @@ Item {
         model: proseCol.parts
         Loader {
           width: proseCol.width
-          sourceComponent: modelData.fileRef !== undefined ? fileRefRow : markdownContent
+          sourceComponent: modelData.fileRef !== undefined ? fileRefRow
+            : (rail.hasInlineBadges(sourceText) ? inlineAttachmentContent : markdownContent)
           property var refData: modelData
           property string sourceText: modelData.text || ""
           property int sourceEntry: proseCol.parent.entryIndex
           property int sourceOffset: modelData.offset
           property int rowIndex: proseCol.parent.rowIndex
-          property color bodyColor: modelData.summary ? rail.summaryColor : Theme.fg
+          property color bodyColor: modelData.summary ? rail.summaryColor : proseCol.parent.bodyColor
+          property color mutedColor: proseCol.parent.mutedColor
           property bool agentAuthored: true
         }
       }
@@ -5103,14 +5263,13 @@ Item {
         anchors.fill: parent
         anchors.leftMargin: 10; anchors.rightMargin: 10
         spacing: 8
-        Icon { name: "file-content"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
-        Text {
+        Icon { name: "file-content"; width: 13; height: 13; color: mutedColor; Layout.alignment: Qt.AlignVCenter }
+        MessageHintCap {
           visible: text.length > 0
           text: rail.fileHintFor(refData.path, rowIndex)
-          color: Theme.orange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
         }
         Text {
-          text: refData.shown; color: Theme.fg
+          text: refData.shown; color: bodyColor
           font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
           elide: Text.ElideMiddle; Layout.fillWidth: true
         }
@@ -5143,8 +5302,8 @@ Item {
       RowLayout {
         anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
         spacing: 8
-        Icon { name: "paintbrush"; width: 13; height: 13; color: Theme.fg_muted; Layout.alignment: Qt.AlignVCenter }
-        Text { text: entry.file; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.bold: true; elide: Text.ElideMiddle; Layout.fillWidth: true }
+        Icon { name: "paintbrush"; width: 13; height: 13; color: mutedColor; Layout.alignment: Qt.AlignVCenter }
+        Text { text: entry.file; color: textColor; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.bold: true; elide: Text.ElideMiddle; Layout.fillWidth: true }
         Text { visible: (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
         Text { visible: (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
       }
