@@ -3845,6 +3845,7 @@ Item {
       readonly property var ask: rail.pendingAsk
       readonly property var userBash: rail.pendingUserBash
       readonly property string prompt: ask ? String(ask.message || ask.placeholder || "") : ""
+      readonly property bool largeTargets: width < 480
       visible: ask !== null && rail.view === "chat"
       Layout.fillWidth: true
       implicitHeight: askCol.implicitHeight + 28
@@ -3908,9 +3909,10 @@ Item {
             Rectangle {
               id: optionRow
               width: askCol.width
-              implicitHeight: Math.max(30, optionText.implicitHeight + 8)
+              implicitHeight: Math.max(askCard.largeTargets ? 48 : 30, optionText.implicitHeight + (askCard.largeTargets ? 16 : 8))
               radius: 8
               color: optionHover.hovered ? Theme.hover : "transparent"
+              border.width: 1; border.color: Theme.hairlineSoft
               Row {
                 anchors { fill: parent; leftMargin: 6; rightMargin: 6 }
                 spacing: 9
@@ -3933,15 +3935,19 @@ Item {
           width: askCol.width
           spacing: 10
           visible: askCard.ask && askCard.ask.method === "confirm"
-          Row { spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+A" : "y"; anchors.verticalCenter: parent.verticalCenter }
+          Row { width: askCard.largeTargets ? (askCol.width - 10) / 2 : implicitWidth; height: askCard.largeTargets ? 48 : implicitHeight
+            spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+A" : "y"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: askCard.userBash ? "Run" : "yes"; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: rail.answerAsk({ confirmed: true }) } }
-          Row { spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+B" : "n"; anchors.verticalCenter: parent.verticalCenter }
+          Row { width: askCard.largeTargets ? (askCol.width - 10) / 2 : implicitWidth; height: askCard.largeTargets ? 48 : implicitHeight
+            spacing: 8; KeyCap { text: rail.onSteamDeck ? "RT+B" : "n"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: askCard.userBash ? "Decline" : "no"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: rail.answerAsk({ confirmed: false }) } }
           // Neither yes nor no: release the agent from the question and open the composer,
           // for the common case where the question itself is the thing worth discussing.
-          Row { visible: !askCard.userBash; spacing: 8; KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
+          Row { visible: !askCard.userBash; width: askCard.largeTargets ? askCol.width : implicitWidth
+            height: askCard.largeTargets ? 48 : implicitHeight; spacing: 8
+            KeyCap { text: "t"; anchors.verticalCenter: parent.verticalCenter }
             Text { text: "talk about this"; color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; anchors.verticalCenter: parent.verticalCenter }
             TapHandler { onTapped: { rail.answerAsk({ cancelled: true, discussing: true }); Qt.callLater(rail.enterInsert) } } }
         }

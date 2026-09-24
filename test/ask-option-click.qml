@@ -8,6 +8,7 @@ ShellRoot {
   id: test
   property int phase: 0
   readonly property bool deck: Quickshell.env("COCKPIT_DECK") === "1"
+  readonly property bool narrow: deck || Quickshell.env("COCKPIT_NARROW_TEST") === "1"
   property var sent: []
   readonly property var answers: sent.filter(message => message.type === "answer")
   SocketServer { active: true; path: Quickshell.env("HOME") + "/agentd-personal.sock"; handler: Socket {} }
@@ -18,7 +19,7 @@ ShellRoot {
     function send(message) { test.sent = test.sent.concat([message]); return true }
   }
   FloatingWindow {
-    visible: true; implicitWidth: test.deck ? 360 : 720; implicitHeight: 800
+    visible: true; implicitWidth: test.narrow ? 360 : 720; implicitHeight: 800
     Rail { id: rail; anchors.fill: parent; agentd: state; scopeMode: "personal"; focused: true }
   }
   TestEvent { id: input }
@@ -69,6 +70,8 @@ ShellRoot {
         var text = test.findText(rail, "First choice")
         test.check(text && text.parent && text.parent.parent, "first option row did not render")
         var row = text.parent.parent
+        test.check(row.border.width === 1 && row.border.color.a > 0, "option outline is missing")
+        if (test.narrow) test.check(row.height >= 48, "narrow option tap target is too short")
         input.mouseClick(row, row.width - 4, row.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
       } else if (phase === 4) {
         test.check(test.answers.length === 2 && test.answers[1].response.value === "First choice",
@@ -82,21 +85,36 @@ ShellRoot {
         test.event({type:"extension_ui_request",session:"target",id:"confirm",method:"confirm",title:"Approve?"})
       } else if (phase === 6) {
         if (test.deck) test.check(test.findText(rail, "RT+A") && test.findText(rail, "RT+B"), "Deck confirm hints missing")
-        rail.forceActiveFocus()
-        input.keyClick(Qt.Key_1, Qt.NoModifier, 0)
+        if (test.narrow) {
+          var yes = test.findText(rail, "yes")
+          test.check(yes && yes.parent.height >= 48 && yes.parent.width > 100, "narrow yes tap target is too small")
+          input.mouseClick(yes.parent, yes.parent.width - 4, yes.parent.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
+        } else {
+          rail.forceActiveFocus()
+          input.keyClick(Qt.Key_1, Qt.NoModifier, 0)
+        }
       } else if (phase === 7) {
         test.check(test.answers.length === 4 && test.answers[3].response.confirmed === true, "Deck A/1 must confirm")
         test.event({type:"extension_ui_request",session:"target",id:"confirm-no",method:"confirm",title:"Decline?"})
       } else if (phase === 8) {
-        rail.forceActiveFocus()
-        input.keyClick(Qt.Key_2, Qt.NoModifier, 0)
+        if (test.narrow) {
+          var no = test.findText(rail, "no")
+          test.check(no && no.parent.height >= 48 && no.parent.width > 100, "narrow no tap target is too small")
+          input.mouseClick(no.parent, no.parent.width - 4, no.parent.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
+        } else {
+          rail.forceActiveFocus()
+          input.keyClick(Qt.Key_2, Qt.NoModifier, 0)
+        }
       } else if (phase === 9) {
         test.check(test.answers.length === 5 && test.answers[4].response.confirmed === false, "Deck B/2 must decline")
         test.event({type:"extension_ui_request",session:"target",id:"talk",method:"confirm",title:"Discuss?"})
       } else if (phase === 10) {
         var talk = test.findText(rail, "talk about this")
         test.check(talk && talk.visible, "discuss option missing")
-        input.mouseClick(talk, Math.min(10, talk.width / 2), talk.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
+        if (test.narrow) {
+          test.check(talk.parent.height >= 48 && talk.parent.width > 100, "narrow discuss tap target is too small")
+          input.mouseClick(talk.parent, talk.parent.width - 4, talk.parent.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
+        } else input.mouseClick(talk, Math.min(10, talk.width / 2), talk.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
       } else if (phase === 11) {
         test.check(test.answers.length === 6 && test.answers[5].response.cancelled === true,
                    "clicking talk did not cancel the question for discussion")
@@ -109,8 +127,8 @@ ShellRoot {
           var chin = test.findNamed(rail, "composerHints")
           var model = chin && test.findText(chin, rail.selectedModelLabel)
           test.check(rail.selectedModelLabel.length && model && model.visible, "Deck chin model name disappeared")
-        } else test.check(hint && hint.visible, "desktop chin hints disappeared")
-        console.log("PASS: click and number answers, confirm choices, Deck question/chin hints")
+        } else if (!test.narrow) test.check(hint && hint.visible, "desktop chin hints disappeared")
+        console.log("PASS: click and number answers, narrow touch targets, Deck question/chin hints")
         Qt.quit()
       }
       phase++
