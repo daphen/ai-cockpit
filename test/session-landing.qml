@@ -6,6 +6,7 @@ import "."
 ShellRoot {
   id: test
   property var seen: []
+  property var activity: []
   property var commands: []
   property var historyRequests: []
   property bool online: true
@@ -19,7 +20,8 @@ ShellRoot {
       else test.commands.push(message)
       return true
     }
-    onEditSeen: (sid, path, needle, historical) => test.seen.push({ sid: sid, path: path, historical: historical })
+    onEditMarksSnapshot: (sid, path) => test.seen.push({ sid: sid, path: path, historical: true })
+    onFileActivity: (sid, path, line, needle) => test.activity.push({ sid: sid, path: path, line: line, needle: needle })
   }
   Component { id: landingRail; Rail { agentd: backend; scopeMode: "work"; nvimSock: "/tmp/landing-test.sock" } }
   FileView { id: nvimCalls; path: Quickshell.env("HOME") + "/nvim-calls" }
@@ -31,7 +33,11 @@ ShellRoot {
       if (!calls.length) return
       check(calls.indexOf(',"work","/home/david_karlsson_lovable_dev/src/lovable-every-1")') >= 0,
             "workspace handoff lost VM scope/directory: " + calls)
-      console.log("PASS: history, interruption, streaming, and source-scoped editor handoff")
+      if (calls.indexOf('src/current.ts') < 0) return
+      check(calls.indexOf('m.follow_remote(') >= 0 && calls.indexOf(',64,\\"\\",nil)') >= 0, "changed line lost on editor handoff: " + calls)
+      var follows = calls.split("\n").filter(call => call.indexOf("m.follow_remote(") >= 0)
+      check(follows.every(call => call.indexOf("ignored-child.ts") < 0), "child activity moved the selected editor: " + calls)
+      console.log("PASS: successful file activity, cursor offsets, selected-session isolation, history, interruption, and streaming")
       Qt.quit()
     }
   }
@@ -42,7 +48,11 @@ ShellRoot {
       data: { entries: [{ id: "m1", type: "message", message: { role: "assistant",
         content: paths.map(function(path, i) {
           return { type: "toolCall", id: "edit" + i, name: "edit", arguments: { path: path, edits: [] } }
-        }) } }] } })
+        }) } }].concat(paths.map(function(path, i) {
+          return {id: "result" + i, parentId: i === 0 ? "m1" : "result" + (i - 1),
+            type: "message", message: {role: "toolResult", toolName: "edit", toolCallId: "edit" + i,
+            timestamp: Date.now() + i, details: {diff: "+2 applied change", firstChangedLine: 2}}}
+        })) } })
   }
   Component.onCompleted: {
     receive({ type: "roster", sessions: [{ id: "ticket-a", name: "ticket-a", status: "idle", cwd: "/tmp/ticket-a" }] })
@@ -57,10 +67,24 @@ ShellRoot {
     check(backend.lastEditFor("ticket-a") === "", "empty history clears stale last edit")
     receive({ type: "tool_execution_start", session: "ticket-a", toolName: "edit", toolCallId: "live",
       args: { path: "src/live.ts", edits: [] } })
-    check(seen.length === 2 && !seen[1].historical && seen[1].path === "src/live.ts", "live edits still notify")
+    check(seen.length === 1 && activity.length === 0, "unfinished edit must not move the editor")
+    receive({ type: "tool_execution_end", session: "ticket-a", toolName: "edit", toolCallId: "live",
+      result: { details: { diff: "@@ -1 +8 @@\n-old\n+new", firstChangedLine: 8 } } })
+    check(activity.length === 1 && activity[0].path === "src/live.ts" && activity[0].line === 8,
+          "successful edit follows its actual changed line")
+    receive({ type: "tool_execution_start", session: "ticket-a", toolName: "edit", toolCallId: "failed",
+      args: { path: "src/failed.ts", edits: [] } })
+    receive({ type: "tool_execution_end", session: "ticket-a", toolName: "edit", toolCallId: "failed", isError: true,
+      result: { details: {} } })
+    check(activity.length === 1 && backend.lastEditFor("ticket-a") === "src/live.ts", "failed edit must not follow or become latest")
+    receive({ type: "tool_execution_start", session: "ticket-a", toolName: "read", toolCallId: "read",
+      args: { path: "src/read.ts", offset: 64, limit: 20 } })
+    receive({ type: "tool_execution_end", session: "ticket-a", toolName: "read", toolCallId: "read", result: {} })
+    check(activity.length === 1 && backend.lastEditFor("ticket-a") === "src/live.ts", "reads must not move the editor or replace the latest edit")
     receive({ type: "tool_execution_start", session: "ticket-a", toolName: "write", toolCallId: "plan",
       args: { path: "/home/test/personal/notes/storage/plans/TICKET-A.md", content: "plan" } })
-    check(seen.length === 2 && backend.lastEditFor("ticket-a") === "src/live.ts", "live plan edits must not replace code landing")
+    receive({ type: "tool_execution_end", session: "ticket-a", toolName: "write", toolCallId: "plan", result: {} })
+    check(activity.length === 1 && backend.lastEditFor("ticket-a") === "src/live.ts", "live plan edits must not replace code landing")
     backend.interrupt("ticket-a")
     check(commands.length === 1 && commands[0].type === "abort", "interrupt reaches transport")
     check(!backend.feedFor("ticket-a").some(function(item) { return String(item.text).indexOf("turn aborted") >= 0 }), "socket write is not confirmation")
@@ -106,7 +130,17 @@ ShellRoot {
     check(backend.feedFor("ticket-a").length === before, "inactive replies do not churn the feed")
     var rail = landingRail.createObject(test)
     receive({ type: "roster", sessions: [{ name: "vm", id: "vm", status: "idle",
-      cwd: "/home/david_karlsson_lovable_dev/src/lovable-every-1" }] })
+      cwd: "/home/david_karlsson_lovable_dev/src/lovable-every-1" },
+      { name: "child", id: "child-id", parent: "vm", status: "streaming", cwd: "/tmp/child" }] })
+    rail.jumpToSession("vm")
     rail.landNvim("vm", "diff")
+    check(rail._followsSelected("vm") && !rail._followsSelected("child") && !rail._followsSelected("child-id"),
+          "follow must stay on the selected agent, not its workers")
+    backend.fileActivity("child", "ignored-child.ts", 10, "", null, "child-edit")
+    backend.editMarksSnapshot("vm", "stale-history.ts", [], 1, 1, "old-history")
+    receive({ type: "tool_execution_start", session: "vm", toolName: "edit", toolCallId: "vm-edit",
+      args: { path: "src/current.ts", edits: [] } })
+    receive({ type: "tool_execution_end", session: "vm", toolName: "edit", toolCallId: "vm-edit",
+      result: { details: { firstChangedLine: 64 } } })
   }
 }

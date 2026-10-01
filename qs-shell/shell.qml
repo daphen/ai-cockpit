@@ -353,7 +353,7 @@ ShellRoot {
               first: TermView {
                 id: term
                 anchors.fill: parent
-                active: activeFocus && !win.dashboardActive
+                active: !win.dashboardActive
                 enabled: !win.dashboardActive
                 Component.onCompleted: forceActiveFocus()
                 onActiveFocusChanged: if (activeFocus) win.pane = "nvim"

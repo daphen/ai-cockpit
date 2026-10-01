@@ -12,7 +12,12 @@ cleanup() {
     local link="$XDG_RUNTIME_DIR/quickshell/by-pid/$pid"
     local entry
     entry=$(readlink -f "$link" || true)
-    kill "$pid" 2>/dev/null || true
+    kill -- "-$pid" 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      kill -0 -- "-$pid" 2>/dev/null || break
+      sleep 0.1
+    done
+    kill -KILL -- "-$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     rm -f "$link"
     [[ "$entry" != "$XDG_RUNTIME_DIR/quickshell/by-id/"* ]] || rm -rf "$entry"
@@ -23,6 +28,10 @@ trap cleanup EXIT
 cp qs-shell/*.qml "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
 mkdir -p "$tmp/home"
+if [[ "${1:-}" == "test/live-follow.qml" ]]; then
+  export COCKPIT_TEST_LUA="${COCKPIT_TEST_LUA:-$HOME/.config/nvim/lua}"
+  [[ -r "$COCKPIT_TEST_LUA/cockpit/init.lua" ]] || { echo "Cockpit Lua source missing: $COCKPIT_TEST_LUA" >&2; exit 1; }
+fi
 if [[ "${1:-test/session-landing.qml}" == "test/session-landing.qml" || "${1:-}" == "test/mirror-preparation.qml" || "${1:-}" == "test/open-in-nvim.qml" ]]; then
   mkdir -p "$tmp/home/.config/niri/scripts" "$tmp/home/bin"
   cp test/fake-mirror-prepare.sh "$tmp/home/.config/niri/scripts/vm-sync"
@@ -53,14 +62,19 @@ if [[ "${1:-}" == "test/diff-source.qml" ]]; then
   done
 fi
 env -u WAYLAND_DISPLAY HOME="$tmp/home" QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH="$HOME/.local/share/qml" \
-  qs -p "$tmp" >"$tmp/output" 2>&1 &
+  setsid qs -p "$tmp" >"$tmp/output" 2>&1 &
 pid=$!
-for _ in $(seq 1 50); do
+for _ in $(seq 1 200); do
   grep -qE 'PASS:|ERROR|Error:' "$tmp/output" && break
+  kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done
 if grep -E 'ERROR|Error:' "$tmp/output"; then exit 1; fi
-grep 'PASS:' "$tmp/output"
+if ! grep 'PASS:' "$tmp/output"; then
+  echo "QML test did not pass within 20 seconds: ${1:-test/session-landing.qml}" >&2
+  tail -30 "$tmp/output" >&2
+  exit 1
+fi
 if [[ "${1:-}" == "test/diff-source.qml" ]]; then
   ! grep -q get_changes "$tmp/lovable.log"
   grep -q '"session": "remote-worker"' "$tmp/work.log"

@@ -138,8 +138,8 @@ Item {
 
   // Pending ask_user questions (extension_ui_request): sid -> request obj
   // {id, method:"confirm"|"select"|"input"|"editor", title, message, options[]}.
-  // One agent edit landed (tool_execution_start, edit-shaped) — for live-follow.
-  signal editSeen(string sid, string path, string needleB64, bool historical)
+  signal editMarksSnapshot(string sid, string path, var rows, double at, int line, string editId)
+  signal fileActivity(string sid, string path, int line, string needleB64, var addedLines, string editId)
   signal sessionSettled(string sid)
   signal modelChangeResult(string sid, bool success, string detail)
   signal openInNvimRequested(string sid, string path, int line, int column)
@@ -160,10 +160,6 @@ Item {
     }
     return best.length >= 3 ? Qt.btoa(best) : ""
   }
-  // Fired when an edit's diff lands (tool_execution_end): the first hunk's
-  // new-file line — cross-repo edits have no local diff data, so this is the
-  // only line signal that always exists.
-  signal editHunk(string sid, string path, int line)
   // What the session is DOING right now (last tool started this exchange) — feeds
   // the working orb's action hue.
   // sid -> Date.now() while a compaction is in flight (live glance feedback).
@@ -240,14 +236,12 @@ Item {
     try { return JSON.parse(String(ask.message || "")) } catch (e) { return null }
   }
   function answerAsk(sid, payload) {
-    if (!asks[sid]) return
+    if (!asks[sid] || _answerIntents[sid]) return
     var response = Object.assign({}, payload)
     var intents = _answerIntents
-    if (response.discussing) {
-      intents[sid] = "discussing"
-      delete response.discussing
-      _answerIntents = intents
-    }
+    intents[sid] = response.discussing ? "discussing" : "answering"
+    delete response.discussing
+    _answerIntents = intents
     if (!send({ type: "answer", session: sid, response: response })) {
       delete intents[sid]
       _answerIntents = intents
@@ -637,7 +631,8 @@ Item {
             if (a.new_string) add += String(a.new_string).split("\n").length
             if (a.old_string) del += String(a.old_string).split("\n").length
           }
-          items.push({ kind: "edit", tool: name, file: _base(p), path: p, add: add, del: del })
+          items.push({ kind: "edit", tool: name, file: _base(p), path: p, add: add, del: del,
+                       id: b.id, failed: toolErrs[b.id] === true, needle: _editNeedle(name, a) })
         } else if (name === "request_user_bash") {
           var ub = toolResults[b.id] || ""
           items.push({ kind: "userbash", tool: name, command: String(a.command || ""),
@@ -658,7 +653,7 @@ Item {
                        text: ans ? ("❯ " + q + "  ↳ " + _clip(ans)) : ("❯ " + q),
                        command: ans.length > 72 ? ans : "" })
         } else {
-          items.push({ kind: "cmd", tool: name, text: toolHint(name, a),
+          items.push({ kind: "cmd", tool: name, text: toolHint(name, a), id: b.id,
                        failed: toolErrs[b.id] === true,
                        command: (name === "bash" || name === "shell") ? (a.command || a.cmd || "") : "" })
         }
@@ -972,8 +967,18 @@ Item {
     if (t === "prompt_accepted") {
       var accepted = String(m.message || "")
       if (accepted.length) {
-        _push(sid, { kind: "user", text: accepted, steered: m.steered === true })
-        _echoTrack(sid, accepted)
+        var echoed = (_localEcho[sid] || []).some(entry => entry.text === accepted)
+        if (!echoed) {
+          _push(sid, { kind: "user", text: accepted, steered: m.steered === true })
+          _echoTrack(sid, accepted)
+        } else if (m.steered === true) {
+          var acceptedRows = feeds[sid] || []
+          for (var ar = acceptedRows.length - 1; ar >= 0; ar--) {
+            if (acceptedRows[ar].kind === "user" && acceptedRows[ar].text === accepted) {
+              acceptedRows[ar].steered = true; feedGen++; break
+            }
+          }
+        }
       }
       return
     }
@@ -1018,6 +1023,9 @@ Item {
       var mm = m.method
       if (mm === "confirm" || mm === "select" || mm === "input" || mm === "editor") {
         var isNew = !asks[sid] || asks[sid].id !== m.id
+        if (isNew) {
+          var intents = _answerIntents; delete intents[sid]; _answerIntents = intents
+        }
         var na = asks; na[sid] = m; asks = na; askGen++
         if (isNew) askRaised(sid, String(m.title || m.message || "needs your input"))
       }
@@ -1046,13 +1054,8 @@ Item {
       curToolGen++
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
-                     add: 0, del: 0, id: m.toolCallId })
-        if (args.path) {
-          if (_isCodeEdit(String(args.path))) {
-            var le = _lastEdit; le[sid] = String(args.path); _lastEdit = le
-            root.editSeen(sid, String(args.path), _editNeedle(tn, args), false)
-          }
-        }
+                     add: (tn === "write" || tn === "create") && args.content ? String(args.content).split("\n").length : 0,
+                     del: 0, id: m.toolCallId, needle: _editNeedle(tn, args) })
       } else {
         // bash/mcp/grep/read/… → one-line hint; keep the raw payload so the row
         // can EXPAND: bash shows its command, agent_* shows target + full message.
@@ -1098,8 +1101,32 @@ Item {
       _curToolId.delete(sid)
       curToolGen++
       const det = m.result && m.result.details
+      const failed = m.isError === true || !!(m.result && m.result.isError)
+      var activity = null, rows = feeds[sid] || []
+      for (var ai = rows.length - 1; ai >= 0 && !activity; ai--) {
+        var items = rows[ai].items || [rows[ai]]
+        for (var aj = items.length - 1; aj >= 0; aj--)
+          if (items[aj].id === m.toolCallId) { activity = items[aj]; break }
+      }
+      if (!activity && m.toolName === "edit" && det && det.patch) {
+        var patchPath = String(det.patch).match(/^\+\+\+ (.+)$/m)
+        if (patchPath) activity = { kind: "edit", path: patchPath[1] }
+      }
+      if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || ""))) {
+        var le = _lastEdit; le[sid] = String(activity.path); _lastEdit = le
+        var location = Number(det && det.firstChangedLine) || 0
+        var added = det && det.diff ? String(det.diff).split("\n").reduce(function(lines, text) {
+          var match = text.match(/^\+\s*(\d+) /)
+          if (match) lines.push(Number(match[1]))
+          return lines
+        }, []) : null
+        if (added === null && (activity.tool === "write" || activity.tool === "create"))
+          added = Array.from({length: activity.add || 0}, (_, row) => row + 1)
+        if (added && added.length) location = added[0]
+        root.fileActivity(sid, String(activity.path), location, String(activity.needle || ""), added, String(m.toolCallId || ""))
+      }
       // A failed tool run turns its own row red in place (Claude Code grammar).
-      if (m.result && m.result.isError) {
+      if (failed) {
         var fa = feeds[sid] || []
         for (var fj = fa.length - 1; fj >= 0; fj--)
           if (fa[fj].id === m.toolCallId) { fa[fj].failed = true; break }
@@ -1111,13 +1138,6 @@ Item {
         for (var i = arr.length - 1; i >= 0; i--) {
           if (arr[i].id === m.toolCallId) {
             arr[i].add = ad[0]; arr[i].del = ad[1]
-            // LAST hunk header, not the first: a multi-hunk edit's newest change
-            // is the one the eye should land on.
-            var hms = String(det.diff).match(/@@ -\d+(?:,\d+)? \+(\d+)/g)
-            if (hms && hms.length && arr[i].path) {
-              var lastH = hms[hms.length - 1].match(/\+(\d+)/)
-              if (lastH && _isCodeEdit(String(arr[i].path))) root.editHunk(sid, String(arr[i].path), parseInt(lastH[1]))
-            }
             break
           }
         }
@@ -1259,16 +1279,54 @@ Item {
     var latestCode = ""
     for (var li = feeds[esid].length - 1; li >= 0; li--) {
       var lit = feeds[esid][li]
-      var lp = lit.kind === "edit" && _isCodeEdit(lit.path) ? lit.path
+      var lp = lit.kind === "edit" && !lit.failed && _isCodeEdit(lit.path) ? lit.path
              : (lit.kind === "turn" && lit.items) ? (function (its) {
                  for (var lj = its.length - 1; lj >= 0; lj--)
-                   if (its[lj].kind === "edit" && root._isCodeEdit(its[lj].path)) return its[lj].path
+                   if (its[lj].kind === "edit" && !its[lj].failed && root._isCodeEdit(its[lj].path)) return its[lj].path
                  return ""
                })(lit.items) : ""
       if (lp) { latestCode = String(lp); break }
     }
     var le2 = _lastEdit; le2[esid] = latestCode; _lastEdit = le2
-    if (latestCode) root.editSeen(esid, latestCode, "", true)
+    var codeEdits = {}, markedRows = [], markedPath = "", markedAt = 0, markedLine = 1, markedId = ""
+    var editSession = sessions.find(session => session.id === esid || session.name === esid)
+    var editCwd = editSession ? String(editSession.cwd || "") : ""
+    for (var historyEntry of m.data.entries || []) {
+      var historyMessage = historyEntry.message || {}
+      if (historyMessage.role === "assistant") {
+        for (var block of historyMessage.content || []) {
+          if (block.type !== "toolCall" || ["edit", "write", "create", "str_replace"].indexOf(block.name) < 0) continue
+          var args = block.arguments || {}, file = String(args.path || args.file_path || args.filePath || "")
+          if (file && _isCodeEdit(file)) codeEdits[block.id] = {
+            path: file.charAt(0) === "/" ? file : editCwd + "/" + file.replace(/^\.\//, ""),
+            written: (block.name === "write" || block.name === "create") && args.content ? String(args.content).split("\n").length : 0
+          }
+        }
+      } else if (historyMessage.role === "toolResult" && !historyMessage.isError && codeEdits[historyMessage.toolCallId]) {
+        var completedEdit = codeEdits[historyMessage.toolCallId], editedPath = completedEdit.path
+        if (editedPath !== markedPath) { markedPath = editedPath; markedRows = [] }
+        var removed = [], added = []
+        for (var diffLine of String((historyMessage.details || {}).diff || "").split("\n")) {
+          var changed = diffLine.match(/^([+-])\s*(\d+) /)
+          if (changed) (changed[1] === "+" ? added : removed).push(Number(changed[2]))
+        }
+        if (!(historyMessage.details || {}).diff && completedEdit.written) {
+          markedRows = []
+          added = Array.from({length: completedEdit.written}, (_, row) => row + 1)
+        }
+        added.sort((a, b) => a - b)
+        markedRows = markedRows.filter(row => removed.indexOf(row) < 0).map(function(row) {
+          var mapped = row - removed.filter(deleted => deleted < row).length
+          for (var inserted of added) if (inserted <= mapped) mapped++
+          return mapped
+        })
+        markedRows = Array.from(new Set(markedRows.concat(added))).sort((a, b) => a - b)
+        markedAt = Number(historyMessage.timestamp) || Date.parse(historyEntry.timestamp) || 0
+        markedLine = added[0] || Number((historyMessage.details || {}).firstChangedLine) || 1
+        markedId = String(historyMessage.toolCallId || "")
+      }
+    }
+    if (markedPath) root.editMarksSnapshot(esid, markedPath, markedRows, markedAt, markedLine, markedId)
     feedGen++
     _recoverAsk(esid, m.data.entries)
   }

@@ -61,6 +61,8 @@ ShellRoot {
                      "Deck option button hints missing")
         }
         input.mouseClick(label, Math.min(15, label.width / 2), label.height / 2, Qt.LeftButton, Qt.NoModifier, 0)
+        rail.forceActiveFocus()
+        for (var repeat = 0; repeat < 4; repeat++) input.keyClick(Qt.Key_2, Qt.NoModifier, 0)
       } else if (phase === 2) {
         test.check(test.answers.length === 1 && test.answers[0].session === "target"
                    && test.answers[0].response.value === "Second choice has a longer description that wraps across the available row",

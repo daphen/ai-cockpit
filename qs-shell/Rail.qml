@@ -1140,19 +1140,6 @@ Item {
       && !isPlanMetadataEdit(x) && !(x.kind === "cmd" && x.tool === "info"))
   }
   function turnEditItems(items) { return turnActivityItems(items).filter(x => x.kind === "edit") }
-  function turnBashItems(items) {
-    var activity = turnActivityItems(items), out = []
-    for (var i = 0; i < activity.length; i++) {
-      var entry = activity[i]
-      if (entry.tool !== "bash") continue
-      if (entry.kind === "group") {
-        var cmds = entry.cmds || []
-        for (var j = 0; j < cmds.length; j++)
-          out.push({ kind: "cmd", tool: "bash", text: cmds[j].text, command: cmds[j].command || "" })
-      } else out.push(entry)
-    }
-    return out
-  }
   function turnInfos(items) {
     return (items || []).filter(x => x.kind === "cmd" && x.tool === "info").map(x => String(x.text || ""))
   }
@@ -1214,6 +1201,8 @@ Item {
   readonly property color silverAccent: Theme.mode === "light" ? "#6F777C" : "#C2C8CC"
   readonly property color mintAccent: Theme.mode === "light" ? "#3F8C69" : "#86D7B0"
   readonly property color goldAccent: Theme.mode === "light" ? "#9A6500" : "#F2C572"
+  readonly property color userCardTop: Theme.mode === "light" ? "#FFFFFF" : Qt.lighter(Theme.surface0, 1.25)
+  readonly property color userCardBottom: Theme.mode === "light" ? "#FDFDFD" : Qt.lighter(Theme.surface0, 1.2)
 
   // Turn-recap summary hue — electric, brightened + desaturated, with the hue
   // nudged off electric's blue-violet toward sky's blue so it doesn't read pink.
@@ -1388,12 +1377,6 @@ Item {
   function modelLabel(modelId) {
     var id = String(modelId || "").split("/").pop()
     return id.toUpperCase().replace(/-/g, " ")
-  }
-  function messageModelLabel(modelId) {
-    var id = String(modelId || "").toLowerCase()
-    if (/(^|-)sol($|-)/.test(id)) return "Sol"
-    if (/(^|-)astra($|-)/.test(id)) return "Astra"
-    return "agent"
   }
   readonly property string selectedModelLabel: modelLabel(selectedModelId)
   property bool modelOpen: false
@@ -1947,17 +1930,6 @@ Item {
     }
   }
 
-  // Live-follow: the agent's edits open in nvim as they happen. Driven from HERE, not
-  // the nvim module — the rail sees every scope's events (a VM ticket lives on another
-  // daemon than nvim's own client) and owns the remote→mirror path mapping. Policy
-  // (don't yank the user off their own file, resolve the hunk line, debounce) stays in
-  // lua where the editor state lives.
-  // Watching a session includes watching the workers it dispatched: follow
-  // accepts edits from the selected session OR any session whose parent chain
-  // reaches it (the parent-view was silently ignoring its child's edits).
-  // Sessions are addressed by NAME in some events and by ID in others; an id-only
-  // lookup silently resolved no cwd and the follow was dropped (a parent watching a
-  // child saw nothing). Match either.
   function _sessionOf(sid) {
     if (!agentd || !sid) return null
     for (var i = 0; i < agentd.sessions.length; i++) {
@@ -1971,19 +1943,8 @@ Item {
     return ss ? String(ss.cwd || "") : ""
   }
   function _followsSelected(sid) {
-    if (sid === selectedRaw) return true
-    var hops = 0, cur = sid
-    while (cur && hops < 4) {
-      var parent = ""
-      for (var i = 0; i < agentd.sessions.length; i++)
-        if (agentd.sessions[i].name === cur || agentd.sessions[i].id === cur) {
-          parent = String(agentd.sessions[i].parent || ""); break
-        }
-      if (!parent) return false
-      if (parent === selectedRaw) return true
-      cur = parent; hops++
-    }
-    return false
+    var session = _sessionOf(sid), selected = _sessionOf(selectedRaw)
+    return !!session && !!selected && session.id === selected.id
   }
   Connections {
     target: rail.agentd
@@ -1995,29 +1956,41 @@ Item {
       if (cwd && rail._isRemote(cwd)) rail._alignMirror(sid)
       else if (rail.agentd) rail.agentd.refreshChanges(sid, cwd)
     }
-    function onEditHunk(sid, path, line) {
-      if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
-      var cwd = rail._sessionCwdOf(sid)
-      if (!cwd) return
-      var lcwd = rail._localPath(cwd)
-      var p = rail._localPath(String(path))
+    function onFileActivity(sid, path, line, needleB64, addedLines, editId) {
+      if (!rail.nvimSock.length) return
+      var session = rail._sessionOf(sid), cwd = rail._sessionCwdOf(sid)
+      if (!session || !cwd) return
+      var lcwd = rail._localPath(cwd), p = rail._localPath(String(path))
       if (p.charAt(0) !== "/") p = lcwd + "/" + p
-      rail.agentd.refreshChanges(sid, lcwd)
+      var rows = addedLines === null ? 'nil' : 'vim.json.decode(' + JSON.stringify(JSON.stringify(addedLines)) + ')'
+      var lua = "local m=require('cockpit');local recorded=m.record_edit("
+              + JSON.stringify(rail.scopeMode) + "," + JSON.stringify(session.id) + "," + JSON.stringify(lcwd) + ","
+              + JSON.stringify(p) + "," + rows + ",false," + Date.now() + "," + Number(line || 0) + "," + JSON.stringify(editId) + ");"
+      if (rail._followsSelected(sid))
+        lua += "if recorded then m.follow_remote(" + JSON.stringify(lcwd) + "," + JSON.stringify(p) + ","
+             + (rail.focused ? 'true' : 'false') + "," + (line > 0 ? String(line) : 'nil') + ","
+             + JSON.stringify(String(needleB64 || "")) + "," + rows + ") end;"
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", '
-        + (rail.focused ? 'v:true' : 'v:false') + ', ' + line + ') . execute("HunkSignsRefresh")'])
+        'luaeval(' + JSON.stringify("(function() " + lua + "return '' end)()") + ')'])
     }
-    function onEditSeen(sid, path, needleB64, historical) {
-      if (historical && sid !== rail.selectedRaw) return
-      if (!rail._followsSelected(sid) || !rail.nvimSock.length) return
-      var cwd = rail._sessionCwdOf(sid)
-      if (!cwd) return
-      var lcwd = rail._localPath(cwd)
-      var p = rail._localPath(String(path))
-      if (p.charAt(0) !== "/") p = lcwd + "/" + p     // pi may report worktree-relative
+    function onEditMarksSnapshot(sid, path, rows, at, line, editId) {
+      if (!rail.nvimSock.length) return
+      var session = rail._sessionOf(sid), cwd = rail._sessionCwdOf(sid)
+      if (!session || !cwd) return
+      var lcwd = rail._localPath(cwd), p = rail._localPath(String(path))
+      if (p.charAt(0) !== "/") p = lcwd + "/" + p
+      var lua = "local m=require('cockpit');local d=m.dashboard_snapshot();local recorded,changed=m.record_edit("
+              + JSON.stringify(rail.scopeMode) + "," + JSON.stringify(session.id) + "," + JSON.stringify(lcwd) + ","
+              + JSON.stringify(p) + ",vim.json.decode(" + JSON.stringify(JSON.stringify(rows)) + "),true,"
+              + Number(at || 0) + "," + Number(line || 0) + "," + JSON.stringify(editId) + ");"
+      if (rail._followsSelected(sid))
+        lua += "if recorded then m.follow_remote(" + JSON.stringify(lcwd) + "," + JSON.stringify(p) + ","
+             + (rail.focused ? '(changed or (d.active and d.model.identity==' + JSON.stringify(session.id)
+                + ' and d.model.cwd==' + JSON.stringify(lcwd) + '))' : 'false')
+             + "," + Number(line || 1) + ",nil,{}) end;"
+      lua += "return ''"
       Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
-        'v:lua.require("cockpit").follow_remote("' + lcwd + '","' + p + '", '
-        + (!historical && rail.focused ? 'v:true' : 'v:false') + ', v:null, "' + String(needleB64 || "") + '")'])
+        'luaeval(' + JSON.stringify("(function() " + lua + " end)()") + ')'])
     }
   }
 
@@ -2829,6 +2802,8 @@ Item {
         id: turnDel
         width: feedView.width
         implicitHeight: card.implicitHeight
+        height: implicitHeight
+        onHeightChanged: Qt.callLater(feedView.forceLayout)
         // Streaming content arrived as a hard pop; fade each row in on its own (see the
         // note above on why this is not a ListView `add` transition).
         opacity: 0
@@ -2850,42 +2825,50 @@ Item {
         // own model property, so model.d is only readable at the delegate root.
         readonly property var turn: model.d
         readonly property bool isUser: turnDel.turn.kind === "user"
+        readonly property bool isHandoff: isUser && !!turnDel.turn.sender
         readonly property bool compactUser: isUser && rail.compactUserMessage(turn.text)
         readonly property string userFoldKey: "user-" + (turn.key || rowIndex)
         readonly property bool userExpanded: compactUser && rail.expandedGroups[userFoldKey] === true
         // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
         readonly property bool isSys: turnDel.turn.sys === true
+        readonly property bool agentContinuation: !isUser && !isSys && rowIndex > 0
+          && rail.groupedFeed[rowIndex - 1].kind === "turn" && !rail.groupedFeed[rowIndex - 1].sys
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
         readonly property color cardContentColor: Theme.mode === "light" ? "#23272B" : "#FAFAFA"
         readonly property color cardBodyColor: Theme.mode === "light" ? "#343A3F" : "#EDEDED"
         readonly property color cardMutedColor: Theme.mode === "light" ? "#747D84" : "#909090"
         readonly property color userContentColor: cardBodyColor
-        readonly property color cardAccent: isUser ? Theme.orange : (isSys ? rail.silverAccent : rail.lavenderAccent)
-        readonly property string agentModelLabel: {
-          var items = turnDel.turn.items || []
-          for (var ai = 0; ai < items.length; ai++)
-            if (items[ai].model) return rail.messageModelLabel(items[ai].model)
-          return rail.messageModelLabel(rail.selectedModelId)
-        }
+        readonly property color cardAccent: isUser && !isHandoff ? Theme.orange : (isSys ? rail.silverAccent : rail.lavenderAccent)
         Rectangle {
           id: card
           anchors {
-            left: parent.left
-            right: parent.right
+            left: turnDel.isHandoff ? parent.left : undefined
+            right: turnDel.isHandoff ? undefined : parent.right
             leftMargin: feedView.shadowGutter
             rightMargin: feedView.shadowGutter
           }
-          implicitHeight: cardCol.implicitHeight + 28
+          width: (parent.width - 2 * feedView.shadowGutter) * (turnDel.isUser ? 0.9 : 1)
+          implicitHeight: cardCol.implicitHeight + (turnDel.agentContinuation && !turnDel.cursor ? 14 : 28)
           radius: 18
-          color: "transparent"
+          color: turnDel.cursor && !turnDel.isUser ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
+          border.width: turnDel.cursor && !turnDel.isUser ? 1 : 0
+          border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.65)
           ContrastCard {
+            visible: turnDel.isUser
             anchors.fill: parent
             cardRadius: card.radius
-            rimTop: fhov.hovered
+            elevated: !turnDel.isHandoff
+            bevelWidth: turnDel.isHandoff ? 1 : 2
+            faceTop: turnDel.isHandoff ? Theme.surface0 : rail.userCardTop
+            faceUpper: faceTop
+            faceMid: turnDel.isHandoff ? faceTop : rail.userCardBottom
+            faceBottom: faceMid
+            rimTop: turnDel.isHandoff ? outlineColor : (fhov.hovered
               ? (Theme.mode === "light" ? "#FFFFFF" : "#34313A")
-              : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B")
-            outlineColor: fhov.hovered
-              ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.42)
+              : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B"))
+            rimBottom: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#C9D1D8" : "#222222")
+            outlineColor: fhov.hovered || turnDel.isHandoff
+              ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, fhov.hovered ? 0.42 : 0.22)
               : (Theme.mode === "light" ? "#C4CBD2" : "#282828")
             Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -2893,6 +2876,7 @@ Item {
           Rectangle {
             anchors.fill: parent
             radius: card.radius
+            visible: turnDel.isUser
             color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.05)
             border.width: 1
             border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.36)
@@ -2902,7 +2886,8 @@ Item {
           Rectangle {
             anchors.fill: parent
             radius: card.radius
-            color: "transparent"
+            color: turnDel.isHandoff ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
+            visible: turnDel.isUser
             border.width: 2
             border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.92)
             opacity: turnDel.cursor ? 1 : 0
@@ -2913,22 +2898,22 @@ Item {
 
           Column {
             id: cardCol
-            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 18; rightMargin: 18; topMargin: 14 }
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 18; rightMargin: 18; topMargin: turnDel.agentContinuation && !turnDel.cursor ? 0 : 14 }
             spacing: 10
 
             // Turn header — the Nucleo glyph is the ONLY colored signifier;
             // the label stays neutral and a touch bigger than the body text.
             Row {
               spacing: 8
-              visible: !turnDel.isSys
+              visible: turnDel.isUser
               Icon {
-                name: turnDel.isUser ? "paper-plane-2" : "sparkle-3"
-                variantSize: turnDel.isUser ? 12 : 0   // paper-plane-2--glyph--12 for "you"
+                name: turnDel.isUser && !turnDel.isHandoff ? "paper-plane-2" : "sparkle-3"
+                variantSize: turnDel.isUser && !turnDel.isHandoff ? 12 : 0
                 width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter
-                color: turnDel.isUser ? Theme.orange : rail.lavenderAccent
+                color: turnDel.cardAccent
               }
               Text {
-                text: turnDel.isUser ? (turnDel.turn.sender ? "From " + turnDel.turn.sender : "You") : turnDel.agentModelLabel
+                text: turnDel.turn.sender ? "From " + turnDel.turn.sender : "You"
                 color: turnDel.cardContentColor
                 font.family: rail.messageFontFamily; font.pixelSize: rail.fsName; font.weight: 600
                 anchors.verticalCenter: parent.verticalCenter
@@ -2994,7 +2979,7 @@ Item {
                 spacing: 6
                 Icon {
                   name: "file-content"
-                  width: 13; height: 13; color: Theme.orange
+                  width: 13; height: 13; color: turnDel.cardAccent
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
@@ -3177,6 +3162,10 @@ Item {
     ContrastCard {
       anchors.fill: parent
       cardRadius: chin.radius
+      faceTop: rail.userCardTop
+      faceUpper: faceTop
+      faceMid: rail.userCardBottom
+      faceBottom: faceMid
     }
 
     ColumnLayout {
@@ -4215,6 +4204,10 @@ Item {
           anchors.fill: parent
           cardRadius: parent.radius
           elevated: false
+          faceTop: rail.userCardTop
+          faceUpper: faceTop
+          faceMid: rail.userCardBottom
+          faceBottom: faceMid
         }
         Rectangle {
           anchors.fill: parent
@@ -4780,7 +4773,93 @@ Item {
       width: parent ? parent.width : 400
       spacing: 9
       readonly property var editItems: rail.turnEditItems(items)
-      readonly property var bashItems: rail.turnBashItems(items)
+      readonly property var commandItems: compactItems.filter(entry => entry.kind !== "edit")
+      readonly property var compactItems: {
+        var out = []
+        for (var entry of rail.turnActivityItems(items)) {
+          if (entry.tool === "error") continue
+          if (entry.kind === "group") {
+            for (var cmd of entry.cmds || []) out.push(Object.assign({}, cmd, {tool: entry.tool}))
+          } else out.push(entry)
+        }
+        return out
+      }
+      readonly property var preview: {
+        var reads = [], edits = [], commands = [], agents = [], other = [], failed = []
+        for (var entry of compactItems) {
+          var text = String(entry.text || entry.tool || "").replace(/\s+/g, " ").trim()
+          if (entry.failed) failed.push(text)
+          if (entry.kind === "edit") edits.push(entry.file + " +" + entry.add + " −" + entry.del)
+          else if (entry.tool === "read") reads.push(text.replace(/^read\s+/, ""))
+          else if (entry.tool === "bash" || entry.tool === "shell") commands.push(String(entry.command || text))
+          else if (String(entry.tool).indexOf("agent_") === 0) agents.push(text)
+          else other.push(text)
+        }
+        var lines = []
+        if (reads.length) lines.push({text: "Read (" + reads.length + "): " + Array.from(new Set(reads)).join(", "), icon: "book-open"})
+        if (edits.length) lines.push({text: "Edited: " + edits.join(", "), icon: "pen-3"})
+        if (commands.length) lines.push({text: "Commands (" + commands.length + ", latest " + Math.min(2, commands.length) + ")", commands: commands.slice(-2), icon: rail.toolIcon("bash")})
+        if (agents.length) lines.push({text: "Agents (" + agents.length + "): " + agents.slice(-2).join("\n"), icon: "users"})
+        if (other.length) lines.push({text: "Other (" + other.length + "): " + other.slice(-2).join("\n"), icon: "gear-2"})
+        if (failed.length) lines.push({text: "Failed: " + failed.join("\n"), failed: true, icon: "circle-info"})
+        return lines
+      }
+      Repeater {
+        model: actCol.preview
+        Rectangle {
+          id: activityPreview
+          readonly property var entry: modelData
+          width: actCol.width
+          implicitHeight: previewContent.implicitHeight + 20
+          radius: 9; color: Theme.bgDim
+          border.width: 1
+          border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.09)
+          Column {
+            id: previewContent
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 }
+            spacing: 7
+            FontMetrics { id: previewFontMetrics; font: activityPreviewText.font }
+            RowLayout {
+              width: parent.width; spacing: 7
+              Icon {
+                name: activityPreview.entry.icon; width: 13; height: 13
+                color: activityPreview.entry.failed ? Theme.red : Theme.fg_muted
+                Layout.alignment: Qt.AlignTop
+                Layout.topMargin: Math.max(0, activityPreviewText.baselineOffset - previewFontMetrics.capitalHeight / 2 - height / 2)
+              }
+              Text {
+                id: activityPreviewText
+                text: activityPreview.entry.text
+                color: activityPreview.entry.failed ? Theme.red : actCol.parent.textColor
+                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+                wrapMode: Text.Wrap; lineHeight: 1.3
+                Layout.fillWidth: true
+              }
+            }
+            Repeater {
+              model: activityPreview.entry.commands || []
+              Rectangle {
+                width: previewContent.width
+                implicitHeight: commandPreview.implicitHeight + 16
+                radius: 6; color: Theme.surface0
+                Text {
+                  id: commandPreview
+                  anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 28; topMargin: 8 }
+                  text: String(modelData).split("\n")[0]
+                  color: Theme.fg_secondary
+                  font.family: "monospace"; font.pixelSize: rail.fsMeta
+                  wrapMode: Text.WrapAnywhere; lineHeight: 1.3
+                }
+                Icon {
+                  anchors { right: parent.right; top: parent.top; margins: 8 }
+                  name: "clipboard"; width: 12; height: 12; color: Theme.fg_muted
+                }
+                TapHandler { onTapped: rail.copyText(String(modelData)) }
+              }
+            }
+          }
+        }
+      }
       Row {
         spacing: 7
         TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey) }
@@ -4789,10 +4868,8 @@ Item {
           width: 12; height: 12; color: actCol.parent.mutedColor; anchors.verticalCenter: parent.verticalCenter
         }
         Text {
-          text: "DETAILS" + (summary ? " · " + summary : ""); color: actCol.parent.mutedColor
-          opacity: 0.82
+          text: "DETAILS"; color: actCol.parent.mutedColor; opacity: 0.82
           font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
-          anchors.verticalCenter: parent.verticalCenter
         }
       }
       Repeater {
@@ -4818,36 +4895,17 @@ Item {
         }
       }
       Repeater {
-        // Keep existing Bash delegates mounted when new activity arrives.
-        model: expanded ? actCol.bashItems.length : 0
+        model: expanded ? actCol.commandItems.length : 0
         Loader {
           width: actCol.width
           Component.onCompleted: rail.probeActCreates++
-          property var entry: actCol.bashItems[index]
+          property var entry: actCol.commandItems[index]
           property string gkey: ekey + "-" + index
           property bool expanded: rail.expandedGroups[gkey] === true
           property color textColor: actCol.parent.textColor
           property color mutedColor: actCol.parent.mutedColor
-          sourceComponent: bashRow
+          sourceComponent: cmdRow
         }
-      }
-    }
-  }
-  Component {
-    id: bashRow
-    RowLayout {
-      spacing: 8
-      Icon {
-        name: "bolt-lightning"; width: 13; height: 13
-        color: mutedColor; Layout.alignment: Qt.AlignVCenter
-      }
-      Text {
-        text: entry.command
-          ? "bash " + String(entry.command).replace(/\s+/g, " ").trim()
-          : (entry.text || "")
-        color: textColor
-        font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-        elide: Text.ElideRight; maximumLineCount: 1; Layout.fillWidth: true
       }
     }
   }
