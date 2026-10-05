@@ -5,11 +5,12 @@ set -euo pipefail
 # This is Lovable's corporate tailnet, so membership is transport—not authorization.
 # The loopback bridge still requires ~/.config/cockpit/bridge-token on every API/WS request.
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-web="$root/web"
+web="$(dirname "$root")/cockpit-mobile"
+[[ -f "$web/package.json" ]] || { echo "Clone daphen/cockpit-mobile beside ai-cockpit first." >&2; exit 1; }
 bridge="$root/bridge"
 
 if [[ ! -d "$web/node_modules" ]]; then
-  npm --prefix "$web" install --no-package-lock
+  npm --prefix "$web" ci
 fi
 if [[ ! -f "$web/dist/index.html" ]] || find "$web/src" "$web/public" "$web/index.html" "$web/package.json" "$web/vite.config.ts" -newer "$web/dist/index.html" -print -quit | grep -q .; then
   npm --prefix "$web" run build

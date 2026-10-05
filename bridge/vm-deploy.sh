@@ -23,6 +23,8 @@ set -euo pipefail
 
 vm="david_karlsson_lovable_dev@dev-heidr-2a39.workstation.lovable.net"
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+web="$(dirname "$root")/cockpit-mobile"
+[[ -f "$web/package.json" ]] || { echo "Clone daphen/cockpit-mobile beside ai-cockpit first." >&2; exit 1; }
 build_dir=$(mktemp -d)
 token_file="$HOME/.config/cockpit/bridge-token"
 trap 'rm -rf "$build_dir"' EXIT
@@ -32,8 +34,8 @@ if [[ ! -s "$token_file" ]] || ! grep -Eq '^[0-9a-f]{64}$' "$token_file"; then
   exit 1
 fi
 
-npm --prefix "$root/web" install --no-package-lock
-npm --prefix "$root/web" run build
+npm --prefix "$web" ci
+npm --prefix "$web" run build
 (
   cd "$root/bridge"
   CGO_ENABLED=0 GOOS=linux go build -trimpath -o "$build_dir/cockpit-bridge" .
@@ -42,7 +44,7 @@ npm --prefix "$root/web" run build
 ssh "$vm" 'mkdir -p ~/.config/cockpit ~/.local/bin ~/.local/share/cockpit-mobile ~/.local/state/cockpit-mobile'
 scp "$build_dir/cockpit-bridge" "$vm:.local/bin/cockpit-bridge.new"
 scp "$token_file" "$vm:.config/cockpit/bridge-token.new"
-tar -C "$root/web/dist" -czf - . | ssh "$vm" '
+tar -C "$web/dist" -czf - . | ssh "$vm" '
   set -e
   chmod 0600 ~/.config/cockpit/bridge-token.new
   mv ~/.config/cockpit/bridge-token.new ~/.config/cockpit/bridge-token
