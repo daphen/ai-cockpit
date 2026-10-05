@@ -1,6 +1,6 @@
 import { AnimatePresence, animate, useMotionValue, useTransform } from "motion/react"
 import * as m from "motion/react-m"
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react"
 import type { Session } from "./agentd"
 import { Orb, orbTone } from "./Orb"
 import { fadeSwap, iconSwap, panelSwap } from "./motion"
@@ -13,6 +13,7 @@ interface Props {
   busy: boolean
   queue: string[]
   disabled?: boolean
+  inputRef?: RefObject<HTMLTextAreaElement | null>
   onSubmit: (text: string) => void
   onUploadImage: (file: File) => Promise<string>
   onSteerQueued: (index: number) => void
@@ -79,12 +80,13 @@ interface PendingImage {
   error?: string
 }
 
-export function Composer({ sessionName, activeKey, currentTool, fleet, busy, queue, disabled, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterFeatured, rosterHeader, roster }: Props) {
+export function Composer({ sessionName, activeKey, currentTool, fleet, busy, queue, disabled, inputRef, onSubmit, onUploadImage, onSteerQueued, onInterrupt, rosterExpanded, onRosterExpandedChange, rosterKey, rosterFeatured, rosterHeader, roster }: Props) {
   const [text, setText] = useState("")
   const [images, setImages] = useState<PendingImage[]>([])
   const [confirmInterrupt, setConfirmInterrupt] = useState(false)
   const [compositorTray, setCompositorTray] = useState(() => matchMedia("(max-width: 720px)").matches)
-  const textarea = useRef<HTMLTextAreaElement>(null)
+  const localTextarea = useRef<HTMLTextAreaElement>(null)
+  const textarea = inputRef ?? localTextarea
   const imageInput = useRef<HTMLInputElement>(null)
   const imageUrls = useRef(new Set<string>())
   const dispatching = useRef(false)
@@ -348,6 +350,7 @@ export function Composer({ sessionName, activeKey, currentTool, fleet, busy, que
         </button>
         <textarea
           ref={textarea}
+          data-session={activeKey}
           rows={1}
           enterKeyHint="send"
           aria-label="Message"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { AnimatePresence, domAnimation, LazyMotion, MotionConfig } from "motion/react"
 import * as m from "motion/react-m"
 import { agentd, sessionKey, UnauthorizedError } from "./agentd"
@@ -24,6 +24,7 @@ function groupForSession(key: string): CockpitGroup {
 
 export default function App() {
   const state = useSyncExternalStore(agentd.subscribe, agentd.getSnapshot)
+  const composerInput = useRef<HTMLTextAreaElement>(null)
   const rememberedSession = localStorage.getItem(lastSessionKey) ?? ""
   const rememberedGroup = groupForSession(rememberedSession)
   const [selected, setSelected] = useState(rememberedSession)
@@ -167,6 +168,17 @@ export default function App() {
   const scopes = useMemo(() => [...new Set(groupSessions.map(session => session.scope))], [groupSessions])
   const ask = selected ? state.asks[selected] : undefined
   const run = (action: () => void) => { try { setError(""); action() } catch (cause) { setError(String(cause)) } }
+  const answer = async (response: Record<string, unknown>) => {
+    const key = selected
+    try {
+      setError("")
+      await agentd.answer(key,response)
+      requestAnimationFrame(() => {
+        const input = composerInput.current
+        if (input?.dataset.session === key) input.focus({preventScroll:true})
+      })
+    } catch (cause) { setError(String(cause)) }
+  }
   const saveToken = (next: string) => {
     localStorage.setItem(tokenKey, next)
     setError("")
@@ -227,7 +239,7 @@ export default function App() {
                     </AnimatePresence>
                     <Feed items={state.feeds[selected]} pinToEnd={Boolean(ask)} />
                     <AnimatePresence initial={false}>
-                      {ask && <AskCard key={`${ask.title}-${ask.method}`} ask={ask} onAnswer={response => run(() => agentd.answer(selected, response))} />}
+                      {ask && <AskCard key={`${ask.title}-${ask.method}`} ask={ask} onAnswer={answer} />}
                     </AnimatePresence>
                     <Composer
                       sessionName={active.displayName ?? active.name}
@@ -237,6 +249,7 @@ export default function App() {
                       busy={active.status === "streaming"}
                       queue={state.queues[selected] ?? []}
                       disabled={Boolean(ask)}
+                      inputRef={composerInput}
                       onSubmit={text => run(() => agentd.submit(selected, text))}
                       onUploadImage={file => agentd.uploadImage(selected, file)}
                       onSteerQueued={index => run(() => agentd.steerQueued(selected, index))}

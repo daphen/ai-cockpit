@@ -42,6 +42,13 @@ if ("serviceWorker" in navigator && window.isSecureContext) {
   let reloadOnChange = false
   let reloading = false
   const announce = () => window.dispatchEvent(new Event("cockpit:update-ready"))
+  const checkUpdate = () => {
+    if (!registration || document.visibilityState !== "visible") return
+    if (registration.waiting) announce()
+    void registration.update().catch(() => {})
+  }
+  window.addEventListener("pageshow", checkUpdate)
+  document.addEventListener("visibilitychange", checkUpdate)
 
   window.addEventListener("cockpit:apply-update", () => {
     if (!registration?.waiting) return

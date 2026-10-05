@@ -33,13 +33,22 @@ export interface Ask {
 
 export type FeedItem =
   | { kind: "user"; text: string; sender?: string; steered?: boolean; key: string }
-  | { kind: "turn"; text: string; thinking: string[]; activity: Activity[]; key: string }
+  | { kind: "turn"; items: TurnItem[]; key: string }
   | { kind: "system"; text: string; tone?: "error" | "info"; key: string }
 
+export type TurnItem =
+  | { kind: "text"; text: string }
+  | { kind: "thinking"; text: string }
+  | { kind: "activity"; activity: Activity }
+
 export interface Activity {
+  id?: string
   tool: string
   label: string
-  detail?: string
+  args: Record<string, unknown>
+  result: string
+  details?: Record<string, unknown>
+  partial?: boolean
   failed?: boolean
 }
 
@@ -58,6 +67,8 @@ interface Entry {
     isError?: boolean
     stopReason?: string
     errorMessage?: string
+    timestamp?: number
+    details?: Record<string, unknown>
   }
 }
 
@@ -143,7 +154,7 @@ function base(path: unknown) {
 
 function toolHint(name: string, args: Record<string, unknown>) {
   if (["read", "edit", "write", "create"].includes(name)) return `${name} ${base(args.path ?? args.file_path)}`.trim()
-  if (["bash", "shell"].includes(name)) return `bash ${clip(args.command ?? args.cmd)}`
+  if (["bash", "shell"].includes(name)) return clip(args.command ?? args.cmd)
   if (["grep", "ripgrep", "search_files"].includes(name)) return `grep ${clip(args.pattern ?? args.query)}`
   if (["glob", "find"].includes(name)) return `glob ${clip(args.pattern ?? args.query)}`
   if (name === "agent_send" || name === "agent_steer") return `${name === "agent_send" ? "send" : "steer"} → ${args.agent ?? "?"}`
@@ -199,75 +210,67 @@ function runningTool(entries: Entry[], leafId?: string) {
   return ""
 }
 
+function userItem(raw: string, key: string, steered = false): Extract<FeedItem, {kind: "user"}> {
+  let text = displayUserText(raw.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")).trim()
+  let sender: string | undefined
+  if (text.startsWith("⇄ ")) {
+    const newline = text.indexOf("\n")
+    sender = text.slice(2, newline < 0 ? undefined : newline).trim().replace(/\s+\(user-approved\)$/, "")
+    text = newline < 0 ? "" : text.slice(newline + 1).trim()
+  }
+  return { kind: "user", text, sender, steered, key }
+}
+
+function resultFields(value: any): Pick<Activity, "result" | "details" | "failed"> {
+  return {
+    result: typeof value === "string" ? value : Array.isArray(value?.content) ? textContent(value.content) : value === undefined ? "" : JSON.stringify(value),
+    details: value?.details,
+    failed: value?.isError === true,
+  }
+}
+
+function activityItem(tool: string, args: Record<string, unknown>, id?: string): Activity {
+  return { tool, args, id, label: tool === "ask_user" ? String(args.title ?? args.message ?? "question") : toolHint(tool,args), result: "", partial: true }
+}
+
+function assistantItem(message: NonNullable<Entry["message"]>, key: string, results: Map<string, ReturnType<typeof resultFields>>): Extract<FeedItem, {kind:"turn"}> {
+  const items: TurnItem[] = []
+  for (const block of message.content ?? []) {
+    if (block.type === "text" && block.text) items.push({kind:"text",text:block.text})
+    if (block.type === "thinking" && (block.thinking || block.text)) items.push({kind:"thinking",text:String(block.thinking ?? block.text)})
+    if (block.type !== "toolCall" && block.type !== "tool_use") continue
+    const activity = activityItem(String(block.name ?? block.tool ?? "tool"),block.arguments ?? block.input ?? {},block.id)
+    const result = block.result !== undefined ? resultFields(block.result) : block.id ? results.get(block.id) : undefined
+    if (result) Object.assign(activity,result,{partial:false})
+    if (activity.tool === "ask_user") {
+      const answer = askAnswer(activity.result)
+      if (answer) activity.label += ` — ${clip(answer)}`
+    }
+    items.push({kind:"activity",activity})
+  }
+  if (message.stopReason === "aborted") items.push({kind:"activity",activity:{...activityItem("error",{}),label:"Turn interrupted",partial:false}})
+  if (message.stopReason === "error" || message.errorMessage) items.push({kind:"activity",activity:{...activityItem("error",{}),label:message.errorMessage ?? "Turn failed",failed:true,partial:false}})
+  return {kind:"turn",items,key:message.timestamp !== undefined ? `assistant-${message.timestamp}` : key}
+}
+
 function entriesToFeed(entries: Entry[], leafId?: string): FeedItem[] {
   const recent = entryChain(entries, leafId).slice(-80)
-  const failures = new Set<string>()
-  const answerIds = new Set(recent.flatMap(entry => (entry.message?.content ?? []).flatMap(block =>
-    (block.type === "toolCall" || block.type === "tool_use") && (block.name ?? block.tool) === "ask_user" && block.id ? [block.id] : []
-  )))
-  const results = new Map<string, string>()
+  const results = new Map<string, ReturnType<typeof resultFields>>()
   for (const entry of recent) {
-    if (entry.message?.role !== "toolResult" || !entry.message.toolCallId) continue
-    if (entry.message.isError) failures.add(entry.message.toolCallId)
-    if (answerIds.has(entry.message.toolCallId)) results.set(entry.message.toolCallId, textContent(entry.message.content))
+    if (entry.message?.role === "toolResult" && entry.message.toolCallId) results.set(entry.message.toolCallId,resultFields(entry.message))
   }
-
   const feed: FeedItem[] = []
   for (const [index, entry] of recent.entries()) {
     const key = entry.id ?? `entry-${index}`
     if (entry.type === "compaction") {
       feed.push({ kind: "system", text: entry.fromHook === true || entry.details?.strategy === "deterministic-auto-v3" ? "context rolled over" : "context compacted", key })
-      continue
-    }
-    if (entry.type === "custom" && entry.customType === "cockpit-user-bash-approval") {
-      feed.push({ kind: "user", text: `↳ approved — ! ${entry.data?.command ?? "command"}`, key })
-      continue
-    }
-    const message = entry.message
-    if (!message || !["user", "assistant"].includes(message.role ?? "")) continue
-    if (message.role === "user") {
-      let text = displayUserText(textContent(message.content).replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")).trim()
-      let sender = ""
-      if (text.startsWith("⇄ ")) {
-        const newline = text.indexOf("\n")
-        sender = text.slice(2, newline < 0 ? undefined : newline).trim()
-        text = newline < 0 ? "" : text.slice(newline + 1).trim()
-      }
-      if (text || sender) feed.push({ kind: "user", text, sender, key })
-      continue
-    }
-
-    const activity: Activity[] = []
-    const thinking: string[] = []
-    const prose: string[] = []
-    for (const block of message.content ?? []) {
-      if (block.type === "text" && block.text) prose.push(block.text.trim())
-      if (block.type === "thinking") thinking.push(String(block.thinking ?? block.text ?? "").trim())
-      if (block.type !== "toolCall" && block.type !== "tool_use") continue
-      const name = String(block.name ?? block.tool ?? "tool")
-      const args = (block.arguments ?? block.input ?? {}) as Record<string, unknown>
-      if (name === "ask_user") {
-        const answer = askAnswer(block.result ?? (block.id ? results.get(block.id) : ""))
-        activity.push({ tool: "ask", label: `❯ ${args.title ?? args.message ?? "question"}${answer ? ` ↳ ${clip(answer)}` : ""}` })
-      } else {
-        activity.push({
-          tool: name,
-          label: toolHint(name, args),
-          detail: ["bash", "shell"].includes(name) ? String(args.command ?? args.cmd ?? "") : undefined,
-          failed: block.id ? failures.has(block.id) : false,
-        })
-      }
-    }
-    if (message.stopReason === "aborted") activity.push({ tool: "error", label: "⏹ turn interrupted", failed: true })
-    if (message.stopReason === "error" || message.errorMessage) activity.push({ tool: "error", label: `✗ ${message.errorMessage ?? "turn failed"}`, failed: true })
-    const text = prose.join("\n\n")
-    const previous = feed.at(-1)
-    if (previous?.kind === "turn") {
-      previous.text = [previous.text, text].filter(Boolean).join("\n\n")
-      previous.thinking.push(...thinking.filter(Boolean))
-      previous.activity.push(...activity)
-    } else {
-      feed.push({ kind: "turn", text, thinking: thinking.filter(Boolean), activity, key })
+    } else if (entry.type === "custom" && entry.customType === "cockpit-user-bash-approval") {
+      feed.push(userItem(`↳ approved — ! ${entry.data?.command ?? "command"}`,key))
+    } else if (entry.message?.role === "user") {
+      const item = userItem(textContent(entry.message.content),key)
+      if (item.text || item.sender) feed.push(item)
+    } else if (entry.message?.role === "assistant") {
+      feed.push(assistantItem(entry.message,key,results))
     }
   }
   return feed
@@ -280,7 +283,7 @@ export class AgentdStore {
   private feeds: Record<string, FeedItem[]> = {}
   private asks: Record<string, Ask> = {}
   private queues: Record<string, string[]> = {}
-  private optimistic: Record<string, FeedItem[]> = {}
+  private answers = new Map<string, { resolve: () => void; reject: (error: Error) => void }>()
   private currentTools: Record<string, string> = {}
   private chatLabels = storedChatLabels()
   private labelRequests = new Set<string>()
@@ -374,7 +377,6 @@ export class AgentdStore {
 
   prompt(key: string, text: string) {
     this.command(key, { type: "prompt", message: text })
-    this.echo(key, text)
   }
 
   steer(key: string, text: string) {
@@ -406,7 +408,12 @@ export class AgentdStore {
   }
 
   answer(key: string, response: Record<string, unknown>) {
-    this.command(key, { type: "answer", response })
+    if (!this.asks[key] || this.answers.has(key)) return Promise.reject(new Error("Question is no longer answerable"))
+    return new Promise<void>((resolve, reject) => {
+      this.answers.set(key, { resolve, reject })
+      try { this.command(key, { type: "answer", response }) }
+      catch (cause) { this.answers.delete(key); reject(cause) }
+    })
   }
 
   private async probeHosts() {
@@ -480,6 +487,11 @@ export class AgentdStore {
       if (state.socket !== socket) return
       state.socket = null
       state.connected = false
+      for (const [session, answer] of this.answers) {
+        if (this.owners[session] !== key) continue
+        answer.reject(new Error("Bridge disconnected before accepting the answer"))
+        this.answers.delete(session)
+      }
       if (this.owners[this.selectedKey] === key) this.refreshSelected = true
       window.clearTimeout(state.reconnectTimer)
       state.reconnectTimer = window.setTimeout(() => this.openScope(host, scope), 250)
@@ -513,7 +525,8 @@ export class AgentdStore {
     this.feeds = {}
     this.asks = {}
     this.queues = {}
-    this.optimistic = {}
+    for (const answer of this.answers.values()) answer.reject(new Error("Bridge connection reset"))
+    this.answers.clear()
     this.currentTools = {}
     this.labelRequests.clear()
     this.owners = {}
@@ -571,37 +584,64 @@ export class AgentdStore {
         if (tool) this.currentTools[key] = tool
         else delete this.currentTools[key]
         if (session) session.currentTool = tool || undefined
-        const authoritative = entriesToFeed(entries, message.data?.leafId)
-        const corpus = authoritative.filter(item => item.kind === "user").map(item => item.text).join("\n")
-        this.optimistic[key] = (this.optimistic[key] ?? []).filter(item => item.kind !== "user" || (!item.steered && !corpus.includes(item.text)))
-        this.feeds[key] = [...authoritative, ...(this.optimistic[key] ?? [])]
+        this.feeds[key] = entriesToFeed(entries, message.data?.leafId)
       }
     } else if (message.type === "prompt_accepted") {
       const text = String(message.message ?? "")
       if (text && key === this.selectedKey) {
-        const item: FeedItem = { kind: "user", text, steered: message.steered === true, key: `accepted-${Date.now()}` }
-        this.optimistic[key] = [...(this.optimistic[key] ?? []), item]
-        this.feeds[key] = [...(this.feeds[key] ?? []), item]
+        this.push(key, userItem(text, `accepted-${Date.now()}`, message.steered === true))
       }
     } else if (message.type === "extension_ui_request" && ["confirm", "select", "input", "editor"].includes(message.method)) {
       this.asks[key] = message as Ask
+    } else if (message.type === "extension_ui_request" && message.method === "notify") {
+      if (key === this.selectedKey) this.push(key, {kind:"system",text:String(message.message ?? ""),tone:message.notifyType === "error" ? "error" : "info",key:`notice-${message.id}`})
     } else if (message.type === "ask_answered") {
       delete this.asks[key]
+      this.publish()
+      this.answers.get(key)?.resolve()
+      this.answers.delete(key)
+      return
     } else if (message.type === "error") {
+      this.answers.get(key)?.reject(new Error(String(message.error ?? "Answer was not accepted")))
+      this.answers.delete(key)
       if (key === this.selectedKey) this.push(key, { kind: "system", text: String(message.error ?? "agentd error"), tone: "error", key: `error-${Date.now()}` })
+    } else if (["message_start", "message_update", "message_end"].includes(String(message.type)) && message.message?.role === "assistant") {
+      if (key === this.selectedKey) {
+        const rows = this.feeds[key] ?? []
+        const turn = assistantItem(message.message, `live-${Date.now()}`, new Map())
+        const index = rows.findIndex(item => item.key === turn.key)
+        if (index < 0) this.push(key, turn)
+        else {
+          const old = rows[index]
+          if (old.kind === "turn") {
+            turn.items = turn.items.map(item => {
+              if (item.kind !== "activity") return item
+              const previous = old.items.find(part => part.kind === "activity" && part.activity.id === item.activity.id)
+              return item.activity.id && previous?.kind === "activity" ? { ...item, activity: { ...item.activity, result: previous.activity.result, details: previous.activity.details, partial: previous.activity.partial, failed: previous.activity.failed } } : item
+            })
+          }
+          this.feeds[key] = rows.map((item, at) => at === index ? turn : item)
+        }
+      }
     } else if (message.type === "tool_execution_start") {
-      const args = message.args ?? {}
       this.currentTools[key] = String(message.toolName ?? "tool")
       if (session) session.currentTool = this.currentTools[key]
-      if (key === this.selectedKey) this.push(key, { kind: "system", text: toolHint(this.currentTools[key], args), key: `tool-${message.toolCallId ?? Date.now()}` })
-    } else if (message.type === "tool_execution_end") {
-      delete this.currentTools[key]
-      if (session) session.currentTool = undefined
-    } else if (message.type === "turn_end" || message.type === "agent_end") {
+      if (key === this.selectedKey) this.updateTool(key, String(message.toolCallId), activityItem(String(message.toolName), message.args ?? {}, String(message.toolCallId)))
+    } else if (message.type === "tool_execution_update" || message.type === "tool_execution_end") {
+      if (key === this.selectedKey) this.updateTool(key, String(message.toolCallId), {
+        ...resultFields(message.type === "tool_execution_update" ? message.partialResult : message.result),
+        partial: message.type === "tool_execution_update",
+        failed: message.isError === true || message.result?.isError === true,
+      })
+      if (message.type === "tool_execution_end") {
+        delete this.currentTools[key]
+        if (session) session.currentTool = undefined
+      }
+    } else if (message.type === "agent_end") {
       delete this.currentTools[key]
       if (session) session.currentTool = undefined
       if (key === this.selectedKey) this.sendSession(key, { type: "get_entries", session: name })
-      if (message.type === "agent_end") this.flushQueue(key)
+      this.flushQueue(key)
     }
     this.publish()
   }
@@ -618,11 +658,23 @@ export class AgentdStore {
     socket.send(JSON.stringify(command))
   }
 
-  private echo(key: string, text: string, steered = false) {
-    const item: FeedItem = { kind: "user", text: displayUserText(text), steered, key: `echo-${Date.now()}` }
-    this.optimistic[key] = [...(this.optimistic[key] ?? []), item]
-    this.feeds[key] = [...(this.feeds[key] ?? []), item]
-    this.publish()
+  private updateTool(key: string, id: string, changes: Partial<Activity>) {
+    const rows = this.feeds[key] ?? []
+    let found = false
+    this.feeds[key] = rows.map(row => row.kind !== "turn" ? row : {
+      ...row,
+      items: row.items.map(item => {
+        if (item.kind !== "activity" || item.activity.id !== id) return item
+        found = true
+        return { ...item, activity: { ...item.activity, ...changes } }
+      }),
+    })
+    if (!found && changes.tool) {
+      const item: TurnItem = { kind: "activity", activity: changes as Activity }
+      const last = this.feeds[key].at(-1)
+      if (last?.kind === "turn") this.feeds[key] = [...this.feeds[key].slice(0,-1), { ...last, items: [...last.items,item] }]
+      else this.push(key, { kind: "turn", items: [item], key: `tool-${id}` })
+    }
   }
 
   private push(key: string, item: FeedItem) {
