@@ -58,8 +58,8 @@ ShellRoot {
         test.check(test.users("Instant prompt") === 1 && test.users("Instant steer") === 1, "delayed history duplicated local echoes: " + JSON.stringify(rail.groupedFeed))
         test.online = false; rail.prefillComposer("Offline message"); keys.keyClick(Qt.Key_Return,Qt.NoModifier,0)
       } else if (test.phase === 5) {
-        test.check(test.users("Offline message") === 0, "disconnected write was presented as a sent message")
-        test.check(rail.probeProse().toLowerCase().indexOf("error") >= 0, "disconnected error indicator was not immediately visible: " + rail.probeProse())
+        test.check(rail.groupedFeed.some(row => row.text === "Offline message" && row.delivery === "failed"), "disconnected write lacks a not-delivered local copy")
+        test.check(rail.probeProse().indexOf("not delivered — the work daemon is disconnected") >= 0, "disconnected message was not immediately visible: " + rail.probeProse())
         console.log("PASS: prompt and steer render within 35ms with no remote response; continued typing, delayed history and disconnected feedback remain correct")
         Qt.quit()
       }

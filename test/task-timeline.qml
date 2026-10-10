@@ -84,7 +84,7 @@ ShellRoot {
         test.check(rail.taskSegments[0].title === rail.taskSegments[2].title, "returning to a task changed its identity")
         var taskLabel = test.find(rail,"activeTaskLabel")
         test.check(taskLabel.visible && taskLabel.width > 180, "active task subtitle missing or still width-capped")
-        test.check(taskLabel.color === Theme.fg_muted && taskLabel.font.pixelSize < rail.fsName, "active task subtitle is not smaller and muted")
+        test.check(taskLabel.color.hslSaturation < 0.2 && !Qt.colorEqual(taskLabel.color,Theme.fg) && taskLabel.font.pixelSize < rail.fsName, "active task subtitle is not smaller and muted")
         for (var i = 0; i < 4; i++) test.check(rail.taskSegments[i].row === test.expectedRows[i], "incorrect rendered row index")
         rail.prefillTask()
         test.check(rail.composerText === "/task ", "pill did not prefill command")

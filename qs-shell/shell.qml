@@ -389,10 +389,20 @@ ShellRoot {
                 ctx.moveTo(width, 0)
                 ctx.lineTo(width, height)
                 ctx.lineTo(0, height)
-                ctx.quadraticCurveTo(width, height, width, 0)
+                ctx.arc(0, 0, width, Math.PI / 2, 0, true)
                 ctx.closePath()
                 ctx.fill()
               }
+            }
+            Rectangle {
+              objectName: "editorFocusOutline"
+              anchors.fill: parent
+              z: 3
+              visible: term.activeFocus && !win.dashboardActive
+              color: "transparent"
+              border.width: 1
+              border.color: Theme.fg
+              bottomRightRadius: paneLayout.terminalCornerRadius
             }
           }
           // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the

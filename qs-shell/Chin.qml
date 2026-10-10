@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
 import QsLib
@@ -39,13 +40,16 @@ Rectangle {
     property bool bold: false
     property bool pop: false
     property real gap: 14
+    property real maxWidth: Infinity
+    property int elideMode: Text.ElideNone
     clip: true
     height: ta.implicitHeight + 8
     // REACTIVE width: an imperative snapshot of implicitWidth desynced when the
     // custom font settled late (creation-time metrics underestimated, neighbors
     // started early and rows mashed together). A binding tracks font/layout.
     readonly property Item _active: _front ? ta : tb
-    width: value.length ? _active.implicitWidth + gap : 0
+    TextMetrics { id: valueMetrics; text: sw.value; font: sw._active.font }
+    width: value.length ? Math.min(maxWidth, valueMetrics.width + gap) : 0
     Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
     property bool _front: true
     onValueChanged: {
@@ -59,11 +63,13 @@ Rectangle {
       inactiveScale: sw.pop ? 1.25 : 1
       first: Text {
         id: ta
+        width: Math.max(0, sw.width - sw.gap); elide: sw.elideMode
         color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
         anchors.verticalCenter: parent.verticalCenter
       }
       second: Text {
         id: tb
+        width: Math.max(0, sw.width - sw.gap); elide: sw.elideMode
         color: sw.tint; font { family: Theme.fontFamily; pixelSize: sw.px; bold: sw.bold }
         anchors.verticalCenter: parent.verticalCenter
       }
@@ -106,8 +112,21 @@ Rectangle {
     anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
     spacing: 0
     height: parent.height
-    Swap { anchors.verticalCenter: parent.verticalCenter
-           value: String(chin.st.path || ""); tint: chin.fg; bold: true }
+    Swap {
+      objectName: "editorPath"
+      anchors.verticalCenter: parent.verticalCenter
+      value: String(chin.st.path || ""); tint: chin.fg; bold: true
+      maxWidth: Math.max(0, Math.min(chin.width / 2, right.x - left.x - leftMeta.implicitWidth - 14))
+      elideMode: Text.ElideMiddle
+      HoverHandler { id: fileHover }
+      Controls.ToolTip.visible: fileHover.hovered
+      Controls.ToolTip.delay: 500
+      Controls.ToolTip.text: String(chin.st.path || "")
+    }
+    Row {
+      id: leftMeta
+      spacing: 0
+      height: parent.height
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
            value: chin._n(chin.st.err)  > 0 ? "✗ " + chin.st.err  : ""; tint: chin.red }
     Swap { anchors.verticalCenter: parent.verticalCenter; pop: true
@@ -134,6 +153,7 @@ Rectangle {
         color: chin.color
         font { family: Theme.fontFamily; pixelSize: 16; bold: true }
       }
+    }
     }
   }
 

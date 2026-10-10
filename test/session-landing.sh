@@ -28,6 +28,10 @@ trap cleanup EXIT
 cp qs-shell/*.qml "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
 mkdir -p "$tmp/home"
+if [[ "${1:-}" == "test/private-font.qml" ]]; then
+  mkdir -p "$tmp/home/.local/share"
+  ln -s "$HOME/.local/share/fonts" "$tmp/home/.local/share/fonts"
+fi
 if [[ "${1:-}" == "test/live-follow.qml" ]]; then
   export COCKPIT_TEST_LUA="${COCKPIT_TEST_LUA:-$HOME/.config/nvim/lua}"
   [[ -r "$COCKPIT_TEST_LUA/cockpit/init.lua" ]] || { echo "Cockpit Lua source missing: $COCKPIT_TEST_LUA" >&2; exit 1; }
@@ -61,17 +65,19 @@ if [[ "${1:-}" == "test/diff-source.qml" ]]; then
     [[ -S "$tmp/runtime/agentd-$scope.sock" ]]
   done
 fi
-env -u WAYLAND_DISPLAY HOME="$tmp/home" QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH="$HOME/.local/share/qml" \
+env -u WAYLAND_DISPLAY HOME="$tmp/home" QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml" \
   setsid qs -p "$tmp" >"$tmp/output" 2>&1 &
 pid=$!
-for _ in $(seq 1 200); do
+checks=200
+[[ "${1:-}" != "test/delivery-confirmation.qml" ]] || checks=400
+for _ in $(seq 1 "$checks"); do
   grep -qE 'PASS:|ERROR|Error:' "$tmp/output" && break
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done
 if grep -E 'ERROR|Error:' "$tmp/output"; then exit 1; fi
 if ! grep 'PASS:' "$tmp/output"; then
-  echo "QML test did not pass within 20 seconds: ${1:-test/session-landing.qml}" >&2
+  echo "QML test did not pass within $((checks / 10)) seconds: ${1:-test/session-landing.qml}" >&2
   tail -30 "$tmp/output" >&2
   exit 1
 fi

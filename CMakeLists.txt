@@ -83,7 +83,7 @@ qt_add_qml_module(heidr_term
   URI Heidr
   VERSION 1.0
   OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml/Heidr
-  SOURCES TermView.cpp TermView.h
+  SOURCES TermView.cpp TermView.h ProseStyle.cpp ProseStyle.h
 )
 target_link_libraries(heidr_term PRIVATE Qt6::Quick Qt6::Gui librio)
 

@@ -5,6 +5,7 @@ import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import QsLib
+import Heidr
 
 // The agent rail: roster (from agentd) + activity feed + composer.
 // Vim nav (dsqrd model): j/k move the roster cursor, Enter selects the session
@@ -43,7 +44,8 @@ Item {
   }
 
   // Click a row: focus the rail, move the cursor there, and act on it.
-  function clickAt(idx) { _blurFeedKey = ""; requestFocus(); cur = idx; activateCur() }
+  function selectAt(idx) { _blurFeedKey = ""; requestFocus(); exitInsert(); cur = idx }
+  function clickAt(idx) { selectAt(idx); activateCur() }
   // Pull focus to the rail and land on the roster (Super+T from the desktop).
   // Super+T must work from ANYWHERE, including while typing: the composer holds the
   // keyboard in insert mode, so moving `cur` alone did nothing visible. Leave insert
@@ -99,7 +101,7 @@ Item {
       var k = keyOf(arr[i]), sig = sigOf(arr[i])
       if (i < model.count && model.get(i).k === k) {
         if (model.get(i).sig !== sig) {
-          model.setProperty(i, "d", arr[i])
+          model.setProperty(i, "d", JSON.parse(JSON.stringify(arr[i])))
           model.setProperty(i, "sig", sig)
         }
         continue
@@ -109,9 +111,9 @@ Item {
       var found = -1
       for (var j = i + 1; j < model.count; j++) if (model.get(j).k === k) { found = j; break }
       if (found >= 0) model.move(found, i, 1)
-      else model.insert(i, { d: arr[i], sig: sig, k: k })
+      else model.insert(i, { d: JSON.parse(JSON.stringify(arr[i])), sig: sig, k: k })
       if (model.get(i).sig !== sig || found >= 0) {
-        model.setProperty(i, "d", arr[i])
+        model.setProperty(i, "d", JSON.parse(JSON.stringify(arr[i])))
         model.setProperty(i, "sig", sig)
       }
     }
@@ -522,7 +524,7 @@ Item {
     // span (palette dark blue wins over the font tag) — a zero-width space after
     // :// breaks the re-detection, invisibly.
     function safeLabel(x) { return String(x).replace("://", "://\u200B") }
-    var out = String(t || "").replace(/\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g,
+    var out = String(t || "").replace(/\[([^\]]*)\]\(([^\s)]+)\)/g,
       function (all, label, url) {
         return "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(label) + "</u></font>](" + url + ")"
       })
@@ -577,15 +579,89 @@ Item {
     }
     return out
   }
-  function activityFileRefs(item) {
+  function activityEntries(items) {
     var out = []
-    if (!item || item.kind !== "turn") return out
-    for (var i = 0; i < (item.items || []).length; i++) {
-      var entry = item.items[i], path = entry && entry.kind === "edit" ? String(entry.path || "") : ""
-      if (path && out.indexOf(path) < 0) out.push(path)
+    for (var entry of turnActivityItems(items)) {
+      if (entry.tool === "error") continue
+      if (entry.kind === "group") out = out.concat(entry.cmds || [])
+      else out.push(entry)
     }
     return out
   }
+  function activityRows(items) {
+    var out = [], group = null
+    for (var entry of activityEntries(items)) {
+      if (entry.kind !== "edit") { group = null; out.push(entry); continue }
+      if (!group) { group = {kind:"edits",files:[]}; out.push(group) }
+      var file = group.files.find(row => row.path === entry.path)
+      if (!file) {
+        file = Object.assign({}, entry, {add:0,del:0,failed:false,result:""})
+        group.files.push(file)
+      }
+      if (!entry.failed && !entry.partial) { file.add += Number(entry.add || 0); file.del += Number(entry.del || 0) }
+      if (entry.failed) { file.failed = true; file.detailsText = entry.detailsText; file.result += (file.result ? "\n" : "") + (entry.result || "") }
+      file.partial = entry.partial === true
+    }
+    return out
+  }
+  function toolFiles(entry) {
+    var out = entry.path ? [String(entry.path)] : []
+    var args = JSON.parse(entry.argumentsText || "{}"), argumentPath = args.path || args.file_path || args.filePath
+    if (argumentPath && out.indexOf(String(argumentPath)) < 0) out.push(String(argumentPath))
+    if (entry.kind === "edit" || entry.tool === "read" || entry.tool === "read_file") return out
+    var source = String(entry.result || "") + "\n" + String(entry.argumentsText || "")
+    var re = /((?:\/|~\/)?(?:[\w.@-]+\/)+[\w.@-]+\.\w{1,6})(:\d+)?/g, match
+    while ((match = re.exec(source)) !== null) {
+      var path = match[1] + (match[2] || "")
+      if (out.indexOf(path) < 0) out.push(path)
+    }
+    return out
+  }
+  function sourceTool(entry) {
+    return ["read", "read_file", "edit", "write", "create", "str_replace", "grep", "ripgrep", "search_files"].indexOf(entry.tool) >= 0
+      || ((entry.tool === "bash" || entry.tool === "shell") && /^\s*(?:rg|grep|cat|sed|head|awk|git\s+(?:diff|show))\b/.test(entry.command || ""))
+  }
+  function plainToolText(text) {
+    return String(text || "").replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))/g, "")
+      .replace(/\r\n?/g, "\n").replace(/[\x00-\x08\x0b-\x1f\x7f]/g, "")
+  }
+  function errorText(entry) {
+    var text = plainToolText(entry.result), lines = text.split("\n").filter(line => line.trim().length)
+    var first = text.match(/(\{[\s\S]*\})/), message = "", status = "", title = ""
+    if (first) {
+      try {
+        var data = JSON.parse(first[1])
+        message = typeof data.message === "string" ? data.message : ""
+        title = typeof data.error === "string" ? data.error.replace(/_/g, " ") : ""
+        if (title) title = title.charAt(0).toUpperCase() + title.slice(1)
+        if (data.status) status = "HTTP " + data.status
+      } catch (error) {}
+    }
+    if (!message) {
+      var diagnostic = lines.filter(line => /^\s*(?:(?:\w+\.)*\w*Error:|(?:WARN|ERROR)\b.*?Error:|fatal:|gh:|bash:|Permission denied|Tool call .*not executed|edits\[\d+\]|Found \d+ occurrences|could not|cannot|timed out|not found)/i.test(line))
+      if (diagnostic.length) message = diagnostic[diagnostic.length - 1].replace(/^.*?Error:\s*/i, "")
+    }
+    if (!message && !first && !sourceTool(entry) && entry.tool !== "bash" && entry.tool !== "shell") message = lines[0] || ""
+    if (!message) message = "Command failed"
+    var code = text.match(/Command exited with code\s+(-?\d+)/)
+    var details = entry.detailsText ? JSON.parse(entry.detailsText) : {}
+    var exitCode = details.exitCode !== undefined ? details.exitCode : code ? Number(code[1]) : undefined
+    return (title ? title + "\n" : "") + [message, status, exitCode !== undefined ? "Exit code " + exitCode : ""].filter(value => value.length).join(" · ")
+  }
+  function errorDetails(entry) {
+    var match = plainToolText(entry.result).match(/(\{[\s\S]*\})/)
+    if (!match) return ""
+    try { return JSON.stringify(JSON.parse(match[1]), null, 2) } catch (error) { return "" }
+  }
+  readonly property string sessionUsage: feed.filter(item => item.tool === "usage").map(item => item.text).join("\n")
+  function activityFileRefs(item) {
+    var out = []
+    if (!item || item.kind !== "turn") return out
+    for (var entry of activityEntries(item.items))
+      if (entry.kind === "edit" && entry.path && out.indexOf(entry.path) < 0) out.push(entry.path)
+    return out
+  }
+  function toolKey(cardKey, entry, index) { return entry.id ? "tool:" + selectedRaw + ":" + entry.id : cardKey + "-tool-" + index }
   function cardFileRefs(item) {
     var out = fileRefLines(item), edits = activityFileRefs(item)
     for (var i = 0; i < edits.length; i++) if (out.indexOf(edits[i]) < 0) out.push(edits[i])
@@ -598,7 +674,7 @@ Item {
   function openFileRef(ref) {
     var r = String(ref || "")
     var line = r.match(/:(\d+)$/)
-    openInNvim(line ? r.substring(0, r.length - line[0].length) : r)
+    openInNvim(line ? r.substring(0, r.length - line[0].length) : r, selectedCwd, line ? Number(line[1]) : 1)
   }
   function proseParts(text) {
     var source = String(text || ""), out = [], start = 0, pos = 0, summary = false, chunk = ""
@@ -637,7 +713,7 @@ Item {
     return out
   }
   function markdownBlocks(text, entryIndex, baseOffset) {
-    var source = String(text || ""), re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)```/g
+    var source = String(text || ""), re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)(?:```|$)/g
     var out = [], m, pos = 0, base = baseOffset || 0
     while ((m = re.exec(source)) !== null) {
       if (m.index > pos) {
@@ -1097,21 +1173,15 @@ Item {
     return /^\s*[✦✧⟢⟣✤◆❉]/.test(s) || /\bnext\s+(question|action)\s*:/i.test(s)
   }
   function turnThinks(items) { return (items || []).filter(x => x.kind === "think") }
+  function claudeThought(item) { return /(^|[/.])claude-/i.test(String(item.model || "")) }
   function turnUserBash(items) { return (items || []).filter(x => x.kind === "userbash") }
-  function isPlanMetadataEdit(item) {
-    if (!item || item.kind !== "edit") return false
-    var path = String(item.path || item.file || "")
-    return /\.(progress|review)\.json$/.test(path)
-      || /(^|\/)\.plans\/[^/]+\.md$/.test(path)
-      || /\/notes\/storage\/plans\/[^/]+\.md$/.test(path)
-  }
   // Compact one-line summary of a turn's TOOL activity (thinking is shown, not
   // counted): "4 bash · 6 read · edited file.ts".
   function turnActivitySummary(items) {
     var counts = {}, editFiles = [], interrupts = 0, errors = 0
     for (var i = 0; i < (items || []).length; i++) {
       var it = items[i]
-      if (it.kind === "text" || it.kind === "think" || it.kind === "userbash" || isPlanMetadataEdit(it)) continue
+      if (it.kind === "text" || it.kind === "think" || it.kind === "userbash") continue
       else if (it.kind === "edit") {
         var file = String(it.file || it.path || "")
         if (file && editFiles.indexOf(file) < 0) editFiles.push(file)
@@ -1137,17 +1207,18 @@ Item {
   }
   function turnActivityItems(items) {
     return (items || []).filter(x => x.kind !== "text" && x.kind !== "think" && x.kind !== "userbash"
-      && !isPlanMetadataEdit(x) && !(x.kind === "cmd" && x.tool === "info"))
+      && !(x.kind === "cmd" && x.tool === "info"))
   }
-  function turnEditItems(items) { return turnActivityItems(items).filter(x => x.kind === "edit") }
   function turnInfos(items) {
     return (items || []).filter(x => x.kind === "cmd" && x.tool === "info").map(x => String(x.text || ""))
   }
 
   function feedCopyTarget(item) {
     if (!item) return ""
-    if (item.kind === "turn")   // a grouped agent turn → join its prose blocks
-      return (item.items || []).filter(x => x.kind === "text").map(x => x.text).join("\n\n")
+    if (item.kind === "turn") {
+      var prose = turnProse(item.items).map(x => x.text).join("\n\n")
+      return prose || activityEntries(item.items).map(x => x.result || x.command || x.argumentsText || x.text || "").join("\n\n")
+    }
     return item.command && item.command.length ? item.command : (item.text || item.file || "")
   }
 
@@ -1189,18 +1260,36 @@ Item {
   }
 
   // Font scale anchored to the design system's base (Theme.fontSize = 14).
-  readonly property int fsHeader: Theme.fontSize + 3
-  readonly property int fsName:   Theme.fontSize + 2
-  readonly property int fsBody:   Theme.fontSize + 1
-  readonly property int fsMeta:   Theme.fontSize
-  readonly property string messageFontFamily: "Inter"
-  readonly property int messageBodyWeight: 450
+  readonly property int fsHeader: Theme.fontSize + 6
+  readonly property int fsName:   Theme.fontSize + 4
+  readonly property int fsBody:   Theme.fontSize + 3
+  readonly property int fsMeta:   Theme.fontSize + 2
+  readonly property int bodyLeading: Math.round(fsBody * 1.5)
+  readonly property int metaLeading: Math.round(fsMeta * 1.5)
+  readonly property string privateFontDir: rail.instanceName === "personal" ? "file://" + Quickshell.env("HOME") + "/.local/share/fonts/Timeless-1.094/" : ""
+  FontLoader { id: privateMessageFont; source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-SansRegular.ttf" : "" }
+  FontLoader { id: privateBoldFont; source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-SansBold.ttf" : "" }
+  FontLoader { id: privateBoldItalicFont; source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-SansBoldItalic.ttf" : "" }
+  FontLoader { id: privateLabelFont; source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-GroteskRegular.ttf" : "" }
+  FontLoader { source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-GroteskMedium.ttf" : "" }
+  FontLoader { source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-GroteskSemibold.ttf" : "" }
+  FontLoader { source: rail.privateFontDir ? rail.privateFontDir + "TimelessSans-GroteskBold.ttf" : "" }
+  readonly property string messageFontFamily: privateMessageFont.status === FontLoader.Ready ? "Timeless Sans Sans" : "Geist"
+  readonly property string messageBoldFontFamily: privateBoldFont.status === FontLoader.Ready && privateBoldItalicFont.status === FontLoader.Ready ? "Timeless Sans Sans Bold" : ""
+  readonly property string labelFontFamily: privateLabelFont.status === FontLoader.Ready ? privateLabelFont.name : Theme.fontFamily
+  function labelFontStyle(weight) {
+    if (privateLabelFont.status !== FontLoader.Ready) return ""
+    return weight >= 700 ? "Grotesk Bold" : weight >= 600 ? "Grotesk Semibold" : weight >= 500 ? "Grotesk Medium" : "Grotesk Regular"
+  }
+  readonly property int messageBodyWeight: 400
   readonly property int messageMetaWeight: 500
   readonly property color lavenderAccent: Theme.mode === "light" ? "#7C68C9" : "#C4B5FD"
   readonly property color skyAccent: Theme.mode === "light" ? "#287FA6" : "#7DD3FC"
   readonly property color silverAccent: Theme.mode === "light" ? "#6F777C" : "#C2C8CC"
   readonly property color mintAccent: Theme.mode === "light" ? "#3F8C69" : "#86D7B0"
   readonly property color goldAccent: Theme.mode === "light" ? "#9A6500" : "#F2C572"
+  readonly property color codePanelColor: Theme.mode === "light" ? "#FFFFFF" : Qt.tint(userCardBottom, Qt.rgba(1, 1, 1, 0.08))
+  readonly property color codePanelBorder: Theme.mode === "light" ? Theme.hairline : Qt.rgba(1, 1, 1, 0.32)
   readonly property color userCardTop: Theme.mode === "light" ? "#FFFFFF" : Qt.lighter(Theme.surface0, 1.25)
   readonly property color userCardBottom: Theme.mode === "light" ? "#FDFDFD" : Qt.lighter(Theme.surface0, 1.2)
 
@@ -1289,10 +1378,11 @@ Item {
   }
   function toolIcon(tool) {
     if (tool === "info") return "circle-info"
-    if (tool === "mcp") return "puzzle-piece"
+    if (tool === "mcp" || tool === "agent_read") return "puzzle-piece"
+    if (tool === "read" || tool === "read_file") return "file-content"
     if (tool === "grep" || tool === "ripgrep" || tool === "search_files"
         || tool === "glob" || tool === "find") return "magnifier"
-    if (tool === "bash" || tool === "shell") return "chevron-right"
+    if (tool === "bash" || tool === "shell") return "keyboard"
     return "gear-2"
   }
 
@@ -1489,7 +1579,12 @@ Item {
     agentd.askGen   // reactive dependency
     return agentd.askFor(selectedRaw)
   }
-  function answerAsk(payload) { if (agentd && pendingAsk) agentd.answerAsk(selectedRaw, payload) }
+  readonly property bool askSending: !!(pendingAsk && agentd && agentd._answerIntents[selectedRaw])
+  function answerAsk(payload) {
+    if (!agentd || !pendingAsk || !agentd.answerAsk(selectedRaw, payload)) return false
+    requestFocus()
+    return true
+  }
   readonly property var pendingUserBash: agentd ? agentd.userBashPayload(pendingAsk) : null
   // A question the agent stopped on, found in the transcript. It cannot be answered from
   // here (the resolver died with the process that asked), so it is a notice, not a card —
@@ -1951,6 +2046,11 @@ Item {
     function onOpenInNvimRequested(sid, path, line, column) {
       rail.openRequestedFile(sid, path, line, column)
     }
+    function onAskAnswered(sid) {
+      Qt.callLater(function() {
+        if (rail._followsSelected(sid) && rail.focused && !rail.pendingAsk) rail.enterInsert()
+      })
+    }
     function onSessionSettled(sid) {
       var cwd = rail._sessionCwdOf(sid)
       if (cwd && rail._isRemote(cwd)) rail._alignMirror(sid)
@@ -2007,12 +2107,15 @@ Item {
   }
   // Per-group expand state, keyed by the row's stable identity (see groupedFeed.key).
   property var expandedGroups: ({})
-  function toggleGroup(i) {
+  function groupOpen(key, defaultOpen) {
+    return expandedGroups[key] !== undefined ? expandedGroups[key] === true : defaultOpen === true
+  }
+  function toggleGroup(i, defaultOpen) {
     var e = Object.assign({}, expandedGroups)
-    e[i] = !e[i]
+    e[i] = !groupOpen(i, defaultOpen)
     expandedGroups = e
   }
-  function toggleGroupKey(k) { toggleGroup(k) }   // string-keyed groups (turn activity)
+  function toggleGroupKey(k, defaultOpen) { toggleGroup(k, defaultOpen) }   // string-keyed groups (turn activity)
   // Focus follows whichever field is VISIBLE: with a question up, the composer is
   // hidden and typing belongs to the ask, so `i` must land there instead.
   readonly property bool onSteamDeck: Quickshell.env("COCKPIT_DECK") === "1"
@@ -2051,6 +2154,13 @@ Item {
   // Enter/o: act on the item under the cursor (session→select, file→open,
   // edit-msg→open, cmd-msg→copy).
   function activateCur() {
+    var pending = view === "chat" ? [feedView.contentItem] : []
+    while (pending.length) {
+      var target = pending.pop()
+      if (!target || target.visible === false) continue
+      if (target.objectName === "writeFileRow" && target.hovered) { target.openFile(); return }
+      for (var child of target.children || []) pending.push(child)
+    }
     var l = curLocal()
     if (curSection() === "roster") {
       activate(l)
@@ -2065,7 +2175,7 @@ Item {
       if (cf) openInNvim(cf.path)
     } else {
       var it = groupedFeed[l]
-      if (it && it.kind === "user" && compactUserMessage(it.text)) {
+      if (it && it.kind === "user" && (it.sender || compactUserMessage(it.text))) {
         toggleGroupKey("user-" + (it.key || l))
         return
       }
@@ -2079,8 +2189,15 @@ Item {
   function toggleCurBash() {
     if (view !== "chat" || cur < rSize) return
     var l = curLocal(), it = groupedFeed[l]
-    if (it && (turnActivitySummary(it.items).length || turnThinks(it.items).length))
-      toggleGroupKey("turn-" + (it.key || l))
+    if (it && (turnActivitySummary(it.items).length || turnThinks(it.items).length)) {
+      var key = "turn-" + (it.key || l), groups = Object.assign({}, expandedGroups)
+      var open = !groupOpen(key, turnThinks(it.items).some(claudeThought))
+      groups[key] = open
+      groups[key + "-tools"] = open
+      var entries = activityEntries(it.items)
+      for (var i = 0; i < entries.length; i++) groups[toolKey(key, entries[i], i)] = open
+      expandedGroups = groups
+    }
   }
   // Is the cursor'd feed card at least partly in the viewport?
   // j/k only move the cursor. ListView keeps it on screen via its native highlight
@@ -2461,11 +2578,9 @@ Item {
   property bool _feedReset: false     // session switch → rebuild rather than reconcile
   function _turnSig(t) {
     if (!t) return ""
+    if (t.kind === "user") return "user|" + String(t.text || "").length + "|" + String(t.deliveryId || "") + "|" + String(t.delivery || "")
     if (t.kind !== "turn") return t.kind + "|" + String(t.text || t.command || "").length
-    var its = t.items || []
-    var last = its.length ? its[its.length - 1] : null
-    return "turn|" + its.length + "|" +
-      (last ? (String(last.kind) + String(last.text || last.command || "").length) : "")
+    return "turn|" + JSON.stringify(t.items || [])
   }
   // Row identity: turns carry a stable key; keyless rows (live pushes, echoes)
   // fall back to kind+text, which never mutates for those kinds.
@@ -2479,7 +2594,7 @@ Item {
       _feedReset = false
       feedModel.clear()
       for (var a = 0; a < arr.length; a++)
-        feedModel.append({ d: arr[a], sig: _turnSig(arr[a]), k: _feedKey(arr[a]) })
+        feedModel.append({ d: JSON.parse(JSON.stringify(arr[a])), sig: _turnSig(arr[a]), k: _feedKey(arr[a]) })
       return
     }
     _reconcileKeyed(feedModel, arr, _feedKey, _turnSig)
@@ -2547,9 +2662,9 @@ Item {
     { kind: "text",  text: "Excluded shapes scheduled for deletion from placement occupancy so replacements reuse vacated geometry." }
   ]
 
-  // Fold the flat feed into cards: each user message stands alone; an agent
-  // message = its tool activity plus the prose that ends it → one card. A new
-  // agent card opens after each prose block (and after every user message).
+  // Fold the flat feed into cards: each user message stands alone. Agent activity
+  // stays in its own card before the prose that follows, so streaming text cannot
+  // move already-visible work below the answer. Each prose block closes its card.
   // Every row carries `key`, a stable identity from the message it came from. Row INDEX
   // is not stable: the transcript is capped to the last 60 messages, so past that each
   // new message slides the whole window and every index shifts by one.
@@ -2582,6 +2697,7 @@ Item {
     var segments = [], segment = null, active = ""
     for (var i = 0; i < f.length; i++) {
       var it = f[i]
+      if (it.tool === "usage") continue
       if (it.kind === "user") {
         if (cur) { out.push(cur); cur = null; acts = 0 }
         chunked = false
@@ -2594,7 +2710,7 @@ Item {
           text = nl > 0 ? text.slice(nl + 1).trim() : ""
         }
         if (!text.trim().length) continue
-        out.push({ kind: "user", text: text, mid: it.mid, steered: it.steered === true, sender: sender, key: it.mid || _contentKey("user", it.text) })
+        out.push({ kind: "user", text: text, mid: it.mid, steered: it.steered === true, sender: sender, deliveryId: it.deliveryId, delivery: it.delivery, key: it.mid || _contentKey("user", it.text) })
       } else if (it.kind === "sys") {
         // Housekeeping (compaction) gets its OWN card so it never colors the
         // neighboring turn's errors.
@@ -2623,9 +2739,10 @@ Item {
           if (cur) { out.push(cur); cur = null; acts = 0; chunked = false }
           continue
         }
+        if (it.kind === "text" && cur) { out.push(cur); cur = null; acts = 0 }
         if (!cur) { cur = { kind: "turn", items: [], key: it.mid || _contentKey(it.kind, it.text || it.command), contFrom: chunked }; acts = 0 }
         cur.items.push(it)
-        if (it.kind === "text") { out.push(cur); cur = null; acts = 0; chunked = false }   // prose ends the card
+        if (it.kind === "text") { out.push(cur); cur = null; acts = 0; chunked = false }   // prose is its own card
         else {
           if (it.kind !== "think") acts++
           // A long tool run is CHUNKED (one card can't grow unbounded) — mark both
@@ -2759,7 +2876,7 @@ Item {
       }
       enabled: rail.view === "chat"
       clip: false
-      spacing: 18
+      spacing: 24
       model: feedModel
       boundsBehavior: Flickable.StopAtBounds
       // Realize the WHOLE feed (it is capped at feedCap=60 rows — slack-channel scale).
@@ -2802,8 +2919,6 @@ Item {
         id: turnDel
         width: feedView.width
         implicitHeight: card.implicitHeight
-        height: implicitHeight
-        onHeightChanged: Qt.callLater(feedView.forceLayout)
         // Streaming content arrived as a hard pop; fade each row in on its own (see the
         // note above on why this is not a ListView `add` transition).
         opacity: 0
@@ -2825,14 +2940,16 @@ Item {
         // own model property, so model.d is only readable at the delegate root.
         readonly property var turn: model.d
         readonly property bool isUser: turnDel.turn.kind === "user"
+        readonly property string localDelivery: rail.agentd && turnDel.turn.deliveryId
+          ? rail.agentd.localDeliveryFor(rail.selectedRaw, turnDel.turn.deliveryId) : ""
         readonly property bool isHandoff: isUser && !!turnDel.turn.sender
-        readonly property bool compactUser: isUser && rail.compactUserMessage(turn.text)
+        readonly property bool isSteering: isUser && !isHandoff && turnDel.turn.steered === true
+        readonly property bool isNote: isHandoff
+        readonly property bool compactUser: isHandoff || (isUser && rail.compactUserMessage(turn.text))
         readonly property string userFoldKey: "user-" + (turn.key || rowIndex)
         readonly property bool userExpanded: compactUser && rail.expandedGroups[userFoldKey] === true
         // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
         readonly property bool isSys: turnDel.turn.sys === true
-        readonly property bool agentContinuation: !isUser && !isSys && rowIndex > 0
-          && rail.groupedFeed[rowIndex - 1].kind === "turn" && !rail.groupedFeed[rowIndex - 1].sys
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
         readonly property color cardContentColor: Theme.mode === "light" ? "#23272B" : "#FAFAFA"
         readonly property color cardBodyColor: Theme.mode === "light" ? "#343A3F" : "#EDEDED"
@@ -2844,17 +2961,17 @@ Item {
           anchors {
             left: turnDel.isHandoff ? parent.left : undefined
             right: turnDel.isHandoff ? undefined : parent.right
-            leftMargin: feedView.shadowGutter
-            rightMargin: feedView.shadowGutter
+            leftMargin: feedView.shadowGutter - (turnDel.isNote ? 12 : 0)
+            rightMargin: feedView.shadowGutter - (turnDel.isUser && !turnDel.isNote ? 0 : 12)
           }
-          width: (parent.width - 2 * feedView.shadowGutter) * (turnDel.isUser ? 0.9 : 1)
-          implicitHeight: cardCol.implicitHeight + (turnDel.agentContinuation && !turnDel.cursor ? 14 : 28)
+          width: (parent.width - 2 * feedView.shadowGutter) * (turnDel.isUser && !turnDel.isNote ? 0.9 : 1) + (turnDel.isUser && !turnDel.isNote ? 0 : 24)
+          implicitHeight: cardCol.implicitHeight + (turnDel.isNote && !turnDel.userExpanded ? 16 : 32)
           radius: 18
-          color: turnDel.cursor && !turnDel.isUser ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
-          border.width: turnDel.cursor && !turnDel.isUser ? 1 : 0
-          border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.65)
+          color: "transparent"
+          border.width: (!turnDel.isUser || turnDel.isNote) && (turnDel.cursor || fhov.hovered) ? 1 : 0
+          border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, turnDel.cursor ? 0.65 : 0.36)
           ContrastCard {
-            visible: turnDel.isUser
+            visible: turnDel.isUser && !turnDel.isNote
             anchors.fill: parent
             cardRadius: card.radius
             elevated: !turnDel.isHandoff
@@ -2866,17 +2983,17 @@ Item {
             rimTop: turnDel.isHandoff ? outlineColor : (fhov.hovered
               ? (Theme.mode === "light" ? "#FFFFFF" : "#34313A")
               : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B"))
-            rimBottom: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#C9D1D8" : "#222222")
+            rimBottom: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#FFFFFF" : "#222222")
             outlineColor: fhov.hovered || turnDel.isHandoff
               ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, fhov.hovered ? 0.42 : 0.22)
-              : (Theme.mode === "light" ? "#C4CBD2" : "#282828")
+              : (Theme.mode === "light" ? "#FFFFFF" : "#282828")
             Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
           Rectangle {
             anchors.fill: parent
             radius: card.radius
-            visible: turnDel.isUser
+            visible: turnDel.isUser && !turnDel.isNote
             color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.05)
             border.width: 1
             border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.36)
@@ -2887,19 +3004,32 @@ Item {
             anchors.fill: parent
             radius: card.radius
             color: turnDel.isHandoff ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
-            visible: turnDel.isUser
+            visible: turnDel.isUser && !turnDel.isNote
             border.width: 2
             border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.92)
             opacity: turnDel.cursor ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
           HoverHandler { id: fhov }
-          TapHandler { onTapped: rail.clickAt(rail.rSize + turnDel.rowIndex) }
+          TapHandler {
+            onTapped: eventPoint => {
+              const point = fullMessageButton.mapFromItem(card, eventPoint.position.x, eventPoint.position.y)
+              if (fullMessageButton.visible && fullMessageButton.contains(point)) return
+              var pending = [card]
+              while (pending.length) {
+                var item = pending.pop()
+                if (!item || item.visible === false) continue
+                if (item.objectName === "writeFileRow" && item.contains(item.mapFromItem(card, eventPoint.position.x, eventPoint.position.y))) return
+                for (var child of item.children || []) pending.push(child)
+              }
+              rail.selectAt(rail.rSize + turnDel.rowIndex)
+            }
+          }
 
           Column {
             id: cardCol
-            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 18; rightMargin: 18; topMargin: turnDel.agentContinuation && !turnDel.cursor ? 0 : 14 }
-            spacing: 10
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: turnDel.isUser ? 24 : 36; rightMargin: turnDel.isUser ? 24 : 36; topMargin: turnDel.isNote && !turnDel.userExpanded ? 8 : 16 }
+            spacing: turnDel.isNote && !turnDel.userExpanded ? 8 : 16
 
             // Turn header — the Nucleo glyph is the ONLY colored signifier;
             // the label stays neutral and a touch bigger than the body text.
@@ -2913,15 +3043,16 @@ Item {
                 color: turnDel.cardAccent
               }
               Text {
-                text: turnDel.turn.sender ? "From " + turnDel.turn.sender : "You"
+                text: turnDel.turn.sender ? "From " + turnDel.turn.sender.replace(/\s+\(user-approved\)$/, "") : "You"
                 color: turnDel.cardContentColor
-                font.family: rail.messageFontFamily; font.pixelSize: rail.fsName; font.weight: 600
+                font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(600)
+                font.pixelSize: turnDel.isNote ? rail.fsMeta : rail.fsName; font.weight: 600
                 anchors.verticalCenter: parent.verticalCenter
               }
               // A steer redirected a LIVE turn — visibly different from a normal
               // prompt, so "why did it abort" has its answer in the header.
               Rectangle {
-                visible: turnDel.isUser && turnDel.turn.steered === true
+                visible: turnDel.isSteering || (turnDel.isHandoff && turnDel.turn.steered === true)
                 implicitWidth: steerCap.implicitWidth + 12
                 implicitHeight: 17; radius: 8.5
                 color: "transparent"
@@ -2931,7 +3062,36 @@ Item {
                   id: steerCap; anchors.centerIn: parent
                   text: "steer"
                   color: Theme.orange
-                  font.family: rail.messageFontFamily; font.pixelSize: Theme.fontSize - 3; font.bold: true
+                  font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(700)
+                  font.pixelSize: rail.fsMeta - 3; font.bold: true
+                }
+              }
+            }
+
+            Flow {
+              visible: !!turnDel.localDelivery
+              width: cardCol.width
+              spacing: 8
+              Text {
+                text: turnDel.localDelivery === "failed" ? "Not delivered"
+                    : turnDel.localDelivery === "accepted" ? "Accepted · awaiting transcript" : "Awaiting confirmation"
+                color: turnDel.localDelivery === "failed" ? Theme.orange : turnDel.cardMutedColor
+                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+                height: 24; verticalAlignment: Text.AlignVCenter
+              }
+              PrimaryButton {
+                text: "Delete"; primary: false; implicitHeight: 24
+                onClicked: {
+                  rail.agentd.dismissLocalEcho(rail.selectedRaw, turnDel.turn.deliveryId)
+                  rail.feedTick++; rail._resyncFeed()
+                }
+              }
+              PrimaryButton {
+                visible: turnDel.localDelivery === "failed"
+                text: "Resend"; primary: false; implicitHeight: 24
+                onClicked: {
+                  rail.agentd.resendLocalEcho(rail.selectedRaw, turnDel.turn.deliveryId)
+                  rail.feedTick++; rail._resyncFeed()
                 }
               }
             }
@@ -2965,36 +3125,16 @@ Item {
               }
             }
 
-            Rectangle {
+            PrimaryButton {
+              id: fullMessageButton
               visible: turnDel.compactUser
-              width: Math.min(cardCol.width, pastedTextRow.implicitWidth + 16)
-              implicitHeight: 26
-              radius: 7
-              color: Qt.rgba(turnDel.userContentColor.r, turnDel.userContentColor.g, turnDel.userContentColor.b, 0.08)
-              border.width: 1
-              border.color: Qt.rgba(turnDel.userContentColor.r, turnDel.userContentColor.g, turnDel.userContentColor.b, 0.18)
-              Row {
-                id: pastedTextRow
-                anchors { left: parent.left; verticalCenter: parent.verticalCenter; leftMargin: 8 }
-                spacing: 6
-                Icon {
-                  name: "file-content"
-                  width: 13; height: 13; color: turnDel.cardAccent
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                  text: turnDel.userExpanded ? "Hide full message" : "Show full message"
-                  color: turnDel.userContentColor
-                  opacity: 0.72
-                  font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-                Icon {
-                  name: turnDel.userExpanded ? "chevron-down" : "chevron-right"
-                  width: 11; height: 11; color: turnDel.userContentColor; opacity: 0.72
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-              }
+              width: Math.min(cardCol.width, implicitWidth)
+              implicitHeight: 28
+              radius: Theme.radiusSm
+              primary: false
+              text: turnDel.userExpanded ? "Hide full message" : "Show full message"
+              iconName: turnDel.userExpanded ? "chevron-down" : "chevron-right"
+              onClicked: rail.clickAt(rail.rSize + turnDel.rowIndex)
             }
 
             Text {
@@ -3003,8 +3143,9 @@ Item {
               text: String(turnDel.turn.text || "").replace(/\s+/g, " ").trim()
               textFormat: Text.PlainText
               color: turnDel.userContentColor
-              font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
-              wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
+              font.family: rail.messageFontFamily; font.pixelSize: rail.fsBody; font.weight: rail.messageBodyWeight
+              lineHeightMode: Text.FixedHeight; lineHeight: rail.fsBody * 1.5
+              wrapMode: Text.Wrap; maximumLineCount: turnDel.isHandoff ? 2 : 3; elide: Text.ElideRight
             }
 
             Loader {
@@ -3025,8 +3166,9 @@ Item {
             Repeater {
               model: turnDel.isUser ? 0 : rail.turnInfos(turnDel.turn.items).length
               Text {
-                width: cardCol.width
-                text: rail.turnInfos(turnDel.turn.items)[index] || ""
+                x: -12; width: cardCol.width + 24
+                text: rail.plainToolText(rail.turnInfos(turnDel.turn.items)[index] || "").replace(/^🔌\s*/, "")
+                textFormat: Text.PlainText
                 color: turnDel.cardMutedColor
                 font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
               }
@@ -3034,15 +3176,20 @@ Item {
 
             Repeater {
               model: turnDel.isUser ? [] : (turnDel.turn.items || []).filter(item => item.kind === "cmd" && item.tool === "error")
-              Text {
-                width: cardCol.width
-                text: modelData.text || ""
-                textFormat: Text.PlainText
-                color: Theme.red
-                font.family: rail.messageFontFamily
-                font.pixelSize: rail.fsBody
-                font.weight: rail.messageBodyWeight
-                wrapMode: Text.Wrap
+              RowLayout {
+                x: -12; width: cardCol.width + 24
+                spacing: 8
+                Icon { name: "triangle-warning"; width: 16; height: 16; color: Theme.red; Layout.minimumWidth: 16; Layout.maximumWidth: 16; Layout.alignment: Qt.AlignTop }
+                Text {
+                  Layout.fillWidth: true
+                  text: rail.plainToolText(modelData.text).replace(/^\s*[⚠✗⨯⏹]\s*/, "")
+                  textFormat: Text.PlainText
+                  color: Theme.red
+                  font.family: rail.messageFontFamily
+                  font.pixelSize: rail.fsBody
+                  font.weight: rail.messageBodyWeight
+                  wrapMode: Text.Wrap
+                }
               }
             }
 
@@ -3050,7 +3197,7 @@ Item {
             Repeater {
               model: turnDel.isUser ? [] : rail.turnProse(turnDel.turn.items)
               Loader {
-                width: cardCol.width
+                x: -12; width: cardCol.width + 24
                 property var entry: modelData
                 property int entryIndex: index
                 property int rowIndex: turnDel.rowIndex
@@ -3063,8 +3210,9 @@ Item {
             Repeater {
               model: turnDel.isUser ? [] : rail.turnSys(turnDel.turn.items)
               Text {
-                width: cardCol.width
-                text: modelData.text || ""
+                x: -12; width: cardCol.width + 24
+                text: rail.plainToolText(modelData.text || "").replace(/^🔌\s*/, "")
+                textFormat: Text.PlainText
                 color: turnDel.cardMutedColor
                 font.family: rail.messageFontFamily
                 font.pixelSize: rail.fsMeta
@@ -3076,32 +3224,30 @@ Item {
             Repeater {
               model: turnDel.isUser ? [] : rail.turnUserBash(turnDel.turn.items)
               Loader {
-                width: cardCol.width
+                x: -24; width: cardCol.width + 48
                 property var entry: modelData
                 sourceComponent: userBashRow
               }
             }
 
-            // Compact counts, always-visible edited files, and optional Bash details.
             Loader {
               active: !turnDel.isUser && (rail.turnActivitySummary(turnDel.turn.items).length > 0 || rail.turnThinks(turnDel.turn.items).length > 0)
               visible: active
-              width: cardCol.width
+              x: -24; width: cardCol.width + 48
               sourceComponent: activityRow
               property var items: turnDel.isUser ? [] : turnDel.turn.items
-              property string summary: active ? rail.turnActivitySummary(turnDel.turn.items) : ""
               // Keyed on the row's stable identity, not its index: a group you expanded
               // otherwise collapsed (and its neighbour opened) as the window slid.
               property string ekey: "turn-" + (turnDel.turn.key || turnDel.rowIndex)
-              property bool expanded: rail.expandedGroups[ekey] === true
+              readonly property bool defaultReasoning: rail.turnThinks(items).some(rail.claudeThought)
+              property bool expanded: rail.groupOpen(ekey, defaultReasoning)
               property color textColor: turnDel.cardBodyColor
               property color mutedColor: turnDel.cardMutedColor
             }
 
-            // Chunked mid-turn cut: say the turn continues, so a header-less next
-            // chunk (and the missing ✧ recap) read as intended, not as a bug.
+            // Only prose needs a continuation marker; tool-only chunks have their own summary.
             Text {
-              visible: !turnDel.isUser && turnDel.turn.cont === true
+              visible: !turnDel.isUser && turnDel.turn.cont === true && rail.turnProse(turnDel.turn.items).length > 0
               text: "⋯ continues"
               color: turnDel.cardMutedColor
               font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
@@ -3162,7 +3308,7 @@ Item {
     ContrastCard {
       anchors.fill: parent
       cardRadius: chin.radius
-      faceTop: rail.userCardTop
+      faceTop: Theme.mode === "light" ? rail.userCardBottom : rail.userCardTop
       faceUpper: faceTop
       faceMid: rail.userCardBottom
       faceBottom: faceMid
@@ -3192,7 +3338,7 @@ Item {
         // never separate; rows are revealed by this clip and fade in slower.
         // The glance stays as the HEADER when expanded — the active session lives
         // there (big title + orb), never duplicated as a list row.
-        implicitHeight: glanceCol.implicitHeight + (rail.rosterExpanded ? rosterInner.implicitHeight + 4 : 0) + 8
+        implicitHeight: glanceCol.implicitHeight + (rail.rosterExpanded ? rosterInner.implicitHeight + rosterInner.anchors.topMargin : 0) + 8
         Behavior on implicitHeight {
           NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad }
         }
@@ -3456,6 +3602,7 @@ Item {
 
         ColumnLayout {
           id: rosterInner
+          objectName: "sessionRosterRows"
           opacity: rail.rosterExpanded ? 1 : 0
           visible: opacity > 0.01
           property real motionBlur: rail.rosterExpanded ? 0 : 0.125
@@ -3466,7 +3613,7 @@ Item {
           Behavior on opacity { NumberAnimation { id: rosterFade; duration: Motion.slow; easing.type: Easing.InOutQuad } }
           Behavior on motionBlur { NumberAnimation { id: rosterBlur; duration: Motion.slow; easing.type: Easing.InOutQuad } }
           Behavior on motionY { NumberAnimation { id: rosterShift; duration: Motion.slow; easing.type: Easing.OutCubic } }
-          anchors { left: parent.left; right: parent.right; top: glanceCol.bottom; topMargin: 4 }
+          anchors { left: parent.left; right: parent.right; top: glanceCol.bottom; topMargin: rail.activeTask.length ? 12 : 4 }
           spacing: 3
           Repeater {
             model: rosterModel
@@ -3493,7 +3640,7 @@ Item {
                    : hov.hovered ? chin.itemHover : "transparent"
               HoverHandler { id: hov }
               // Collapsed: index doesn't map to the full list → just focus/expand.
-              TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.requestFocus() }
+              TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.focusRoster() }
               RowLayout {
                 anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
                 spacing: 8
@@ -3568,7 +3715,7 @@ Item {
                   Text {
                     id: askCap; anchors.centerIn: parent
                     text: "needs input"
-                    color: Theme.bg; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 2; font.bold: true
+                    color: Theme.bg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 2; font.bold: true
                   }
                 }
                 // Tool + elapsed while streaming: the only status WORDS left, and only
@@ -3888,9 +4035,14 @@ Item {
                   leftMargin: 18; rightMargin: 16; topMargin: 14 }
         spacing: 9
 
-        Text {
-          text: askCard.userBash ? "run as you" : "needs your input"
-          color: chin.decisionOrange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+        Row {
+          spacing: 8
+          Spinner { visible: rail.askSending; running: visible; color: chin.decisionOrange; dotSize: 1.5; anchors.verticalCenter: parent.verticalCenter }
+          Text {
+            objectName: "question-reply-status"
+            text: rail.askSending ? "Sending reply…" : askCard.userBash ? "run as you" : "needs your input"
+            color: chin.decisionOrange; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.bold: true
+          }
         }
         Text {
           visible: text.length > 0; width: parent.width; wrapMode: Text.Wrap
@@ -3925,6 +4077,7 @@ Item {
         Column {
           width: askCol.width
           spacing: 6
+          enabled: !rail.askSending; opacity: enabled ? 1 : 0.5
           visible: askCard.ask && askCard.ask.method === "select"
           Repeater {
             model: (askCard.ask && askCard.ask.method === "select") ? askCard.ask.options : []
@@ -3956,6 +4109,7 @@ Item {
         Flow {
           width: askCol.width
           spacing: 10
+          enabled: !rail.askSending; opacity: enabled ? 1 : 0.5
           visible: askCard.ask && askCard.ask.method === "confirm"
           Row { width: askCard.largeTargets ? (askCol.width - 10) / 2 : implicitWidth; height: askCard.largeTargets ? 48 : implicitHeight
             spacing: 8; ChinKeyCap { text: rail.onSteamDeck ? "RT+A" : "y"; anchors.verticalCenter: parent.verticalCenter }
@@ -3990,6 +4144,7 @@ Item {
             Icon { name: "chevron-right"; width: 14; height: 14; color: chin.decisionOrange }
             TextInput {
               id: askInput
+              readOnly: rail.askSending
               Layout.fillWidth: true
               color: chin.fg
               font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
@@ -3997,7 +4152,7 @@ Item {
               verticalAlignment: TextInput.AlignVCenter
               cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: askInput.cursorVisible ? 1 : 0 }
               onAccepted: {
-                if (text.trim().length) rail.answerAsk({ value: text })
+                if (!text.trim().length || !rail.answerAsk({ value: text })) return
                 text = ""
                 rail.exitInsert()
               }
@@ -4017,7 +4172,7 @@ Item {
         Text {
           width: askCol.width; wrapMode: Text.Wrap
           readonly property bool hasUrl: askCard.ask && rail.firstUrl(String(askCard.ask.title || "") + "\n" + askCard.prompt).length > 0
-          text: (hasUrl ? (rail.onSteamDeck ? "tap link · " : "ctrl+o opens link · ") : "") + (rail.askDeferred ? "finish typing · esc to answer"
+          text: rail.askSending ? "Waiting for the agent to confirm receipt…" : (hasUrl ? (rail.onSteamDeck ? "tap link · " : "ctrl+o opens link · ") : "") + (rail.askDeferred ? "finish typing · esc to answer"
               : rail.onSteamDeck && askCard.ask && askCard.ask.method === "select"
                 ? "hold RT + A/B/X/Y for options 1–4 · tap any option · B cancels"
               : rail.onSteamDeck && askCard.ask && askCard.ask.method === "confirm"
@@ -4191,6 +4346,7 @@ Item {
       // composer that still looks ready for an unrelated message.
       Rectangle {
         objectName: "composerFrame"
+        TapHandler { onTapped: { if (!rail.focused) rail.requestFocus(); rail.enterInsert() } }
         Layout.fillWidth: true
         Layout.minimumWidth: 0
         visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
@@ -4204,7 +4360,7 @@ Item {
           anchors.fill: parent
           cardRadius: parent.radius
           elevated: false
-          faceTop: rail.userCardTop
+          faceTop: Theme.mode === "light" ? rail.userCardBottom : rail.userCardTop
           faceUpper: faceTop
           faceMid: rail.userCardBottom
           faceBottom: faceMid
@@ -4213,8 +4369,8 @@ Item {
           anchors.fill: parent
           radius: parent.radius
           color: "transparent"
-          border.color: rail.insert ? rail.activeRing : chin.hairline
-          border.width: rail.insert ? 2 : (chin.lightMode ? 1 : 2)
+          border.color: rail.insert ? rail.activeRing : Theme.hairline
+          border.width: rail.insert ? 2 : 1
           Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
         }
         RowLayout {
@@ -4245,6 +4401,7 @@ Item {
             }
           TextArea {
             id: composerInput
+            onActiveFocusChanged: if (activeFocus) { if (!rail.focused) rail.requestFocus(); rail.enterInsert() }
             width: composerFlick.width
             padding: 0
             background: null
@@ -4288,7 +4445,7 @@ Item {
                 return
               }
               if (pa && (pa.method === "input" || pa.method === "editor")) {
-                if (text.trim().length) rail.answerAsk({ value: text })
+                if (!text.trim().length || !rail.answerAsk({ value: text })) return
               } else if (rail.agentd && !rail.attachRefs(text).trim().length && !rail.featuredStreaming
                          && rail.agentd.myAbortAgoFor(rail.selectedRaw) >= 0
                          && rail.agentd.myAbortAgoFor(rail.selectedRaw) < 1800000) {
@@ -4619,7 +4776,7 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             text: prefix + modelData
             color: pickerRow.sel ? Theme.fg : Theme.fg_secondary
-            font.family: Theme.fontFamily; font.pixelSize: 14
+            font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
             width: parent.width - 29; elide: Text.ElideMiddle
           }
         }
@@ -4718,7 +4875,7 @@ Item {
     Rectangle {
       id: ubCard
       width: parent ? parent.width : 400
-      implicitHeight: ubCol.implicitHeight + 18
+      implicitHeight: ubCol.implicitHeight + 24
       radius: 9
       color: Theme.bgDim
       readonly property bool waiting: !entry.failed && !String(entry.result || "").length
@@ -4728,15 +4885,15 @@ Item {
       border.color: entry.failed ? Theme.red : Theme.hairline
       Column {
         id: ubCol
-        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 9 }
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
         spacing: 6
         RowLayout {
           width: parent.width
-          Icon { name: "chevron-right"; width: 13; height: 13; color: entry.failed ? Theme.red : Theme.orange }
+          Icon { name: "keyboard"; width: 16; height: 16; color: entry.failed ? Theme.red : Theme.orange; Layout.alignment: Qt.AlignVCenter }
           Text {
             text: "! " + String(entry.command || "")
             color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
-            wrapMode: Text.WrapAnywhere; Layout.fillWidth: true
+            wrapMode: Text.WordWrap; Layout.fillWidth: true
           }
           Text {
             text: entry.failed ? "failed" : (String(entry.result || "").length ? "done" : (ubCard.waiting ? "requested" : "interrupted"))
@@ -4752,15 +4909,15 @@ Item {
         }
         Rectangle {
           visible: String(entry.result || "").length > 0
-          width: parent.width; implicitHeight: ubResult.implicitHeight + 14
+          width: parent.width; implicitHeight: ubResult.implicitHeight + 24
           radius: 7; color: Theme.surface0
           Text {
             id: ubResult
-            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 7 }
+            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
             text: String(entry.result || "")
             color: entry.failed ? Theme.red : Theme.fg_secondary
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-            wrapMode: Text.WrapAnywhere
+            wrapMode: Text.WordWrap
           }
         }
       }
@@ -4772,139 +4929,88 @@ Item {
       id: actCol
       width: parent ? parent.width : 400
       spacing: 9
-      readonly property var editItems: rail.turnEditItems(items)
-      readonly property var commandItems: compactItems.filter(entry => entry.kind !== "edit")
-      readonly property var compactItems: {
-        var out = []
-        for (var entry of rail.turnActivityItems(items)) {
-          if (entry.tool === "error") continue
-          if (entry.kind === "group") {
-            for (var cmd of entry.cmds || []) out.push(Object.assign({}, cmd, {tool: entry.tool}))
-          } else out.push(entry)
-        }
-        return out
-      }
-      readonly property var preview: {
-        var reads = [], edits = [], commands = [], agents = [], other = [], failed = []
-        for (var entry of compactItems) {
-          var text = String(entry.text || entry.tool || "").replace(/\s+/g, " ").trim()
-          if (entry.failed) failed.push(text)
-          if (entry.kind === "edit") edits.push(entry.file + " +" + entry.add + " −" + entry.del)
-          else if (entry.tool === "read") reads.push(text.replace(/^read\s+/, ""))
-          else if (entry.tool === "bash" || entry.tool === "shell") commands.push(String(entry.command || text))
-          else if (String(entry.tool).indexOf("agent_") === 0) agents.push(text)
-          else other.push(text)
-        }
-        var lines = []
-        if (reads.length) lines.push({text: "Read (" + reads.length + "): " + Array.from(new Set(reads)).join(", "), icon: "book-open"})
-        if (edits.length) lines.push({text: "Edited: " + edits.join(", "), icon: "pen-3"})
-        if (commands.length) lines.push({text: "Commands (" + commands.length + ", latest " + Math.min(2, commands.length) + ")", commands: commands.slice(-2), icon: rail.toolIcon("bash")})
-        if (agents.length) lines.push({text: "Agents (" + agents.length + "): " + agents.slice(-2).join("\n"), icon: "users"})
-        if (other.length) lines.push({text: "Other (" + other.length + "): " + other.slice(-2).join("\n"), icon: "gear-2"})
-        if (failed.length) lines.push({text: "Failed: " + failed.join("\n"), failed: true, icon: "circle-info"})
-        return lines
-      }
-      Repeater {
-        model: actCol.preview
-        Rectangle {
-          id: activityPreview
-          readonly property var entry: modelData
-          width: actCol.width
-          implicitHeight: previewContent.implicitHeight + 20
-          radius: 9; color: Theme.bgDim
-          border.width: 1
-          border.color: Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.09)
-          Column {
-            id: previewContent
-            anchors { left: parent.left; right: parent.right; top: parent.top; margins: 10 }
-            spacing: 7
-            FontMetrics { id: previewFontMetrics; font: activityPreviewText.font }
-            RowLayout {
-              width: parent.width; spacing: 7
-              Icon {
-                name: activityPreview.entry.icon; width: 13; height: 13
-                color: activityPreview.entry.failed ? Theme.red : Theme.fg_muted
-                Layout.alignment: Qt.AlignTop
-                Layout.topMargin: Math.max(0, activityPreviewText.baselineOffset - previewFontMetrics.capitalHeight / 2 - height / 2)
-              }
-              Text {
-                id: activityPreviewText
-                text: activityPreview.entry.text
-                color: activityPreview.entry.failed ? Theme.red : actCol.parent.textColor
-                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
-                wrapMode: Text.Wrap; lineHeight: 1.3
-                Layout.fillWidth: true
-              }
-            }
-            Repeater {
-              model: activityPreview.entry.commands || []
-              Rectangle {
-                width: previewContent.width
-                implicitHeight: commandPreview.implicitHeight + 16
-                radius: 6; color: Theme.surface0
-                Text {
-                  id: commandPreview
-                  anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 8; rightMargin: 28; topMargin: 8 }
-                  text: String(modelData).split("\n")[0]
-                  color: Theme.fg_secondary
-                  font.family: "monospace"; font.pixelSize: rail.fsMeta
-                  wrapMode: Text.WrapAnywhere; lineHeight: 1.3
-                }
-                Icon {
-                  anchors { right: parent.right; top: parent.top; margins: 8 }
-                  name: "clipboard"; width: 12; height: 12; color: Theme.fg_muted
-                }
-                TapHandler { onTapped: rail.copyText(String(modelData)) }
-              }
-            }
-          }
-        }
+      readonly property var compactItems: rail.activityRows(items)
+      readonly property var tools: rail.activityEntries(items)
+      readonly property bool toolsOpen: rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
+      readonly property var shownTools: {
+        if (toolsOpen) return compactItems
+        rail.agentd ? rail.agentd.curToolGen : 0
+        var id = rail.agentd ? rail.agentd.curToolIdFor(rail.selectedRaw) : ""
+        var current = tools.find(tool => tool.id && tool.id === id)
+        if (!current) return []
+        return compactItems.filter(activity => activity.kind === "edits"
+          ? activity.files.some(file => file.path === current.path) : activity.id === current.id)
       }
       Row {
-        spacing: 7
-        TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey) }
+        visible: rail.turnThinks(items).length > 0
+        x: 12; width: actCol.width - 24
+        spacing: 8
         Icon {
           name: expanded ? "chevron-down" : "chevron-right"
-          width: 12; height: 12; color: actCol.parent.mutedColor; anchors.verticalCenter: parent.verticalCenter
+          width: 16; height: 16; color: actCol.parent.mutedColor
+          anchors.verticalCenter: parent.verticalCenter
         }
         Text {
-          text: "DETAILS"; color: actCol.parent.mutedColor; opacity: 0.82
-          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
+          text: "Reasoning"; color: actCol.parent.mutedColor
+          font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(400); font.pixelSize: rail.fsMeta
         }
+        TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey, actCol.parent.defaultReasoning) }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
       }
       Repeater {
-        model: expanded ? rail.turnThinks(items) : []
+        model: expanded ? rail.turnThinks(items).filter(thought => rail.expandedGroups[ekey] === true || rail.claudeThought(thought)) : []
         Loader {
-          width: actCol.width
+          x: 12; width: actCol.width - 24
           sourceComponent: thinkRow
           property var entry: modelData
-          property string gkey: ekey + "-think-" + index
-          property bool expanded: rail.expandedGroups[gkey] === true
+          property string gkey: ekey + "-think-" + (modelData.mid || index)
+          property bool expanded: rail.groupOpen(gkey, rail.claudeThought(entry))
           property color mutedColor: actCol.parent.mutedColor
         }
       }
-      Repeater {
-        model: expanded ? actCol.editItems.length : 0
-        Loader {
-          width: actCol.width
-          property var entry: actCol.editItems[index]
-          property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === ekey && rail.fileChoiceCur === index
-          property color textColor: actCol.parent.textColor
-          property color mutedColor: actCol.parent.mutedColor
-          sourceComponent: editRow
+      RowLayout {
+        objectName: "work-details:" + ekey
+        visible: actCol.tools.length > 0
+        x: 12; width: actCol.width - 24
+        spacing: 8
+        Icon {
+          name: actCol.toolsOpen ? "chevron-down" : "chevron-right"
+          width: 12; height: 12; color: actCol.parent.mutedColor
+          Layout.minimumWidth: 12; Layout.maximumWidth: 12
         }
+        Text {
+          text: "Work details · " + actCol.tools.length + (actCol.tools.length === 1 ? " tool" : " tools")
+          color: actCol.parent.mutedColor
+          font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(400); font.pixelSize: rail.fsMeta
+          elide: Text.ElideRight; Layout.fillWidth: true
+        }
+        Text {
+          readonly property int failures: actCol.tools.filter(tool => tool.failed === true).length
+          visible: failures > 0
+          text: failures + " failed"; color: Theme.red
+          font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(400); font.pixelSize: rail.fsMeta
+        }
+        TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey + "-tools") }
+        HoverHandler { cursorShape: Qt.PointingHandCursor }
       }
       Repeater {
-        model: expanded ? actCol.commandItems.length : 0
+        model: actCol.shownTools.length
         Loader {
-          width: actCol.width
+          x: 24; width: actCol.width - 24
           Component.onCompleted: rail.probeActCreates++
-          property var entry: actCol.commandItems[index]
-          property string gkey: ekey + "-" + index
+          readonly property var activity: actCol.shownTools[index]
+          property var entry: activity.kind === "edits" && activity.files.length === 1 ? activity.files[0] : activity
+          property bool grouped: false
+          property string gkey: activity.kind === "edits" && activity.files.length === 1
+            ? rail.toolKey(rail.toolKey(ekey, activity, index), entry, 0) : rail.toolKey(ekey, entry, index)
+          property string cardKey: ekey
+          property var items: actCol.parent.items
           property bool expanded: rail.expandedGroups[gkey] === true
+          property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === ekey
+            && rail.activityFileRefs({kind:"turn",items:items})[rail.fileChoiceCur] === entry.path
           property color textColor: actCol.parent.textColor
           property color mutedColor: actCol.parent.mutedColor
-          sourceComponent: cmdRow
+          sourceComponent: activity.kind === "edits" ? (activity.files.length > 1 ? editGroup : editActivityRow) : cmdRow
         }
       }
     }
@@ -4918,32 +5024,41 @@ Item {
       // Errors are the one row you must be able to READ: full text, wrapped, red.
       // A failed tool call is an error OUTCOME on a normal row — same red, one line.
       readonly property bool isErr: entry.tool === "error"
+      readonly property bool isShell: entry.tool === "bash" || entry.tool === "shell"
       readonly property bool isFailed: entry.failed === true
       // Bash rows carry the raw command — tap toggles it open underneath.
-      readonly property bool canExpand: !isErr && String(entry.command || "").length > 0
-      readonly property bool open: canExpand && typeof gkey !== "undefined" && rail.expandedGroups[gkey] === true
+      readonly property bool canExpand: !isErr && !!(entry.result || entry.command) && entry.tool !== "queue" && entry.tool !== "read" && entry.tool !== "read_file" && (!rail.sourceTool(entry) || entry.failed)
+      readonly property bool open: typeof gkey !== "undefined" && rail.expandedGroups[gkey] === true
       RowLayout {
-        width: cmdCol.width
+        x: 12; width: cmdCol.width - 24
         spacing: 8
+        FontMetrics { id: commandFont; font: commandLabel.font }
         Icon {
-          name: rail.toolIcon(entry.tool); width: 13; height: 13
+          name: rail.toolIcon(entry.tool); width: 16; height: 16
           color: (cmdCol.isErr || cmdCol.isFailed) ? Theme.red : Theme.fg_muted
+          Layout.minimumWidth: 16; Layout.maximumWidth: 16
+          Layout.minimumHeight: 16; Layout.maximumHeight: 16
           Layout.alignment: Qt.AlignTop
-          Layout.topMargin: Math.max(0, Math.round(rail.fsBody * 1.3 - 13) / 2)
+          Layout.topMargin: Math.max(0, commandLabel.baselineOffset + commandFont.tightBoundingRect(commandLabel.text).y + commandFont.tightBoundingRect(commandLabel.text).height / 2 - 8)
         }
         Text {
+          id: commandLabel
+          textFormat: Text.PlainText
           readonly property bool liveNow: {
             rail.agentd ? rail.agentd.curToolGen : 0
             return !!(rail.agentd && entry.id && rail.agentd.curToolIdFor(rail.selectedRaw) === entry.id)
           }
-          text: entry.text + (cmdCol.isFailed ? "  — failed" : "")
+          text: ((entry.tool === "read" || entry.tool === "read_file") && rail.toolFiles(entry).length
+            ? "read " + rail.toolFiles(entry)[0].split("/").pop()
+            : (entry.tool === "bash" || entry.tool === "shell" ? String(entry.command || entry.text || "").split("\n")[0].replace(/^\s*bash\s+/, "") : entry.text)) + (cmdCol.isFailed ? "  — failed" : "")
                 + (liveNow ? "  · " + rail.runningToolLabel(rail.selectedRaw).split("· ").pop() : "")
           color: cmdCol.isErr ? Theme.red : (cmdCol.isFailed ? Theme.red : Theme.fg_secondary)
-          font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
+          font.family: Theme.fontFamily
+          font.pixelSize: rail.fsMeta - 1
           wrapMode: cmdCol.isErr ? Text.WordWrap : Text.NoWrap
           elide: cmdCol.isErr ? Text.ElideNone : Text.ElideRight
           maximumLineCount: cmdCol.isErr ? 9999 : 1
-          lineHeight: 1.3
+          lineHeight: cmdCol.isErr ? 1.3 : 1
           Layout.fillWidth: true
         }
         Icon {
@@ -4952,24 +5067,212 @@ Item {
           width: 11; height: 11; color: Theme.fg_muted
           Layout.alignment: Qt.AlignVCenter
         }
-        TapHandler { enabled: cmdCol.canExpand && typeof gkey !== "undefined"; onTapped: rail.toggleGroupKey(gkey) }
+        TapHandler { enabled: cmdCol.canExpand; onTapped: rail.toggleGroupKey(gkey) }
+        HoverHandler { enabled: cmdCol.canExpand; cursorShape: Qt.PointingHandCursor }
       }
-      // The full command, monospace on its own ground — selectable-by-eye, wraps.
-      Rectangle {
-        visible: cmdCol.open
+      Loader {
         width: cmdCol.width
-        implicitHeight: cmdFull.implicitHeight + 16
-        radius: 8
-        color: Theme.bgDim
-        Text {
-          id: cmdFull
-          anchors { left: parent.left; right: parent.right; top: parent.top; margins: 8 }
-          text: String(entry.command || "")
-          color: Theme.fg_secondary
-          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-          wrapMode: Text.WrapAnywhere; lineHeight: 1.35
+        active: !!(entry.command || entry.result || entry.argumentsText || entry.detailsText) && entry.tool !== "queue"
+        visible: active
+        property var entry: cmdCol.parent.entry
+        property bool grouped: false
+        property string gkey: cmdCol.parent.gkey
+        property bool expanded: cmdCol.open
+        sourceComponent: toolResultRow
+      }
+    }
+  }
+  Component {
+    id: editGroup
+    Rectangle {
+      id: writeCard
+      width: parent ? parent.width : 400
+      implicitHeight: writeCardCol.implicitHeight
+      radius: 10
+      color: Qt.rgba((Theme.canvas.r + rail.userCardBottom.r) / 2,
+                     (Theme.canvas.g + rail.userCardBottom.g) / 2,
+                     (Theme.canvas.b + rail.userCardBottom.b) / 2, 1)
+      border.width: 1; border.color: Theme.hairline
+      readonly property var files: parent.entry.files
+      Column {
+        id: writeCardCol
+        width: parent.width
+        Item {
+          width: parent.width; implicitHeight: writeTitle.implicitHeight + 24
+          RowLayout {
+            id: writeHeading
+            anchors.fill: parent; anchors.margins: 12
+            spacing: 8
+            Icon {
+              name: "square-plus"; width: 16; height: 16; color: Theme.fg_muted
+              Layout.minimumWidth: 16; Layout.maximumWidth: 16
+              Layout.minimumHeight: 16; Layout.maximumHeight: 16
+            }
+            Text {
+              id: writeTitle
+              text: (writeCard.files.some(file => file.partial) ? "Editing " : writeCard.files.some(file => file.failed) ? "File changes · " : "Edited ") + writeCard.files.length + " files"
+              color: Theme.fg_secondary; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+              elide: Text.ElideRight; Layout.maximumWidth: Math.max(0, writeHeading.width - writeDiff.implicitWidth - 48)
+            }
+            Row {
+              id: writeDiff
+              spacing: 6
+              Text { text: "+" + writeCard.files.reduce((total,file) => total + file.add,0); color: Theme.green; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+              Text { text: "-" + writeCard.files.reduce((total,file) => total + file.del,0); color: Theme.red; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+            }
+            Item { Layout.fillWidth: true }
+          }
         }
-        TapHandler { onTapped: rail.copyText(String(entry.command || "")) }
+        Repeater {
+          model: writeCard.files
+          Column {
+            width: writeCardCol.width
+            Rectangle { width: parent.width; height: 1; color: Theme.hairline }
+            Loader {
+              width: parent.width
+              property bool grouped: true
+              property var entry: modelData
+              property string gkey: rail.toolKey(writeCard.parent.gkey, entry, index)
+              property bool expanded: rail.expandedGroups[gkey] === true
+              property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === writeCard.parent.cardKey
+                && rail.activityFileRefs({kind:"turn",items:writeCard.parent.items})[rail.fileChoiceCur] === entry.path
+              property color textColor: writeCard.parent.textColor
+              property color mutedColor: writeCard.parent.mutedColor
+              sourceComponent: editActivityRow
+            }
+          }
+        }
+      }
+    }
+  }
+  Component {
+    id: editActivityRow
+    Column {
+      id: editCol
+      width: parent ? parent.width : 400
+      spacing: 6
+      Loader {
+        width: parent.width
+        property var entry: editCol.parent.entry
+        property bool grouped: editCol.parent.grouped
+        property bool fileSelected: editCol.parent.fileSelected
+        property color textColor: editCol.parent.textColor
+        property color mutedColor: editCol.parent.mutedColor
+        sourceComponent: editRow
+      }
+      Loader {
+        x: editCol.parent.grouped ? 12 : 0
+        width: parent.width - 2 * x
+        property var entry: editCol.parent.entry
+        property bool grouped: editCol.parent.grouped
+        property string gkey: editCol.parent.gkey
+        property bool expanded: editCol.parent.expanded
+        active: !!(entry.result || entry.argumentsText || entry.detailsText)
+        visible: active
+        sourceComponent: toolResultRow
+      }
+      Item {
+        width: 1; height: 6
+        visible: editCol.parent.grouped && (editCol.parent.entry.failed || editCol.parent.expanded)
+      }
+    }
+  }
+  Component {
+    id: toolResultRow
+    Column {
+      id: resultCol
+      width: parent ? parent.width : 400
+      spacing: 6
+      readonly property bool showOutput: !rail.sourceTool(entry) || entry.failed
+      readonly property bool grouped: parent.grouped
+      Flow {
+        x: resultCol.grouped ? 0 : 12; width: parent.width - 2 * x
+        spacing: 8
+        visible: expanded && entry.tool !== "read" && entry.tool !== "read_file"
+        ButtonSurface {
+          primary: false; radius: 6
+          visible: resultCol.showOutput && !!entry.result
+          width: detailRow.implicitWidth + 16; height: 26
+          Row {
+            id: detailRow; anchors.centerIn: parent; spacing: 5
+            Icon { name: expanded ? "chevron-down" : "chevron-right"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: expanded ? "Hide details" : "Show details"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
+          }
+          TapHandler { onTapped: rail.toggleGroupKey(gkey) }
+        }
+        ButtonSurface {
+          primary: false; radius: 6
+          visible: !!entry.result
+          width: copyRow.implicitWidth + 16; height: 26
+          Row {
+            id: copyRow; anchors.centerIn: parent; spacing: 5
+            Icon { name: "clipboard"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "Copy output"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
+          }
+          TapHandler { onTapped: rail.copyText(rail.plainToolText(entry.result)) }
+        }
+        ButtonSurface {
+          primary: false; radius: 6
+          visible: !!entry.command
+          width: commandRow.implicitWidth + 16; height: 26
+          Row {
+            id: commandRow; anchors.centerIn: parent; spacing: 5
+            Icon { name: "clipboard"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "Copy command"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
+          }
+          TapHandler { onTapped: rail.copyText(String(entry.command)) }
+        }
+        Row {
+          visible: entry.partial === true; height: 26; spacing: 5
+          Icon { name: "clock"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+          Text { text: "Streaming"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1; anchors.verticalCenter: parent.verticalCenter }
+        }
+      }
+      Rectangle {
+        objectName: "tool-code-panel:" + (entry.id || entry.tool)
+        width: parent.width; implicitHeight: preview.implicitHeight + 32
+        visible: entry.failed === true && !expanded && !!entry.result
+        radius: 8; color: rail.codePanelColor
+        border.width: 1; border.color: rail.codePanelBorder
+        Text {
+          id: preview
+          objectName: "tool-preview:" + (entry.id || entry.tool)
+          anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: resultCol.grouped ? 24 : 36; rightMargin: 24; topMargin: 16 }
+          text: rail.errorText(entry)
+          textFormat: Text.PlainText
+          maximumLineCount: 5; elide: Text.ElideRight; wrapMode: Text.WordWrap
+          color: Theme.red
+          font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+        }
+      }
+      Repeater {
+        model: {
+          if (!expanded || !resultCol.showOutput || !entry.result) return []
+          var fields = [{label:"Output",value:entry.failed ? rail.errorText(entry) : rail.plainToolText(entry.result)}]
+          var details = entry.failed ? rail.errorDetails(entry) : ""
+          if (details) fields.push({label:"Details",value:details})
+          return fields
+        }
+        Column {
+          width: resultCol.width
+          spacing: 4
+          Text { x: resultCol.grouped ? 24 : 36; text: modelData.label; color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+          Rectangle {
+            width: parent.width; implicitHeight: outputText.implicitHeight + 32
+            radius: 8; color: rail.codePanelColor
+            border.width: 1; border.color: rail.codePanelBorder
+            TextEdit {
+              id: outputText
+              objectName: "tool-" + modelData.label.toLowerCase() + ":" + (entry.id || entry.tool)
+              anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: resultCol.grouped ? 24 : 36; rightMargin: 24; topMargin: 16 }
+              height: implicitHeight
+              readOnly: true; selectByMouse: true; activeFocusOnPress: false
+              text: modelData.value; textFormat: TextEdit.PlainText; wrapMode: TextEdit.WordWrap
+              color: entry.failed ? Theme.red : Theme.fg
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+            }
+          }
+        }
       }
     }
   }
@@ -4980,7 +5283,7 @@ Item {
       // A small dim dot — a reasoning sub-bullet, distinct from the agent's sparkle avatar.
       // Slot is one line tall and top-aligned, so the dot centres on the first line.
       Item {
-        Layout.preferredWidth: 13
+        Layout.preferredWidth: 16
         Layout.preferredHeight: Math.round(rail.fsBody * 1.3)
         Layout.alignment: Qt.AlignTop
         Rectangle { width: 4; height: 4; radius: 2; color: mutedColor; anchors.centerIn: parent }
@@ -4993,7 +5296,7 @@ Item {
         elide: (typeof expanded !== "undefined" && expanded) ? Text.ElideNone : Text.ElideRight
         maximumLineCount: (typeof expanded !== "undefined" && expanded) ? 9999 : 1
       }
-      TapHandler { enabled: typeof gkey !== "undefined"; onTapped: rail.toggleGroupKey(gkey) }
+      TapHandler { enabled: typeof gkey !== "undefined"; onTapped: rail.toggleGroupKey(gkey, rail.claudeThought(entry)) }
     }
   }
   Component {
@@ -5001,7 +5304,7 @@ Item {
     Column {
       id: attachmentLines
       width: parent ? parent.width : 400
-      spacing: 2
+      spacing: 0
       readonly property var lines: rail.inlineAttachmentLines(sourceText)
       readonly property color contentColor: parent.bodyColor
       Repeater {
@@ -5010,7 +5313,7 @@ Item {
           id: attachmentLine
           readonly property var tokens: modelData
           width: attachmentLines.width
-          height: Math.max(24, childrenRect.height)
+          height: Math.max(rail.bodyLeading, childrenRect.height)
           Repeater {
             model: attachmentLine.tokens
             Loader {
@@ -5023,6 +5326,23 @@ Item {
           }
         }
       }
+    }
+  }
+  Rectangle {
+    objectName: "sessionUsageTooltip"
+    visible: modelHover.hovered && rail.sessionUsage.length > 0
+    x: 20; y: chin.y - height - 8; z: 200
+    width: Math.min(rail.width - 40, 620)
+    height: usageLabel.implicitHeight + 24
+    radius: 10; color: Theme.surface0
+    border.width: 1; border.color: Theme.hairline
+    Text {
+      id: usageLabel
+      anchors { left: parent.left; right: parent.right; top: parent.top; margins: 12 }
+      text: rail.sessionUsage
+      textFormat: Text.PlainText; wrapMode: Text.Wrap
+      color: Theme.fg_secondary
+      font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
     }
   }
   component MessageHintCap: Item {
@@ -5058,7 +5378,7 @@ Item {
       text: parent.text.toUpperCase()
       color: Theme.mode === "light" ? "#242424" : "#FAFAFA"
       font.family: Theme.fontFamily
-      font.pixelSize: 11
+      font.pixelSize: rail.fsMeta - 3
       font.weight: 600
     }
   }
@@ -5066,13 +5386,13 @@ Item {
     id: inlineAttachmentText
     Item {
       width: attachmentWord.implicitWidth
-      height: 24
+      height: rail.bodyLeading
       Text {
         id: attachmentWord
         anchors.verticalCenter: parent.verticalCenter
         text: token.text
         color: contentColor
-        font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
+        font.family: rail.messageFontFamily; font.pixelSize: rail.fsBody; font.weight: rail.messageBodyWeight
       }
     }
   }
@@ -5080,7 +5400,7 @@ Item {
     id: inlineCodeText
     Item {
       width: codeWord.implicitWidth + (token.trailing ? 7 : 0)
-      height: 24
+      height: rail.bodyLeading
       Text {
         id: codeWord
         anchors.verticalCenter: parent.verticalCenter
@@ -5094,38 +5414,21 @@ Item {
     id: inlineAttachmentChip
     Item {
       width: imagePill.width + (token.trailing ? 7 : 0)
-      height: 26
-      Rectangle {
+      height: rail.bodyLeading
+      ButtonSurface {
         id: imagePill
+        inverted: Theme.mode === "dark"
         width: imagePillRow.implicitWidth + 16
-        height: 26
+        height: rail.bodyLeading
         radius: height / 2
-        border.width: 1
-        border.color: Theme.mode === "light" ? "#D8D8D5" : "#2B2B2B"
-        gradient: Gradient {
-          orientation: Gradient.Vertical
-          GradientStop { position: 0; color: Theme.mode === "light" ? "#FFFFFF" : "#3B3B3B" }
-          GradientStop { position: 1; color: Theme.mode === "light" ? "#D5D3CF" : "#202020" }
-        }
-        Rectangle {
-          anchors.fill: parent
-          anchors.margins: 2
-          radius: Math.max(0, parent.radius - 2)
-          gradient: Gradient {
-            orientation: Gradient.Vertical
-            GradientStop { position: 0; color: Theme.mode === "light" ? "#FBFAF8" : "#1A1A1A" }
-            GradientStop { position: 0.28; color: Theme.mode === "light" ? "#FAF9F7" : "#0E0E0E" }
-            GradientStop { position: 1; color: Theme.mode === "light" ? "#F3F1ED" : "#060606" }
-          }
-        }
         Row {
           id: imagePillRow
           anchors.centerIn: parent
           spacing: 6
-          Icon { name: "image"; width: 12; height: 12; color: rail.mintAccent; anchors.verticalCenter: parent.verticalCenter }
+          Icon { name: "image"; width: 12; height: 12; color: imagePill.inverted ? "#3F8C69" : "#86D7B0"; anchors.verticalCenter: parent.verticalCenter }
           Text {
             text: token.label
-            color: Theme.mode === "light" ? "#343432" : "#D8D8D8"
+            color: imagePill.contentColor
             font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
             anchors.verticalCenter: parent.verticalCenter
           }
@@ -5137,38 +5440,21 @@ Item {
     id: inlineFileChip
     Item {
       width: filePill.width + (token.trailing ? 7 : 0)
-      height: 26
-      Rectangle {
+      height: rail.bodyLeading
+      ButtonSurface {
         id: filePill
+        inverted: Theme.mode === "dark"
         width: filePillRow.implicitWidth + 16
-        height: 26
+        height: rail.bodyLeading
         radius: height / 2
-        border.width: 1
-        border.color: Qt.rgba(rail.goldAccent.r, rail.goldAccent.g, rail.goldAccent.b, 0.45)
-        gradient: Gradient {
-          orientation: Gradient.Vertical
-          GradientStop { position: 0; color: Theme.mode === "light" ? "#FFFFFF" : "#3B3B3B" }
-          GradientStop { position: 1; color: Theme.mode === "light" ? "#D5D3CF" : "#202020" }
-        }
-        Rectangle {
-          anchors.fill: parent
-          anchors.margins: 2
-          radius: Math.max(0, parent.radius - 2)
-          gradient: Gradient {
-            orientation: Gradient.Vertical
-            GradientStop { position: 0; color: Theme.mode === "light" ? "#FBFAF8" : "#1A1A1A" }
-            GradientStop { position: 0.28; color: Theme.mode === "light" ? "#FAF9F7" : "#0E0E0E" }
-            GradientStop { position: 1; color: Theme.mode === "light" ? "#F3F1ED" : "#060606" }
-          }
-        }
         Row {
           id: filePillRow
           anchors.centerIn: parent
           spacing: 6
-          Icon { name: "file-content"; width: 12; height: 12; color: rail.goldAccent; anchors.verticalCenter: parent.verticalCenter }
+          Icon { name: "file-content"; width: 12; height: 12; color: filePill.inverted ? "#9A6500" : "#F2C572"; anchors.verticalCenter: parent.verticalCenter }
           Text {
             text: token.label
-            color: Theme.mode === "light" ? "#343432" : "#D8D8D8"
+            color: filePill.contentColor
             font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageMetaWeight
             anchors.verticalCenter: parent.verticalCenter
           }
@@ -5181,8 +5467,8 @@ Item {
     Column {
       id: markdownRoot
       width: parent ? parent.width : 400
-      spacing: 10
-      readonly property var blocks: rail.markdownBlocks(sourceText, sourceEntry, sourceOffset)
+      spacing: rail.bodyLeading
+      readonly property var blocks: rail.markdownBlocks(sourceText, sourceEntry, sourceOffset).filter(block => block.kind !== "fence" || block.runnable)
       Repeater {
         model: markdownRoot.blocks
         Loader {
@@ -5211,9 +5497,11 @@ Item {
         activeFocusOnPress: false
         text: rail.colorizeLinks(rail.badgeAttachments(rail.decorateMarkdown(block, rowIndex)))
         color: bodyColor
-        font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
+        font.family: rail.messageFontFamily; font.pixelSize: rail.fsBody; font.weight: rail.messageBodyWeight
         wrapMode: TextEdit.WordWrap
         textFormat: TextEdit.MarkdownText
+        Component.onCompleted: rail.messageBoldFontFamily ? ProseStyle.apply(textDocument, rail.messageBoldFontFamily) : ProseStyle.apply(textDocument)
+        onTextChanged: rail.messageBoldFontFamily ? ProseStyle.apply(textDocument, rail.messageBoldFontFamily) : ProseStyle.apply(textDocument)
         onLinkActivated: (u) => Quickshell.execDetached(["xdg-open", u])
       }
       Repeater {
@@ -5238,9 +5526,9 @@ Item {
       width: parent ? parent.width : 400
       implicitHeight: fenceCol.implicitHeight + 20
       radius: 9
-      color: Theme.bgDim
+      color: rail.codePanelColor
       border.width: 1
-      border.color: block.runnable && agentAuthored ? rail.summaryColor : Theme.hairline
+      border.color: block.runnable && agentAuthored ? rail.summaryColor : rail.codePanelBorder
       readonly property var activeHint: rail.hintForKey(block.key, rowIndex)
       readonly property bool requestsApproval: block.runnable && agentAuthored
       Column {
@@ -5268,13 +5556,6 @@ Item {
             TapHandler { onTapped: if (fence.activeHint) rail.hintKey(fence.activeHint.label) }
           }
         }
-        Text {
-          width: parent.width
-          text: String(block.code || "").replace(/\n$/, "")
-          color: rail.goldAccent
-          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-          wrapMode: Text.WrapAnywhere; lineHeight: 1.35
-        }
       }
       HoverHandler { id: fenceHover; enabled: fence.requestsApproval }
       TapHandler { enabled: fence.requestsApproval; onTapped: rail.requestSnippet(block.code) }
@@ -5285,7 +5566,7 @@ Item {
     Column {
       id: proseCol
       width: parent ? parent.width : 400
-      spacing: 14
+      spacing: rail.bodyLeading
       readonly property var parts: rail.proseParts(entry.text)
       Repeater {
         model: proseCol.parts
@@ -5352,20 +5633,26 @@ Item {
   Component {
     id: editRow
     Rectangle {
-      implicitHeight: 30
+      id: writeRow
+      objectName: "writeFileRow"
+      readonly property bool hovered: writeHover.hovered
+      function openFile() { rail.openFileRef(entry.path) }
+      HoverHandler { id: writeHover; cursorShape: Qt.PointingHandCursor }
+      implicitHeight: rail.fsMeta + (grouped ? 24 : 14)
       radius: 8
       color: fileSelected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08) : "transparent"
       border.width: fileSelected ? 1 : 0
       border.color: Theme.hairline
       RowLayout {
-        anchors.fill: parent; anchors.leftMargin: 8; anchors.rightMargin: 8
+        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
         spacing: 8
-        Icon { name: "paintbrush"; width: 13; height: 13; color: mutedColor; Layout.alignment: Qt.AlignVCenter }
-        Text { text: entry.file; color: textColor; font.family: Theme.fontFamily; font.pixelSize: rail.fsBody; font.bold: true; elide: Text.ElideMiddle; Layout.fillWidth: true }
-        Text { visible: (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
-        Text { visible: (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+        Icon { name: entry.failed ? "triangle-warning" : "file-content"; width: 16; height: 16; color: entry.failed ? Theme.red : mutedColor; Layout.alignment: Qt.AlignVCenter }
+        Text { text: entry.path && entry.path.indexOf(rail.selectedCwd + "/") === 0 ? entry.path.slice(rail.selectedCwd.length + 1) : (entry.path || entry.file); color: textColor; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; elide: Text.ElideMiddle; Layout.fillWidth: true }
+        Text { visible: entry.failed === true; text: "Failed"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+        Text { visible: !entry.failed && (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+        Text { visible: !entry.failed && (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
       }
-      TapHandler { onTapped: rail.openFileRef(entry.path) }
+      TapHandler { onTapped: writeRow.openFile() }
     }
   }
 }

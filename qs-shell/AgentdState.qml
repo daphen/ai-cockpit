@@ -228,6 +228,7 @@ Item {
   // the roster and raise a desktop notification for NON-selected sessions (a
   // blocked background worker read as "working" for as long as nobody looked).
   signal askRaised(string sid, string title)
+  signal askAnswered(string sid)
   function askCount() { var n = 0; for (var k in asks) n++; return n }
   function askFor(sid) { return asks[sid] || null }
   function isUserBashAsk(ask) { return ask && ask.title === "__cockpit_user_bash__" }
@@ -236,16 +237,20 @@ Item {
     try { return JSON.parse(String(ask.message || "")) } catch (e) { return null }
   }
   function answerAsk(sid, payload) {
-    if (!asks[sid] || _answerIntents[sid]) return
+    if (!asks[sid] || _answerIntents[sid]) return false
     var response = Object.assign({}, payload)
-    var intents = _answerIntents
+    var intents = Object.assign({}, _answerIntents)
     intents[sid] = response.discussing ? "discussing" : "answering"
     delete response.discussing
     _answerIntents = intents
     if (!send({ type: "answer", session: sid, response: response })) {
+      intents = Object.assign({}, _answerIntents)
       delete intents[sid]
       _answerIntents = intents
+      _setTransient(sid, "answer-failed", "error", "Reply not sent — disconnected. Try again.", 60000)
+      return false
     }
+    return true
   }
 
   // Per-session changed-files (from the daemon's `changes` diff broadcast).
@@ -293,9 +298,38 @@ Item {
   // queue until the next tool boundary, so it is absent from get_entries for seconds to
   // minutes — and the rebuild wiped the optimistic row, making mid-turn sends silently
   // vanish and then "all show up at once" when pi finally consumed them.
-  property var _localEcho: ({})   // sid -> [{text, at}, …] not yet seen in the transcript
-  function _echoTrack(sid, text) {
-    var m = _localEcho; (m[sid] = m[sid] || []).push({ text: text, at: Date.now() }); _localEcho = m
+  property var _localEcho: ({})   // sid -> [{text}, …] not yet seen in the transcript
+  property int _sendSerial: 0
+  function _sendId() { return "cockpit-send:" + Date.now() + ":" + (++_sendSerial) }
+  function _echoTrack(sid, text, id, delivery, steered) {
+    var m = Object.assign({}, _localEcho)
+    m[sid] = (m[sid] || []).concat([{ text: text, id: id, delivery: delivery, steered: steered === true }])
+    _localEcho = m
+    _push(sid, { kind: "user", text: text, deliveryId: id, delivery: delivery, steered: steered === true })
+  }
+  function localDeliveryFor(sid, id) {
+    var entry = (_localEcho[sid] || []).find(item => item.id === id)
+    return entry ? entry.delivery : ""
+  }
+  function dismissLocalEcho(sid, id) {
+    var echoes = Object.assign({}, _localEcho)
+    echoes[sid] = (echoes[sid] || []).filter(entry => entry.id !== id)
+    _localEcho = echoes
+    feeds[sid] = (feeds[sid] || []).filter(entry => entry.deliveryId !== id)
+    feedGen++
+  }
+  function resendLocalEcho(sid, id) {
+    var entry = (_localEcho[sid] || []).find(item => item.id === id && item.delivery === "failed")
+    if (!entry) return
+    dismissLocalEcho(sid, id)
+    submit(sid, entry.text)
+  }
+  function _echoDelivery(sid, id, delivery) {
+    var echoes = Object.assign({}, _localEcho)
+    echoes[sid] = (echoes[sid] || []).map(entry => entry.id === id ? Object.assign({}, entry, { delivery: delivery }) : entry)
+    _localEcho = echoes
+    feeds[sid] = (feeds[sid] || []).map(entry => entry.deliveryId === id ? Object.assign({}, entry, { delivery: delivery }) : entry)
+    feedGen++
   }
   function _settleEcho(sid, text) {
     var list = _localEcho[sid] || []
@@ -324,9 +358,11 @@ Item {
     // the 60s cap.
     var nmk = _marks; delete nmk[sid]; _marks = nmk
     // agentd/pi expect `message`, not `text`.
-    if (!send({ type: "prompt", session: sid, message: text })) { _undelivered(sid, text); return }
-    _push(sid, { kind: "user", text: text })   // optimistic echo; get_entries refreshes it
-    _echoTrack(sid, text)
+    var id = _sendId()
+    if (!send({ type: "prompt", session: sid, message: text, id: id })) {
+      _echoTrack(sid, text, id, "failed", false); _undelivered(sid, text); return
+    }
+    _echoTrack(sid, text, id, "pending", false)
     var p = Object.assign({}, pendingSends); p[sid] = true; pendingSends = p; pendingGen++
   }
   // Mid-turn redirect. pi's steer is BEST-EFFORT: if the turn ends within a moment of
@@ -338,12 +374,14 @@ Item {
   function steer(sid, text) {
     if (_taskCommand(sid, text)) return
     if (isInterrupting(sid)) { enqueue(sid, text); return }
-    if (!send({ type: "steer", session: sid, message: text })) { _undelivered(sid, text); return }
-    _push(sid, { kind: "user", text: text, steered: true })
-    _echoTrack(sid, text)
+    var id = _sendId()
+    if (!send({ type: "steer", session: sid, message: text, id: id })) {
+      _echoTrack(sid, text, id, "failed", true); _undelivered(sid, text); return
+    }
+    _echoTrack(sid, text, id, "pending", true)
     var pending = _steerPending
     var list = pending[sid] || []
-    list.push({ text: text, at: Date.now() })
+    list.push({ text: text, id: id, at: Date.now() })
     pending[sid] = list
     _steerPending = pending
   }
@@ -480,6 +518,103 @@ Item {
   function _base(p)  { var s = String(p); var i = s.lastIndexOf("/"); return i >= 0 ? s.slice(i + 1) : s }
   function _rel(p)   { var s = String(p || ""); return s.replace(/^\/home\/daphen\//, "~/") }
   function _clip(s)  { s = String(s || "").replace(/\s+/g, " "); return s.length > 72 ? s.slice(0, 69) + "…" : s }
+  function _safeJson(value) {
+    if (value === undefined) return ""
+    try {
+      return JSON.stringify(value, function(key, item) {
+        if (key === "data" && this && this.type === "image") return "[base64 omitted]"
+        return item
+      })
+    } catch (e) { return String(value) }
+  }
+  function _contentText(content) {
+    if (content === undefined || content === null) return ""
+    if (!Array.isArray(content)) return typeof content === "string" ? content : _safeJson(content)
+    var out = []
+    for (var i = 0; i < content.length; i++) {
+      var block = content[i]
+      if (block && block.type === "text") out.push(String(block.text || ""))
+      else if (block && block.type === "image") {
+        var meta = {}
+        for (var key in block) if (key !== "data" && key !== "type") meta[key] = block[key]
+        out.push("[image" + (meta.mimeType ? " " + meta.mimeType : "") + "; base64 omitted"
+                 + (Object.keys(meta).length > (meta.mimeType ? 1 : 0) ? "; " + _safeJson(meta) : "") + "]")
+      } else out.push(_safeJson(block))
+    }
+    return out.filter(function(text) { return text.length > 0 }).join("\n")
+  }
+  function _resultFields(result, partial) {
+    var value = result
+    if (value === undefined || value === null) return { result: "", detailsText: "", partial: partial === true }
+    return {
+      result: value.content !== undefined ? _contentText(value.content)
+              : (value.output !== undefined ? String(value.output) : _contentText(value)),
+      detailsText: value.details !== undefined ? _safeJson(value.details) : "",
+      partial: partial === true
+    }
+  }
+  function _numberText(value) {
+    var text = String(Math.round(Number(value) || 0)), out = ""
+    while (text.length > 3) { out = "," + text.slice(-3) + out; text = text.slice(0, -3) }
+    return text + out
+  }
+  function _usageItem(data) {
+    data = data || {}
+    var tokens = data.tokens || {}, lines = [], parts = []
+    if (tokens.total !== undefined && tokens.total !== null) parts.push(_numberText(tokens.total) + " tokens")
+    if (data.cost !== undefined && data.cost !== null) parts.push("$" + Number(data.cost).toFixed(4))
+    var context = data.contextUsage
+    if (context && context.tokens !== undefined && context.tokens !== null) {
+      var contextText = "context " + _numberText(context.tokens)
+      if (context.contextWindow !== undefined && context.contextWindow !== null)
+        contextText += " / " + _numberText(context.contextWindow)
+      if (context.percent !== undefined && context.percent !== null)
+        contextText += " (" + Number(context.percent).toFixed(1).replace(/\.0$/, "") + "%)"
+      parts.push(contextText)
+    }
+    if (parts.length) lines.push(parts.join(" · "))
+    var breakdown = []
+    if (tokens.input !== undefined && tokens.input !== null) breakdown.push("input " + _numberText(tokens.input))
+    if (tokens.output !== undefined && tokens.output !== null) breakdown.push("output " + _numberText(tokens.output))
+    if (tokens.cacheRead !== undefined && tokens.cacheRead !== null) breakdown.push("cache read " + _numberText(tokens.cacheRead))
+    if (tokens.cacheWrite !== undefined && tokens.cacheWrite !== null) breakdown.push("cache write " + _numberText(tokens.cacheWrite))
+    if (breakdown.length) lines.push(breakdown.join(" · "))
+    if (!lines.length) return null
+    return { kind: "sys", tool: "usage", text: lines.join("\n"), detailsText: _safeJson(data) }
+  }
+  function _findToolItem(sid, id) {
+    var rows = feeds[sid] || []
+    for (var i = rows.length - 1; i >= 0; i--) {
+      var children = rows[i].items || rows[i].cmds || [rows[i]]
+      for (var j = children.length - 1; j >= 0; j--)
+        if (children[j].id === id) return children[j]
+    }
+    return null
+  }
+  function _toolItemInRows(rows, id) {
+    if (!id) return null
+    for (var i = 0; i < rows.length; i++) {
+      var children = rows[i].items || rows[i].cmds || [rows[i]]
+      for (var j = 0; j < children.length; j++) if (children[j].id === id) return children[j]
+    }
+    return null
+  }
+  function _setFeedValue(sid, key, item) {
+    var rows = feeds[sid] || [], found = -1
+    for (var i = rows.length - 1; i >= 0; i--)
+      if (rows[i].feedKey === key) { found = i; break }
+    if (!item) {
+      if (found >= 0) { rows.splice(found, 1); feeds[sid] = rows; feedGen++ }
+      return
+    }
+    item.feedKey = key
+    item.liveDirective = true
+    if (found >= 0) rows[found] = item
+    else rows.push(item)
+    if (rows.length > feedCap) rows = rows.slice(rows.length - feedCap)
+    feeds[sid] = rows
+    feedGen++
+  }
 
   // Mirror of the nvim rail's tool_hint: name + the bit that matters. MCP calls
   // become "mcp <server> <tool>" / "mcp <server> search:<x>" — not "bash mcp".
@@ -576,11 +711,30 @@ Item {
     _push(sid, item)
     return item
   }
+  function _liveThink(sid, contentIndex, model) {
+    var items = feeds[sid] || []
+    for (var i = items.length - 1; i >= 0; i--)
+      if (items[i].liveThink && items[i].contentIndex === contentIndex) {
+        if (model) items[i].model = String(model)
+        return items[i]
+      }
+    var item = { kind: "think", text: "thinking", full: "", liveThink: true,
+                 model: String(model || ""), contentIndex: contentIndex, mid: "think:" + Date.now() + ":" + contentIndex }
+    _push(sid, item)
+    return item
+  }
+  function _finishLiveThink(sid) {
+    var items = feeds[sid] || [], changed = false
+    for (var i = 0; i < items.length; i++)
+      if (items[i].liveThink) { items[i].liveThink = false; changed = true }
+    if (changed) feedGen++
+  }
 
   // Selecting a session: pull its transcript AND its current changed files.
   function select(sid) {
     if (!sid || !String(sid).length) return
     send({ type: "get_entries", session: sid })
+    send({ type: "get_session_stats", session: sid })
     refreshChanges(sid)
   }
 
@@ -616,6 +770,7 @@ Item {
       } else if (b.type === "toolCall" || b.type === "tool_use") {
         var name = b.name || b.tool || "tool"
         var a = b.arguments || b.input || b.args || {}
+        var resultInfo = toolResults[b.id] || { result: "", detailsText: "" }
         if (name === "edit" || name === "write" || name === "create" || name === "str_replace") {
           var p = a.path || a.file_path || a.filePath || ""
           var add = 0, del = 0
@@ -632,12 +787,15 @@ Item {
             if (a.old_string) del += String(a.old_string).split("\n").length
           }
           items.push({ kind: "edit", tool: name, file: _base(p), path: p, add: add, del: del,
-                       id: b.id, failed: toolErrs[b.id] === true, needle: _editNeedle(name, a) })
+                       id: b.id, failed: toolErrs[b.id] === true, needle: _editNeedle(name, a),
+                       argumentsText: _safeJson(a), result: resultInfo.result,
+                       detailsText: resultInfo.detailsText, partial: false })
         } else if (name === "request_user_bash") {
-          var ub = toolResults[b.id] || ""
-          items.push({ kind: "userbash", tool: name, command: String(a.command || ""),
+          var ub = resultInfo.result
+          items.push({ kind: "userbash", tool: name, id: b.id, command: String(a.command || ""),
                        reason: String(a.reason || ""), result: ub, text: ub,
-                       failed: toolErrs[b.id] === true })
+                       argumentsText: _safeJson(a), detailsText: resultInfo.detailsText,
+                       partial: false, failed: toolErrs[b.id] === true })
         } else if (name === "ask_user") {
           // The QUESTION AND ANSWER live here in the transcript (the answer is the
           // tool call's result) — render them as a persistent row, or the answered
@@ -648,13 +806,16 @@ Item {
           if (a.title === "__cockpit_user_bash__") {
             try { q = "! " + String(JSON.parse(String(a.message || "")).command || "") } catch (e) {}
           }
-          var ans = _askAnswerText(b.result)
-          items.push({ kind: "cmd", tool: "ask",
+          var ans = _askAnswerText(resultInfo.result)
+          items.push({ kind: "cmd", tool: "ask", id: b.id,
                        text: ans ? ("❯ " + q + "  ↳ " + _clip(ans)) : ("❯ " + q),
-                       command: ans.length > 72 ? ans : "" })
+                       command: ans.length > 72 ? ans : "", argumentsText: _safeJson(a),
+                       result: resultInfo.result, detailsText: resultInfo.detailsText,
+                       partial: false, failed: toolErrs[b.id] === true })
         } else {
           items.push({ kind: "cmd", tool: name, text: toolHint(name, a), id: b.id,
-                       failed: toolErrs[b.id] === true,
+                       failed: toolErrs[b.id] === true, argumentsText: _safeJson(a),
+                       result: resultInfo.result, detailsText: resultInfo.detailsText, partial: false,
                        command: (name === "bash" || name === "shell") ? (a.command || a.cmd || "") : "" })
         }
       }
@@ -680,6 +841,19 @@ Item {
       } else if (msg.role === "userBashApproval") {
         items.push({ kind: "cmd", tool: "ask",
                      text: "❯ ! " + String(msg.command || "") + "  ↳ approved" })
+      } else if (msg.role === "bashExecution") {
+        items.push({ kind: "cmd", tool: "bash", text: toolHint("bash", {command: msg.command || ""}),
+                     command: String(msg.command || ""), argumentsText: _safeJson({command: msg.command || ""}),
+                     result: String(msg.output || ""), detailsText: _safeJson({exitCode: msg.exitCode,
+                       cancelled: msg.cancelled === true, truncated: msg.truncated === true,
+                       fullOutputPath: msg.fullOutputPath || "", excludeFromContext: msg.excludeFromContext === true}),
+                     partial: false, failed: msg.cancelled === true || (msg.exitCode !== undefined && msg.exitCode !== 0) })
+      } else if (msg.role === "custom") {
+        if (msg.display !== false && msg.displayToUser !== false) {
+          var customText = _contentText(msg.content)
+          if (customText) items.push({ kind: "sys", tool: "info", text: customText,
+                                       detailsText: msg.details !== undefined ? _safeJson(msg.details) : "" })
+        }
       } else if (msg.role === "user") {
         var uc = msg.content || [], ut = ""
         for (var k = 0; k < uc.length; k++) if (uc[k].type === "text" && uc[k].text) ut += (ut ? "\n" : "") + uc[k].text
@@ -782,10 +956,10 @@ Item {
       if (e.type === "message" && e.message && e.message.role === "toolResult") {
         if (e.message.toolCallId) {
           if (e.message.isError) toolErrs[e.message.toolCallId] = true
-          var rt = "", rc = e.message.content || []
-          for (var ri = 0; ri < rc.length; ri++)
-            if (rc[ri].type === "text" && rc[ri].text) rt += (rt ? "\n" : "") + rc[ri].text
-          toolResults[e.message.toolCallId] = rt
+          toolResults[e.message.toolCallId] = {
+            result: _contentText(e.message.content),
+            detailsText: e.message.details !== undefined ? _safeJson(e.message.details) : ""
+          }
         }
         continue
       }
@@ -805,7 +979,13 @@ Item {
         msgs.push({ role: "userBashApproval", command: e.data.command || "", _mid: e.id })
         continue
       }
-      if (e.type === "message" && e.message && (e.message.role === "user" || e.message.role === "assistant")) {
+      if (e.type === "custom_message" && e.display !== false && e.displayToUser !== false) {
+        msgs.push({ role: "custom", customType: e.customType, content: e.content,
+                    details: e.details, display: true, _mid: e.id })
+        continue
+      }
+      if (e.type === "message" && e.message && (e.message.role === "user" || e.message.role === "assistant"
+          || e.message.role === "custom" || e.message.role === "bashExecution")) {
         // Stamp the entry id onto the message: feed rows need an identity that survives
         // the CHAT_CAP window sliding, or every row's INDEX shifts by one per new message
         // and anything keyed on it (the cursor, expanded groups) lands on a neighbour.
@@ -832,7 +1012,7 @@ Item {
         while (j < items.length && items[j].kind === "cmd" && items[j].tool === it.tool) j++
         if (j - i >= 3) {
           var cmds = []
-          for (var k = i; k < j; k++) cmds.push({ text: items[k].text, command: items[k].command || "" })
+          for (var k = i; k < j; k++) cmds.push(items[k])
           out.push({ kind: "group", tool: it.tool, cmds: cmds, mid: it.mid, model: it.model || "" })
           i = j
           continue
@@ -895,6 +1075,15 @@ Item {
       }
       return
     }
+    if (t === "response" && (m.command === "prompt" || m.command === "steer") && String(m.id || "").indexOf("cockpit-send:") === 0) {
+      _echoDelivery(m.session, m.id, m.success ? "accepted" : "failed")
+      if (!m.success) {
+        _clearPending(m.session)
+        _steerPending[m.session] = (_steerPending[m.session] || []).filter(entry => entry.id !== m.id)
+        _push(m.session, { kind: "cmd", tool: "error", text: "not delivered — " + String(m.error || "Pi rejected the message") })
+      }
+      return
+    }
     if (t === "response" && m.command === "prompt" && String(m.id || "").indexOf("cockpit-task:") === 0) {
       if (m.session === selectedSession && m.success) refreshEntries(m.session)
       if (!m.success) _push(m.session, { kind: "cmd", tool: "error", text: "task change failed: " + String(m.error || "unknown error") })
@@ -902,6 +1091,10 @@ Item {
     }
     if (t === "response" && m.command === "get_entries") {
       if (m.session === selectedSession) onEntries(m)
+      return
+    }
+    if (t === "response" && m.command === "get_session_stats" && m.success === true && m.session) {
+      _setFeedValue(m.session, "session-usage", _usageItem(m.data))
       return
     }
     if (t === "response" && m.command === "set_model" && m.session) {
@@ -919,6 +1112,18 @@ Item {
     if (sid === selectedSession) {
       if (t === "message_start" && m.message && m.message.role === "assistant") {
         _finishLiveText(sid)
+        _finishLiveThink(sid)
+      } else if (t === "message_start" && m.message && m.message.role === "custom"
+                 && m.message.display !== false && m.message.displayToUser !== false) {
+        var shown = _contentText(m.message.content)
+        if (shown) _push(sid, { kind: "sys", tool: "info", text: shown,
+                                detailsText: m.message.details !== undefined ? _safeJson(m.message.details) : "" })
+      } else if (t === "message_start" && m.message && m.message.role === "bashExecution") {
+        _push(sid, { kind: "cmd", tool: "bash", text: toolHint("bash", {command:m.message.command || ""}),
+                     command: String(m.message.command || ""), argumentsText: _safeJson({command:m.message.command || ""}),
+                     result: String(m.message.output || ""), detailsText: _safeJson({exitCode:m.message.exitCode,
+                       cancelled:m.message.cancelled === true, truncated:m.message.truncated === true}),
+                     partial: false, failed: m.message.cancelled === true || (m.message.exitCode !== undefined && m.message.exitCode !== 0) })
       } else if (t === "message_update" && m.assistantMessageEvent) {
         var delta = m.assistantMessageEvent
         if (delta.type === "text_start") {
@@ -927,13 +1132,32 @@ Item {
         } else if (delta.type === "text_delta") {
           _liveText(sid).text += String(delta.delta || "")
           feedGen++
+        } else if (delta.type === "thinking_start") {
+          _liveThink(sid, Number(delta.contentIndex) || 0, m.message && m.message.model)
+        } else if (delta.type === "thinking_delta") {
+          var thought = _liveThink(sid, Number(delta.contentIndex) || 0, m.message && m.message.model)
+          thought.full += String(delta.delta || "")
+          var heading = thought.full.match(/\*\*([\s\S]*?)\*\*/) || thought.full.match(/^\s*([^\n]+)/)
+          thought.text = (heading ? heading[1] : "thinking").replace(/\s+/g, " ").trim().slice(0, 90)
+          feedGen++
         }
       } else if (t === "message_end" && m.message && m.message.role === "assistant") {
         var textItems = []
         _expandAssistant(m.message.content, textItems)
         var prose = textItems.filter(function(item) { return item.kind === "text" }).map(function(item) { return item.text }).join("\n\n")
         if (prose.length) _liveText(sid).text = prose
+        var endedContent = m.message.content || []
+        for (var endedIndex = 0; endedIndex < endedContent.length; endedIndex++) {
+          if (endedContent[endedIndex].type !== "thinking") continue
+          var fullThought = String(endedContent[endedIndex].thinking || endedContent[endedIndex].text || "")
+          if (!fullThought.trim()) continue
+          var liveThought = _liveThink(sid, endedIndex, m.message.model)
+          liveThought.full = fullThought.trim()
+          var thoughtHeading = liveThought.full.match(/\*\*([\s\S]*?)\*\*/) || liveThought.full.match(/^\s*([^\n]+)/)
+          liveThought.text = (thoughtHeading ? thoughtHeading[1] : "thinking").replace(/\s+/g, " ").trim().slice(0, 90)
+        }
         _finishLiveText(sid)
+        _finishLiveThink(sid)
       }
     }
     // Recency: any session-tagged event is activity. Silent (no gen bump) — the
@@ -948,7 +1172,18 @@ Item {
     if (t === "agent_end") root._flushQueue(sid)
     // A daemon bounce (undeliverable prompt, lineage refusal) was invisible — the send
     // echoed optimistically and then nothing. Surface it as a feed row.
-    if (t === "error" && m.error) _push(sid, { kind: "cmd", tool: "error", text: String(m.error) })
+    if (t === "error" && m.error) {
+      var failedIntents = Object.assign({}, _answerIntents)
+      delete failedIntents[sid]; _answerIntents = failedIntents
+      _push(sid, { kind: "cmd", tool: "error", text: String(m.error) })
+      if (String(m.error).indexOf("not delivered:") === 0) {
+        var unconfirmed = (_localEcho[sid] || []).filter(entry => entry.delivery === "pending")
+        if (unconfirmed.length === 1) {
+          _echoDelivery(sid, unconfirmed[0].id, "failed")
+          _steerPending[sid] = (_steerPending[sid] || []).filter(entry => entry.id !== unconfirmed[0].id)
+        }
+      }
+    }
     // Strand fallback: the turn ended too soon after a steer to have consumed it, so
     // pi dropped the message. Re-send it as a fresh prompt (already echoed in the feed).
     if (t === "turn_end" || t === "agent_end") {
@@ -970,7 +1205,6 @@ Item {
         var echoed = (_localEcho[sid] || []).some(entry => entry.text === accepted)
         if (!echoed) {
           _push(sid, { kind: "user", text: accepted, steered: m.steered === true })
-          _echoTrack(sid, accepted)
         } else if (m.steered === true) {
           var acceptedRows = feeds[sid] || []
           for (var ar = acceptedRows.length - 1; ar >= 0; ar--) {
@@ -996,7 +1230,7 @@ Item {
     }
     if (t === "ask_answered") {
       var intent = _answerIntents[sid] || ""
-      var intents = _answerIntents; delete intents[sid]; _answerIntents = intents
+      var intents = Object.assign({}, _answerIntents); delete intents[sid]; _answerIntents = intents
       var label = m.cancelled ? (intent === "discussing" ? "discussing instead" : "cancelled")
                 : (m.confirmed !== undefined ? (m.confirmed ? "approved" : "declined")
                 : (m.value !== undefined ? String(m.value) : ""))
@@ -1017,6 +1251,7 @@ Item {
         _push(sid, { kind: "user", text: echo })
       }
       var answered = asks; delete answered[sid]; asks = answered; askGen++
+      if (intent) askAnswered(sid)
       return
     }
     if (t === "extension_ui_request") {
@@ -1024,12 +1259,39 @@ Item {
       if (mm === "confirm" || mm === "select" || mm === "input" || mm === "editor") {
         var isNew = !asks[sid] || asks[sid].id !== m.id
         if (isNew) {
-          var intents = _answerIntents; delete intents[sid]; _answerIntents = intents
+          var intents = Object.assign({}, _answerIntents); delete intents[sid]; _answerIntents = intents
         }
         var na = asks; na[sid] = m; asks = na; askGen++
         if (isNew) askRaised(sid, String(m.title || m.message || "needs your input"))
       }
-      // notify / setStatus / setWidget etc. are UI directives, not questions.
+      if (mm === "notify") {
+        var notifyTool = m.notifyType === "error" ? "error" : (m.notifyType === "warning" ? "warning" : "info")
+        _setFeedValue(sid, "extension-notify:" + String(m.id || Date.now()),
+          { kind: "sys", tool: notifyTool, text: String(m.message || "") })
+      } else if (mm === "setStatus") {
+        _setFeedValue(sid, "extension-status:" + String(m.statusKey || ""),
+          m.statusText === undefined ? null : { kind: "sys", tool: "status", text: String(m.statusText) })
+      } else if (mm === "setWidget") {
+        var widgetText = Array.isArray(m.widgetLines) ? m.widgetLines.join("\n") : ""
+        _setFeedValue(sid, "extension-widget:" + String(m.widgetKey || ""),
+          m.widgetLines === undefined ? null : { kind: "sys", tool: "widget", text: widgetText,
+            placement: String(m.widgetPlacement || "") })
+      } else if (mm === "setTitle") {
+        _setFeedValue(sid, "extension-title", { kind: "sys", tool: "title", text: String(m.title || "") })
+      }
+      return
+    }
+    if (t === "queue_update") {
+      var steeringQueue = m.steering || [], followUpQueue = m.followUp || []
+      if (!steeringQueue.length && !followUpQueue.length) _setFeedValue(sid, "pi-queue", null)
+      else {
+        var queueLines = []
+        for (var sq = 0; sq < steeringQueue.length; sq++) queueLines.push("steer: " + String(steeringQueue[sq]))
+        for (var fq = 0; fq < followUpQueue.length; fq++) queueLines.push("follow-up: " + String(followUpQueue[fq]))
+        _setFeedValue(sid, "pi-queue", { kind: "cmd", tool: "queue",
+          text: "queued · " + steeringQueue.length + " steer · " + followUpQueue.length + " follow-up",
+          command: queueLines.join("\n\n") })
+      }
       return
     }
     if (t === "changes" || (t === "response" && m.command === "get_changes" && !m.success)) {
@@ -1055,7 +1317,8 @@ Item {
       if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
                      add: (tn === "write" || tn === "create") && args.content ? String(args.content).split("\n").length : 0,
-                     del: 0, id: m.toolCallId, needle: _editNeedle(tn, args) })
+                     del: 0, id: m.toolCallId, needle: _editNeedle(tn, args),
+                     argumentsText: _safeJson(args), result: "", detailsText: "", partial: true, failed: false })
       } else {
         // bash/mcp/grep/read/… → one-line hint; keep the raw payload so the row
         // can EXPAND: bash shows its command, agent_* shows target + full message.
@@ -1067,7 +1330,17 @@ Item {
           raw = "dir: " + (args.dir || "?") + (args.name ? "\nname: " + args.name : "")
               + (args.profile ? "\nprofile: " + args.profile : "") + (args.detached ? "\ndetached: true" : "")
               + (args.prompt ? "\n\nseed prompt:\n" + args.prompt : "")
-        _push(sid, { kind: "cmd", tool: tn, text: toolHint(tn, args), command: raw, id: m.toolCallId })
+        _push(sid, { kind: "cmd", tool: tn, text: toolHint(tn, args), command: raw, id: m.toolCallId,
+                     argumentsText: _safeJson(args), result: "", detailsText: "", partial: true, failed: false })
+      }
+    } else if (t === "tool_execution_update") {
+      var updated = _findToolItem(sid, m.toolCallId)
+      if (updated) {
+        var partialFields = _resultFields(m.partialResult, true)
+        updated.result = partialFields.result
+        updated.detailsText = partialFields.detailsText
+        updated.partial = true
+        feedGen++
       }
     } else if (t === "auto_retry_start") {
       _setTransient(sid, "retry", "info",
@@ -1102,11 +1375,14 @@ Item {
       curToolGen++
       const det = m.result && m.result.details
       const failed = m.isError === true || !!(m.result && m.result.isError)
-      var activity = null, rows = feeds[sid] || []
-      for (var ai = rows.length - 1; ai >= 0 && !activity; ai--) {
-        var items = rows[ai].items || [rows[ai]]
-        for (var aj = items.length - 1; aj >= 0; aj--)
-          if (items[aj].id === m.toolCallId) { activity = items[aj]; break }
+      var activity = _findToolItem(sid, m.toolCallId)
+      var finalFields = _resultFields(m.result, false)
+      if (activity) {
+        activity.result = finalFields.result
+        activity.detailsText = finalFields.detailsText
+        activity.partial = false
+        activity.failed = failed
+        feedGen++
       }
       if (!activity && m.toolName === "edit" && det && det.patch) {
         var patchPath = String(det.patch).match(/^\+\+\+ (.+)$/m)
@@ -1125,26 +1401,15 @@ Item {
         if (added && added.length) location = added[0]
         root.fileActivity(sid, String(activity.path), location, String(activity.needle || ""), added, String(m.toolCallId || ""))
       }
-      // A failed tool run turns its own row red in place (Claude Code grammar).
-      if (failed) {
-        var fa = feeds[sid] || []
-        for (var fj = fa.length - 1; fj >= 0; fj--)
-          if (fa[fj].id === m.toolCallId) { fa[fj].failed = true; break }
-        feeds[sid] = fa; feedGen++
-      }
-      if (det && det.diff) {
+      if (det && det.diff && activity) {
         const ad = _countDiff(det.diff)
-        var arr = feeds[sid] || []
-        for (var i = arr.length - 1; i >= 0; i--) {
-          if (arr[i].id === m.toolCallId) {
-            arr[i].add = ad[0]; arr[i].del = ad[1]
-            break
-          }
-        }
-        feeds[sid] = arr; feedGen++
+        activity.add = ad[0]
+        activity.del = ad[1]
+        feedGen++
       }
     } else if (t === "agent_end" && sid === selectedSession) {
       refreshEntries(sid)
+      send({ type: "get_session_stats", session: sid })
       sessionSettled(sid)
     }
   }
@@ -1156,8 +1421,19 @@ Item {
     if (!esid) return
     var am = _entriesAskedAt; delete am[esid]; _entriesAskedAt = am
     _feedSid = esid
-    var liveText = (feeds[esid] || []).filter(function(item) { return item.liveText })
-    feeds[esid] = _entriesToFeed(m.data.entries, m.data.leafId).concat(liveText)
+    var rebuilt = _entriesToFeed(m.data.entries, m.data.leafId)
+    var liveItems = (feeds[esid] || []).filter(function(item) {
+      if (!(item.liveText || item.liveThink || item.liveDirective || item.partial === true)) return false
+      var rebuiltTool = item.partial === true ? _toolItemInRows(rebuilt, item.id) : null
+      if (!rebuiltTool) return true
+      rebuiltTool.result = item.result
+      rebuiltTool.detailsText = item.detailsText
+      rebuiltTool.partial = true
+      rebuiltTool.failed = item.failed
+      if (!rebuiltTool.command && item.command) rebuiltTool.command = item.command
+      return false
+    })
+    feeds[esid] = rebuilt.concat(liveItems)
     // Answer echoes are a BRIDGE, not history (same contract as the interrupt
     // marks below): pi's transcript renders the answered ask itself once the
     // toolResult lands ("❯ question ↳ answer"), so an echo re-appended past that
@@ -1232,7 +1508,6 @@ Item {
       }
       var joined = corpus.join("\n\u0000")
       var left = []
-      var idle = _sessionStatus(esid) !== "streaming"
       var settledAnchor = feeds[esid].length, settledMid = ""
       for (var au = feeds[esid].length - 1; au >= 0; au--) {
         if (feeds[esid][au].kind !== "user") continue
@@ -1248,15 +1523,6 @@ Item {
         // literal text), so the echo never matched and re-appended forever.
         var sk = qt.match(/^\/(?:skill:)?([\w-]+)\b/)
         if (sk && joined.indexOf('<skill name="' + sk[1] + '"') >= 0) continue
-        // An echo can wait out a long tool run while a STREAMING turn holds the steer —
-        // but an IDLE session with a stale echo means the message provably died (pi
-        // rejected or never received it). Say so once instead of ghosting it forever.
-        var age = Date.now() - (qe.at || 0)
-        if (idle && age > 30000) {
-          feeds[esid].push({ kind: "cmd", tool: "error",
-                             text: "✗ not delivered — the agent never received: “" + qt.slice(0, 80) + "”. Resend it." })
-          continue                                        // dropped from the queue
-        }
         var insertAt = feeds[esid].length
         if (qe.beforeMid) {
           for (var bi = 0; bi < feeds[esid].length; bi++)
@@ -1270,7 +1536,7 @@ Item {
           }
         }
         left.push(qe)
-        feeds[esid].splice(insertAt, 0, { kind: "user", text: qt })
+        feeds[esid].splice(insertAt, 0, { kind: "user", text: qt, deliveryId: qe.id, delivery: qe.delivery, steered: qe.steered === true })
       }
       var le = _localEcho
       if (left.length) le[esid] = left; else delete le[esid]
