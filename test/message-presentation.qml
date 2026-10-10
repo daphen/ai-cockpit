@@ -130,7 +130,8 @@ ShellRoot {
       } else if (test.phase === 7) {
         test.check(!test.label("python3 - <<'PY'\nprint('fixture')\nPY"), "desktop showed command source after copying")
         var commandRow = test.find(rail, item => typeof item.text === "string" && item.text.indexOf("python3 - <<'PY'") === 0)
-        var copyCommand = test.find(commandRow.parent.parent, item => item.text === "Copy command")
+        var scope = commandRow, copyCommand = null
+        for (var up = 0; up < 5 && scope && !copyCommand; up++) { scope = scope.parent; copyCommand = test.find(scope, item => item.text === "Copy command") }
         test.check(copyCommand, "copy command unavailable: " + JSON.stringify(rail.expandedGroups) + " position " + JSON.stringify(commandRow.mapToItem(rail,0,0)))
         test.click(copyCommand)
         test.check(test.copiedCommand === "python3 - <<'PY'\nprint('fixture')\nPY", "command copy lost its multiline payload: " + JSON.stringify(test.copiedCommand))

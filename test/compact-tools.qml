@@ -22,6 +22,8 @@ ShellRoot {
     for (var child of item.children || []) { var match = find(child,predicate); if (match) return match }
     return null
   }
+  function named(prefix) { return find(rail,item => String(item.objectName || "").indexOf(prefix) === 0) }
+  function starting(text) { return find(rail,item => String(item.text || "").indexOf(text) === 0) }
   function label(text) { return find(rail,item => item.text === text) }
   function details() { return find(rail,item => String(item.objectName || "").indexOf("work-details:") === 0) }
   function click(item) { check(item,"missing click target"); gui.wait(30); input.mouseClick(item,5,item.height/2,Qt.LeftButton,Qt.NoModifier,0) }
@@ -43,7 +45,8 @@ ShellRoot {
         ]}})
       } else if (phase === 1) {
         check(find(rail,item => String(item.text || "").startsWith("The answer stays readable.")) && label("Work details · 2 tools") && label("1 failed"),"reply or compact failure summary missing")
-        check(!label("read source.qml") && !label("check fixture  — failed") && !find(rail,item => String(item.objectName || "").indexOf("tool-preview:") === 0),"completed commands/errors still dominate the default view")
+        check(!label("read source.qml"),"source reads crowd the default view")
+        check(label("check fixture  — failed") && named("tool-preview:bash"),"unresolved failure hidden from the default view")
         click(details())
       } else if (phase === 2) {
         var command = label("check fixture  — failed"), read = label("read source.qml")
@@ -57,15 +60,15 @@ ShellRoot {
         check(find(rail,item => item.objectName === "tool-output:bash" && item.text.includes("Fixture failure")),"full failure is inaccessible")
         click(details())
       } else if (phase === 4) {
-        check(!label("check fixture  — failed"),"closing work details left diagnostics exposed")
+        check(!label("read source.qml") && label("check fixture  — failed"),"closing work details did not return to the useful view")
         event({type:"tool_execution_start",toolCallId:"live",toolName:"bash",args:{command:"current command"}})
       } else if (phase === 5) {
         check(find(rail,item => String(item.text || "").startsWith("current command")),"current tool hidden by compact history")
-        check(!label("check fixture  — failed"),"running tool reopened old failures")
+        check(!label("read source.qml"),"running tool reopened source reads")
         event({type:"tool_execution_end",toolCallId:"live",toolName:"bash",isError:false,result:{content:[{type:"text",text:"Done"}]}})
       } else if (phase === 6) {
-        check(!label("current command"),"completed live command did not compact")
-        console.log("PASS: compact history/failure counts, subordinate tool typography/indentation, full diagnostics, hidden source, visible current tool and automatic completion compaction")
+        check(starting("current command"),"completed command vanished from the default view")
+        console.log("PASS: useful default view (commands and unresolved failures, no source reads), subordinate tool typography/indentation, full diagnostics, hidden source, visible current tool")
         Qt.quit()
       }
       phase++

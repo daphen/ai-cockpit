@@ -460,13 +460,19 @@ Item {
   // forever once the work finished. Progress belongs in the live indicator
   // (compactingSince); the feed keeps only durable facts, e.g. errors.
   function _setTransient(sid, key, tool, text, ttl, quiet) {
-    var t = _transients; (t[sid] = t[sid] || {})[key] = { tool: tool, text: text, at: Date.now(), ttl: ttl }
+    var t = _transients; (t[sid] = t[sid] || {})[key] = { tool: tool, text: text, at: Date.now(), ttl: ttl, quiet: quiet === true }
     _transients = t
-    if (!quiet) _push(sid, { kind: "cmd", tool: tool, text: text })
+    if (!quiet) _setFeedValue(sid, "transient:" + key, { kind: "cmd", tool: tool, text: text })
+  }
+  // The row shown while the model is still writing a tool call's arguments.
+  function _clearToolPreview(sid) {
+    _setFeedValue(sid, "toolcall-preview", null)
+    if (_curToolId.get(sid) === "toolcall-preview") { _curToolId.delete(sid); curToolGen++ }
   }
   function _clearTransient(sid, key) {
     var t = _transients
     if (t[sid] && t[sid][key]) { delete t[sid][key]; _transients = t }
+    _setFeedValue(sid, "transient:" + key, null)
   }
   property var _marks: ({})   // sid -> [text, …] (capped)
   property var _myAbortAt: ({})   // sid -> ms of the last abort WE sent (attribution)
@@ -640,11 +646,19 @@ Item {
     a = a || {}
     if (name === "read" || name === "apply_patch") {
       var p = a.path || a.file_path || a.filePath || ""
-      return name + (p ? " " + _rel(p) : "")
+      var first = Number(a.offset) || 0, count = Number(a.limit) || 0
+      var range = first || count ? ":" + (first || 1) + (count ? "-" + ((first || 1) + count - 1) : "+") : ""
+      return name + (p ? " " + _rel(p) + range : "")
+    }
+    if (name === "edit" || name === "write" || name === "create" || name === "str_replace") {
+      var target = a.path || a.file_path || a.filePath || ""
+      return name + (target ? " " + _rel(target) : "")
     }
     if (name === "bash" || name === "shell")       return "bash " + _clip(a.command || a.cmd)
-    if (name === "grep" || name === "ripgrep" || name === "search_files") return "grep " + _clip(a.pattern || a.query || a.regex)
-    if (name === "glob" || name === "find")        return "glob " + _clip(a.pattern || a.glob || a.query)
+    var where = a.path || a.dir || a.directory || ""
+    where = where ? " in " + _rel(where) : ""
+    if (name === "grep" || name === "ripgrep" || name === "search_files") return "grep \"" + _clip(a.pattern || a.query || a.regex) + "\"" + where
+    if (name === "glob" || name === "find")        return "find " + _clip(a.pattern || a.glob || a.query) + where
     if (name === "list" || name === "ls")          { var d = a.path || a.dir || a.directory || ""; return "ls " + (d ? _rel(d) : "") }
     if (name === "webfetch" || name === "web_fetch" || name === "fetch") return "fetch " + _clip(a.url || a.uri)
     if (name === "websearch" || name === "web_search") return "web " + _clip(a.query || a.q)
@@ -1140,8 +1154,16 @@ Item {
           var heading = thought.full.match(/\*\*([\s\S]*?)\*\*/) || thought.full.match(/^\s*([^\n]+)/)
           thought.text = (heading ? heading[1] : "thinking").replace(/\s+/g, " ").trim().slice(0, 90)
           feedGen++
+        } else if (delta.type === "toolcall_start" || delta.type === "toolcall_delta") {
+          var call = delta.partial && delta.partial.content ? delta.partial.content[Number(delta.contentIndex) || 0] : null
+          if (call && call.name) {
+            _setFeedValue(sid, "toolcall-preview", { kind: "cmd", tool: call.name, id: "toolcall-preview",
+                                                    text: toolHint(call.name, call.arguments || {}) + " …" })
+            if (_curToolId.get(sid) !== "toolcall-preview") { _curToolId.set(sid, "toolcall-preview"); curToolGen++ }
+          }
         }
       } else if (t === "message_end" && m.message && m.message.role === "assistant") {
+        _clearToolPreview(sid)
         var textItems = []
         _expandAssistant(m.message.content, textItems)
         var prose = textItems.filter(function(item) { return item.kind === "text" }).map(function(item) { return item.text }).join("\n\n")
@@ -1167,7 +1189,7 @@ Item {
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "agent_end") root._confirmInterrupt(sid)
     if (t === "agent_end" || t === "error" || (t === "turn_end" && !isInterrupting(sid))) root._clearPending(sid)
-    if (t === "agent_end") { _curTool.delete(sid); curToolGen++ }
+    if (t === "agent_end") { _clearToolPreview(sid); _curTool.delete(sid); curToolGen++ }
     // The whole turn is over (completed or aborted) → the next queued message goes out.
     if (t === "agent_end") root._flushQueue(sid)
     // A daemon bounce (undeliverable prompt, lineage refusal) was invisible — the send
@@ -1305,6 +1327,7 @@ Item {
       return
     }
     if (t === "tool_execution_start") {
+      _clearToolPreview(sid)
       const tn = m.toolName || ""
       const args = m.args || {}
       if (tn === "open_in_nvim" && args.path)
@@ -1493,7 +1516,8 @@ Item {
     var trs = _transients[esid] || {}
     for (var tk in trs) {
       if (Date.now() - trs[tk].at > trs[tk].ttl) { _clearTransient(esid, tk); continue }
-      feeds[esid].push({ kind: "cmd", tool: trs[tk].tool, text: trs[tk].text })
+      // Visible transients are live rows that already survived the rebuild.
+      if (trs[tk].quiet) feeds[esid].push({ kind: "cmd", tool: trs[tk].tool, text: trs[tk].text })
     }
     // Keep local echoes the transcript has not caught up with. Consumed steers that pi
     // never records stay anchored before their response instead of following the bottom.

@@ -55,8 +55,8 @@ ShellRoot {
     ]
     var entries = [{type:"message",id:"a",parentId:null,message:{role:"assistant",stopReason:"length",content:calls.concat([{type:"text",text:"Code lives in the editor.\n```qml\nSOURCE_ONLY_NEOVIM\n```"}])}}], parent = "a"
     for (var call of calls) {
-      var text = call.id === "bash" ? output : call.id === "edit" ? "Permission denied" : call.id === "mcp" ? "MCP structured result" : call.id === "read" ? "SOURCE_ONLY_NEOVIM" : "Saved"
-      entries.push({type:"message",id:"r"+call.id,parentId:parent,message:{role:"toolResult",toolCallId:call.id,toolName:call.name,isError:call.id === "edit",content:[{type:"text",text:text}]}})
+      var text = call.id === "bash" ? output : call.id === "edit3" ? "Permission denied" : call.id === "mcp" ? "MCP structured result" : call.id === "read" ? "SOURCE_ONLY_NEOVIM" : "Saved"
+      entries.push({type:"message",id:"r"+call.id,parentId:parent,message:{role:"toolResult",toolCallId:call.id,toolName:call.name,isError:call.id === "edit3",content:[{type:"text",text:text}]}})
       parent = "r"+call.id
     }
     event({type:"response",command:"get_entries",data:{entries:entries,leafId:parent}})
@@ -84,15 +84,15 @@ ShellRoot {
       } else if (phase === 3) {
         check(named("tool-output:bash").text === "omega","non-tail same-length progress stayed stale")
         result("bash","bash",output,false)
-        result("edit","edit","Permission denied",true)
+        result("edit","edit","Saved",false)
         result("edit2","edit","Saved",false)
-        result("edit3","edit","Saved",false)
+        result("edit3","edit","Permission denied",true)
         result("mcp","mcp","\u001b[34mMCP structured result\u001b[0m",false)
         result("read","read","SOURCE_ONLY_NEOVIM",false)
         event({type:"response",command:"get_session_stats",success:true,data:{tokens:{total:999,input:800,output:199},cost:0.1}})
       } else if (phase === 4) {
         check(named("tool-output:bash").text === output,"final output lost its payload")
-        var failure = named("tool-preview:edit")
+        var failure = named("tool-preview:edit3")
         check(failure && failure.text === "Permission denied" && Qt.colorEqual(failure.color,Theme.red),"edit failure diagnostic hidden")
         var editColumn = failure.parent.parent.parent.parent
         check(editColumn.height - failure.parent.mapToItem(editColumn,0,failure.parent.height).y >= 12,"failed grouped edit lost bottom padding")
@@ -150,7 +150,7 @@ ShellRoot {
         check(!named("tool-output:read"),"Ctrl+Enter exposed source code")
         var readRow = label("read live.qml").parent.parent
         check(!label("Copy output",readRow) && !label("Show details",readRow),"read acquired controls after expansion")
-        var control = label("Hide details",named("tool-output:edit").parent.parent.parent)
+        var control = label("Hide details",named("tool-output:edit3").parent.parent.parent)
         check(control && Qt.colorEqual(control.color,Theme.fg_muted),"failure painted its control red")
         var warnings = 0
         function count(item) {
@@ -173,14 +173,14 @@ ShellRoot {
         var error = named("tool-preview:gh"), source = named("tool-preview:grep")
         check(error && error.text === "Not Found · HTTP 404 · Exit code 1","JSON API error was not formatted: " + (error && error.text) + " " + JSON.stringify(rail.expandedGroups))
         var linear = named("tool-preview:linear")
-        check(linear && linear.text === "Invalid request\nThe query is too complex. · HTTP 400", "prefixed MCP JSON lacks a readable title and message")
+        check(linear && linear.text === "Invalid request · The query is too complex. · HTTP 400", "prefixed MCP JSON lacks a readable title and message")
         var overlap = named("tool-preview:single")
-        check(error.wrapMode === Text.WordWrap && overlap && overlap.wrapMode === Text.WordWrap && overlap.lineCount > 1,"narrow error does not wrap at word boundaries: " + JSON.stringify({mode:error.wrapMode,overlapMode:overlap && overlap.wrapMode,lines:overlap && overlap.lineCount,width:overlap && overlap.width,text:overlap && overlap.text,windowWidth:window.width}))
+        check(error.wrapMode === Text.NoWrap && error.elide === Text.ElideRight && overlap && overlap.lineCount === 1,"failure preview is not a single quiet line")
         check(source && source.text === "Command failed · Exit code 1" && !find(rail,item => String(item.text || "").includes("SOURCE_ONLY_NEOVIM")),"failed source search dumped code")
         check(label("single.qml") && !find(rail,item => item.files && item.files.length === 1),"single-file change acquired a grouped card")
         var bubble = find(rail,item => item.radius === 18 && item.parent && item.parent.isUser === true)
         check(bubble && Math.abs(bubble.mapToItem(rail,bubble.width,0).x - error.parent.mapToItem(rail,error.parent.width,0).x) < 1,"error and user bubble outer gutters differ")
-        check(error.x === 36 && error.y === 16,"error content does not align with its command label and vertical padding")
+        check(error.x === 36 && error.y === 0,"error line does not align with its command label")
         var command = find(rail,item => String(item.text || "").startsWith("gh api fixture/protection"))
         var shell = find(command.parent,item => item.name === "keyboard")
         var metrics = Qt.createQmlObject('import QtQuick; FontMetrics {}',test)

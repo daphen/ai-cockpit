@@ -595,11 +595,13 @@ Item {
       if (!group) { group = {kind:"edits",files:[]}; out.push(group) }
       var file = group.files.find(row => row.path === entry.path)
       if (!file) {
-        file = Object.assign({}, entry, {add:0,del:0,failed:false,result:""})
+        file = Object.assign({}, entry, {add:0,del:0,failed:false,result:"",diffs:[]})
         group.files.push(file)
       }
-      if (!entry.failed && !entry.partial) { file.add += Number(entry.add || 0); file.del += Number(entry.del || 0) }
-      if (entry.failed) { file.failed = true; file.detailsText = entry.detailsText; file.result += (file.result ? "\n" : "") + (entry.result || "") }
+      var diff = editDiff(entry)
+      if (diff && !entry.failed) file.diffs.push(diff)
+      if (!entry.failed && !entry.partial) { file.add += Number(entry.add || 0); file.del += Number(entry.del || 0); file.failed = false; file.result = "" }
+      if (entry.failed) { file.failed = true; file.id = entry.id; file.detailsText = entry.detailsText; file.result += (file.result ? "\n" : "") + (entry.result || "") }
       file.partial = entry.partial === true
     }
     return out
@@ -616,6 +618,189 @@ Item {
       if (out.indexOf(path) < 0) out.push(path)
     }
     return out
+  }
+  readonly property int outputPreviewLines: 10
+  // Item mode: Enter on a card walks its actionable items (headers, tool rows, file/diff, show all, copy) with hjkl.
+  property bool itemMode: false
+  property string itemFocus: ""
+  property int itemRow: 0
+  property int itemCol: 0
+  function _cmdExpandable(entry) {
+    return entry.tool !== "error" && !!(entry.result || entry.command) && entry.tool !== "read" && entry.tool !== "read_file"
+      && (!sourceTool(entry) || entry.failed)
+  }
+  function _hiddenOutputLines(entry) {
+    if (!entry.result || entry.failed || sourceTool(entry)) return 0
+    return Math.max(0, plainToolText(entry.result).replace(/\n+$/, "").split("\n").length - outputPreviewLines)
+  }
+  // Rows of {key, run} in on-screen order, built from the same keys the delegates render with.
+  function cardItemGrid(l) {
+    var it = groupedFeed[l], rows = []
+    if (!it || it.kind === "user" || !it.items) return rows
+    var ekey = "turn-" + (it.key || l), items = it.items
+    if (turnThinks(items).length) {
+      var reasoningDefault = turnThinks(items).some(claudeThought)
+      rows.push([{ key: ekey, run: () => toggleGroupKey(ekey, reasoningDefault) }])
+    }
+    var tools = activityEntries(items)
+    if (!tools.length) return rows
+    rows.push([{ key: ekey + "-tools", run: () => toggleGroupKey(ekey + "-tools") }])
+    var compact = activityRows(items), unresolved = unresolvedFailures(tools)
+    var currentId = agentd ? agentd.curToolIdFor(selectedRaw) : ""
+    var shown = groupOpen(ekey + "-tools") ? compact : compact.filter(activity => usefulActivity(activity, unresolved, currentId))
+    function addFile(file, gkey) {
+      var row = [{ key: "open:" + gkey, run: () => openFileRef(file.path) }]
+      var diff = entryDiff(file)
+      if (file.failed || diff.length) row.push({ key: gkey, run: () => toggleGroupKey(gkey) })
+      rows.push(row)
+      if (expandedGroups[gkey] === true && !file.failed && diffRows(diff).length > diffPreviewLines)
+        rows.push([{ key: gkey + ":all", run: () => toggleGroupKey(gkey + ":all") }])
+    }
+    for (var i = 0; i < shown.length; i++) {
+      var activity = shown[i]
+      if (activity.kind === "edits") {
+        if (activity.files.length === 1) addFile(activity.files[0], toolKey(toolKey(ekey, activity, i), activity.files[0], 0))
+        else for (var f = 0; f < activity.files.length; f++) addFile(activity.files[f], toolKey(toolKey(ekey, activity, i), activity.files[f], f))
+        continue
+      }
+      let gkey = toolKey(ekey, activity, i), entry = activity
+      if (!_cmdExpandable(entry)) continue
+      rows.push([{ key: gkey, run: () => toggleGroupKey(gkey) }])
+      if (expandedGroups[gkey] !== true) continue
+      if (_hiddenOutputLines(entry) > 0) rows.push([{ key: gkey + ":all", run: () => toggleGroupKey(gkey + ":all") }])
+      var buttons = []
+      if (entry.result) buttons.push({ key: "copyout:" + gkey, run: () => copyText(plainToolText(entry.result)) })
+      if (entry.command) buttons.push({ key: "copycmd:" + gkey, run: () => copyText(String(entry.command)) })
+      if (buttons.length) rows.push(buttons)
+    }
+    return rows
+  }
+  function _focusItem(row, col) {
+    var grid = cardItemGrid(curLocal())
+    if (!grid.length) { exitItemMode(); return }
+    itemRow = Math.max(0, Math.min(grid.length - 1, row))
+    itemCol = Math.max(0, Math.min(grid[itemRow].length - 1, col))
+    itemFocus = grid[itemRow][itemCol].key
+  }
+  function startItemMode() {
+    if (view !== "chat" || cur < rSize || !cardItemGrid(curLocal()).length) return false
+    itemMode = true
+    _focusItem(0, 0)
+    return true
+  }
+  function exitItemMode() { itemMode = false; itemFocus = "" }
+  function keyItemMode(e) {
+    if (e.key === Qt.Key_Escape) { exitItemMode(); return true }
+    // Rows don't share columns, so vertical moves land on a row's first item.
+    if (e.key === Qt.Key_J || e.key === Qt.Key_Down) { _focusItem(itemRow + 1, 0); return true }
+    if (e.key === Qt.Key_K || e.key === Qt.Key_Up) { _focusItem(itemRow - 1, 0); return true }
+    if (e.key === Qt.Key_L || e.key === Qt.Key_Right) { _focusItem(itemRow, itemCol + 1); return true }
+    if (e.key === Qt.Key_H || e.key === Qt.Key_Left) { _focusItem(itemRow, itemCol - 1); return true }
+    if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter || e.key === Qt.Key_Space) {
+      var grid = cardItemGrid(curLocal()), item = grid[itemRow] && grid[itemRow][itemCol]
+      if (item) {
+        var key = item.key
+        item.run()
+        // The grid reshapes after a toggle; keep the ring on the item that was triggered.
+        Qt.callLater(function() {
+          var next = cardItemGrid(curLocal())
+          for (var r = 0; r < next.length; r++) for (var c = 0; c < next[r].length; c++)
+            if (next[r][c].key === key) { itemRow = r; itemCol = c; itemFocus = key; return }
+          _focusItem(itemRow, itemCol)
+        })
+      }
+      return true
+    }
+    // Any other key leaves item mode and acts normally.
+    exitItemMode()
+    return false
+  }
+  component ItemFocus: Rectangle {
+    property string itemKey: ""
+    anchors.fill: parent; anchors.margins: -4
+    radius: 6; color: "transparent"
+    border.width: 1.5; border.color: Theme.orange
+    visible: rail.itemMode && rail.itemFocus === itemKey && itemKey !== ""
+  }
+  readonly property int diffPreviewLines: 40
+  function readRange(entry) {
+    var args = {}
+    try { args = JSON.parse(entry.argumentsText || "{}") } catch (error) {}
+    var first = Number(args.offset) || 0, count = Number(args.limit) || 0
+    return first || count ? ":" + (first || 1) + (count ? "-" + ((first || 1) + count - 1) : "+") : ""
+  }
+  function editDiff(entry) {
+    try {
+      var details = JSON.parse(entry.detailsText || "{}")
+      return details && details.diff ? String(details.diff) : ""
+    } catch (error) { return "" }
+  }
+  function entryDiff(entry) { return entry.diffs ? entry.diffs.join("\n     ...\n") : editDiff(entry) }
+  // pi diff lines: a +/-/space marker, a padded line number, then the content; "     ..." marks a gap.
+  function diffRows(text) {
+    return String(text || "").split("\n").filter(line => line.length).map(function(line) {
+      var match = line.match(/^([+\- ])\s*(\d*)\s?(.*)$/)
+      return match ? { sign: match[1], number: match[2], text: match[3] } : { sign: " ", number: "", text: line }
+    })
+  }
+  readonly property var codeKeywords: ({
+    js: "async await break case catch class const continue default delete do else export extends false finally for function if import in instanceof let new null of property readonly return signal static super switch this throw true try typeof undefined var void while yield",
+    nix: "assert else false if import in inherit let null rec then true with",
+    lua: "and break do else elseif end false for function goto if in local nil not or repeat return then true until while",
+    py: "False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield",
+    sh: "case do done elif else esac export fi for function if in local return then while",
+    c: "auto bool break case char class const continue default defer do else enum fn for func go if impl int let long match mod mut namespace override package pub return self static struct switch trait true type typedef use var virtual void where while"
+  })
+  function codeLanguage(path) {
+    var ext = String(path || "").split(".").pop().toLowerCase()
+    if (["js", "mjs", "cjs", "ts", "tsx", "jsx", "qml", "json"].indexOf(ext) >= 0) return "js"
+    if (["sh", "bash", "zsh", "fish"].indexOf(ext) >= 0) return "sh"
+    if (["c", "h", "cc", "cpp", "hpp", "rs", "go", "java", "kt", "swift", "cs"].indexOf(ext) >= 0) return "c"
+    return ["nix", "lua", "py"].indexOf(ext) >= 0 ? ext : ""
+  }
+  // Home-relative or session-relative path with the directory dimmed and the file name bright.
+  function pathMarkup(path) {
+    var shown = String(path || "")
+    if (selectedCwd && shown.indexOf(selectedCwd + "/") === 0) shown = shown.slice(selectedCwd.length + 1)
+    else if (shown.indexOf(homeDir + "/") === 0) shown = "~" + shown.slice(homeDir.length)
+    var cut = shown.lastIndexOf("/")
+    return cut < 0 ? _styledText(shown)
+      : "<font color=\"" + Theme.fg_muted + "\">" + _styledText(shown.slice(0, cut + 1)) + "</font>" + _styledText(shown.slice(cut + 1))
+  }
+  readonly property string homeDir: Quickshell.env("HOME") || ""
+  function _styledText(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\t/g, "   ").replace(/ /g, "&nbsp;")
+  }
+  // One line of code as StyledText: comments, strings, numbers and keywords. Deliberately lexical, not a parser.
+  function highlightCode(text, language) {
+    text = String(text || "")
+    if (!language) return _styledText(text)
+    var comment = language === "lua" ? "--.*" : ["nix", "sh", "py"].indexOf(language) >= 0 ? "#.*" : "//.*"
+    var token = new RegExp("(" + comment + ")|(\"(?:[^\"\\\\]|\\\\.)*\"?|'(?:[^'\\\\]|\\\\.)*'?|`[^`]*`?)|\\b(\\d[\\w.]*)|\\b(true|false|null|nil|None|True|False|undefined|nullptr)\\b|\\b(" + codeKeywords[language].split(" ").join("|") + ")\\b", "g")
+    var out = "", last = 0, match
+    while ((match = token.exec(text)) !== null) {
+      if (!match[0].length) { token.lastIndex++; continue }
+      var color = match[1] ? Theme.syntaxComment : match[2] ? Theme.syntaxString : match[3] ? Theme.syntaxNumber
+                : match[4] ? Theme.syntaxBoolean : Theme.syntaxKeyword
+      var piece = "<font color=\"" + color + "\">" + _styledText(match[0]) + "</font>"
+      out += _styledText(text.slice(last, match.index)) + (match[1] ? "<i>" + piece + "</i>" : piece)
+      last = token.lastIndex
+    }
+    return out + _styledText(text.slice(last))
+  }
+  function _attemptKey(entry) {
+    return entry.kind === "edit" ? "edit:" + String(entry.path || "") : String(entry.tool || "") + ":" + String(entry.command || entry.text || "")
+  }
+  // A failure is resolved when a later call on the same file (or the same command) in the turn succeeded.
+  function unresolvedFailures(tools) {
+    return tools.filter((tool, index) => tool.failed === true
+      && !tools.slice(index + 1).some(later => later.failed !== true && later.partial !== true && _attemptKey(later) === _attemptKey(tool)))
+  }
+  function usefulActivity(activity, unresolved, currentId) {
+    if (activity.kind === "edits") return true
+    var rows = activity.kind === "group" ? (activity.cmds || []) : [activity]
+    return rows.some(row => (currentId && row.id === currentId) || unresolved.indexOf(row) >= 0
+      || (!row.failed && !sourceTool(row) && ["read", "read_file", "ls", "list", "glob", "find"].indexOf(row.tool) < 0))
   }
   function sourceTool(entry) {
     return ["read", "read_file", "edit", "write", "create", "str_replace", "grep", "ripgrep", "search_files"].indexOf(entry.tool) >= 0
@@ -2153,14 +2338,19 @@ Item {
   }
   // Enter/o: act on the item under the cursor (session→select, file→open,
   // edit-msg→open, cmd-msg→copy).
-  function activateCur() {
+  function _hoveredWriteRow() {
     var pending = view === "chat" ? [feedView.contentItem] : []
     while (pending.length) {
       var target = pending.pop()
       if (!target || target.visible === false) continue
-      if (target.objectName === "writeFileRow" && target.hovered) { target.openFile(); return }
+      if (target.objectName === "writeFileRow" && target.hovered) return target
       for (var child of target.children || []) pending.push(child)
     }
+    return null
+  }
+  function activateCur() {
+    var hovered = _hoveredWriteRow()
+    if (hovered) { hovered.openFile(); return }
     var l = curLocal()
     if (curSection() === "roster") {
       activate(l)
@@ -2406,7 +2596,10 @@ Item {
         rail.stopSession(rail.selectedRaw)
       }
       return true
-    case Qt.Key_O: case Qt.Key_Return: case Qt.Key_Enter:
+    case Qt.Key_Return: case Qt.Key_Enter:
+      if (!_hoveredWriteRow() && startItemMode()) return true
+      activateCur(); return true
+    case Qt.Key_O:
       activateCur(); return true
     }
     return false
@@ -2425,6 +2618,7 @@ Item {
     }
     if (modelOpen && keyModelPicker(e)) { e.accepted = true; return }
     if (fileSelectOpen && keyFileSelection(e)) { e.accepted = true; return }
+    if (itemMode && keyItemMode(e)) { e.accepted = true; return }
     // Insert: the focused input owns the keyboard — except a blocking confirm/
     // select ask, which hides the composer, so its keys must still land here.
     if (insert && (!pendingAsk || askDeferred || askWantsText)) return
@@ -2440,6 +2634,7 @@ Item {
   // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
     if (fileSelectOpen) closeFileSelection()
+    if (itemMode) exitItemMode()
     if (hinting) cancelHints("cur-move")   // any cursor move invalidates the labeled row
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
@@ -4932,18 +5127,22 @@ Item {
       readonly property var compactItems: rail.activityRows(items)
       readonly property var tools: rail.activityEntries(items)
       readonly property bool toolsOpen: rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
+      readonly property var unresolved: rail.unresolvedFailures(tools)
+      // Closed shows what other harnesses show by default: changes, actions, live and unresolved work; reads stay behind the toggle.
       readonly property var shownTools: {
         if (toolsOpen) return compactItems
         rail.agentd ? rail.agentd.curToolGen : 0
         var id = rail.agentd ? rail.agentd.curToolIdFor(rail.selectedRaw) : ""
-        var current = tools.find(tool => tool.id && tool.id === id)
-        if (!current) return []
-        return compactItems.filter(activity => activity.kind === "edits"
-          ? activity.files.some(file => file.path === current.path) : activity.id === current.id)
+        return compactItems.filter(activity => rail.usefulActivity(activity, unresolved, id))
       }
-      Row {
+      // Rings sit beside rows, never inside a Row/RowLayout, which would give them layout space.
+      Item {
         visible: rail.turnThinks(items).length > 0
-        x: 12; width: actCol.width - 24
+        x: 12; width: actCol.width - 24; height: reasoningRow.implicitHeight
+        ItemFocus { itemKey: ekey; anchors.fill: reasoningRow }
+      Row {
+        id: reasoningRow
+        width: parent.width
         spacing: 8
         Icon {
           name: expanded ? "chevron-down" : "chevron-right"
@@ -4957,6 +5156,7 @@ Item {
         TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey, actCol.parent.defaultReasoning) }
         HoverHandler { cursorShape: Qt.PointingHandCursor }
       }
+      }
       Repeater {
         model: expanded ? rail.turnThinks(items).filter(thought => rail.expandedGroups[ekey] === true || rail.claudeThought(thought)) : []
         Loader {
@@ -4968,10 +5168,14 @@ Item {
           property color mutedColor: actCol.parent.mutedColor
         }
       }
-      RowLayout {
-        objectName: "work-details:" + ekey
+      Item {
         visible: actCol.tools.length > 0
-        x: 12; width: actCol.width - 24
+        x: 12; width: actCol.width - 24; height: detailsRow.implicitHeight
+        ItemFocus { itemKey: ekey + "-tools"; anchors.fill: detailsRow }
+      RowLayout {
+        id: detailsRow
+        objectName: "work-details:" + ekey
+        width: parent.width
         spacing: 8
         Icon {
           name: actCol.toolsOpen ? "chevron-down" : "chevron-right"
@@ -4987,11 +5191,12 @@ Item {
         Text {
           readonly property int failures: actCol.tools.filter(tool => tool.failed === true).length
           visible: failures > 0
-          text: failures + " failed"; color: Theme.red
+          text: failures + " failed"; color: actCol.unresolved.length > 0 ? Theme.red : actCol.parent.mutedColor
           font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(400); font.pixelSize: rail.fsMeta
         }
         TapHandler { gesturePolicy: TapHandler.ReleaseWithinBounds; onTapped: rail.toggleGroupKey(ekey + "-tools") }
         HoverHandler { cursorShape: Qt.PointingHandCursor }
+      }
       }
       Repeater {
         model: actCol.shownTools.length
@@ -5027,10 +5232,14 @@ Item {
       readonly property bool isShell: entry.tool === "bash" || entry.tool === "shell"
       readonly property bool isFailed: entry.failed === true
       // Bash rows carry the raw command — tap toggles it open underneath.
-      readonly property bool canExpand: !isErr && !!(entry.result || entry.command) && entry.tool !== "queue" && entry.tool !== "read" && entry.tool !== "read_file" && (!rail.sourceTool(entry) || entry.failed)
+      readonly property bool canExpand: !isErr && !!(entry.result || entry.command) && entry.tool !== "read" && entry.tool !== "read_file" && (!rail.sourceTool(entry) || entry.failed)
       readonly property bool open: typeof gkey !== "undefined" && rail.expandedGroups[gkey] === true
+      Item {
+        x: 12; width: cmdCol.width - 24; height: commandRowLayout.implicitHeight
+        ItemFocus { itemKey: typeof gkey !== "undefined" ? gkey : ""; anchors.fill: commandRowLayout }
       RowLayout {
-        x: 12; width: cmdCol.width - 24
+        id: commandRowLayout
+        width: parent.width
         spacing: 8
         FontMetrics { id: commandFont; font: commandLabel.font }
         Icon {
@@ -5049,12 +5258,12 @@ Item {
             return !!(rail.agentd && entry.id && rail.agentd.curToolIdFor(rail.selectedRaw) === entry.id)
           }
           text: ((entry.tool === "read" || entry.tool === "read_file") && rail.toolFiles(entry).length
-            ? "read " + rail.toolFiles(entry)[0].split("/").pop()
+            ? "read " + rail.toolFiles(entry)[0].split("/").pop() + rail.readRange(entry)
             : (entry.tool === "bash" || entry.tool === "shell" ? String(entry.command || entry.text || "").split("\n")[0].replace(/^\s*bash\s+/, "") : entry.text)) + (cmdCol.isFailed ? "  — failed" : "")
                 + (liveNow ? "  · " + rail.runningToolLabel(rail.selectedRaw).split("· ").pop() : "")
           color: cmdCol.isErr ? Theme.red : (cmdCol.isFailed ? Theme.red : Theme.fg_secondary)
           font.family: Theme.fontFamily
-          font.pixelSize: rail.fsMeta - 1
+          font.pixelSize: rail.fsMeta - 2
           wrapMode: cmdCol.isErr ? Text.WordWrap : Text.NoWrap
           elide: cmdCol.isErr ? Text.ElideNone : Text.ElideRight
           maximumLineCount: cmdCol.isErr ? 9999 : 1
@@ -5070,9 +5279,10 @@ Item {
         TapHandler { enabled: cmdCol.canExpand; onTapped: rail.toggleGroupKey(gkey) }
         HoverHandler { enabled: cmdCol.canExpand; cursorShape: Qt.PointingHandCursor }
       }
+      }
       Loader {
         width: cmdCol.width
-        active: !!(entry.command || entry.result || entry.argumentsText || entry.detailsText) && entry.tool !== "queue"
+        active: !!(entry.command || entry.result || entry.argumentsText || entry.detailsText)
         visible: active
         property var entry: cmdCol.parent.entry
         property bool grouped: false
@@ -5158,7 +5368,18 @@ Item {
         property bool fileSelected: editCol.parent.fileSelected
         property color textColor: editCol.parent.textColor
         property color mutedColor: editCol.parent.mutedColor
+        property string gkey: editCol.parent.gkey
+        property bool expanded: editCol.parent.expanded
         sourceComponent: editRow
+      }
+      Loader {
+        x: editCol.parent.grouped ? 12 : 0
+        width: parent.width - 2 * x
+        property var entry: editCol.parent.entry
+        property string gkey: editCol.parent.gkey
+        active: editCol.parent.expanded && !entry.failed && rail.entryDiff(entry).length > 0
+        visible: active
+        sourceComponent: editDiffPanel
       }
       Loader {
         x: editCol.parent.grouped ? 12 : 0
@@ -5210,6 +5431,7 @@ Item {
             Text { text: "Copy output"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
           }
           TapHandler { onTapped: rail.copyText(rail.plainToolText(entry.result)) }
+          ItemFocus { itemKey: "copyout:" + gkey }
         }
         ButtonSurface {
           primary: false; radius: 6
@@ -5221,6 +5443,7 @@ Item {
             Text { text: "Copy command"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
           }
           TapHandler { onTapped: rail.copyText(String(entry.command)) }
+          ItemFocus { itemKey: "copycmd:" + gkey }
         }
         Row {
           visible: entry.partial === true; height: 26; spacing: 5
@@ -5230,33 +5453,47 @@ Item {
       }
       Rectangle {
         objectName: "tool-code-panel:" + (entry.id || entry.tool)
-        width: parent.width; implicitHeight: preview.implicitHeight + 32
+        // Agents fail and retry edits routinely: one quiet line, the full error one click away.
+        width: parent.width; implicitHeight: preview.implicitHeight + 4
         visible: entry.failed === true && !expanded && !!entry.result
-        radius: 8; color: rail.codePanelColor
-        border.width: 1; border.color: rail.codePanelBorder
+        color: "transparent"
         Text {
           id: preview
           objectName: "tool-preview:" + (entry.id || entry.tool)
-          anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: resultCol.grouped ? 24 : 36; rightMargin: 24; topMargin: 16 }
-          text: rail.errorText(entry)
+          anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: resultCol.grouped ? 24 : 36; rightMargin: 24 }
+          text: rail.errorText(entry).replace(/\s*\n\s*/g, " · ")
           textFormat: Text.PlainText
-          maximumLineCount: 5; elide: Text.ElideRight; wrapMode: Text.WordWrap
-          color: Theme.red
-          font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+          maximumLineCount: 1; elide: Text.ElideRight; wrapMode: Text.NoWrap
+          color: Theme.red; opacity: 0.85
+          font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 2
         }
       }
       Repeater {
         model: {
+          if (expanded && entry.tool === "queue") return [{label:"Queued",value:String(entry.command || ""),hidden:0}]
           if (!expanded || !resultCol.showOutput || !entry.result) return []
-          var fields = [{label:"Output",value:entry.failed ? rail.errorText(entry) : rail.plainToolText(entry.result)}]
+          var output = entry.failed ? rail.errorText(entry) : rail.plainToolText(entry.result)
+          var lines = output.replace(/\n+$/, "").split("\n")
+          var hidden = !entry.failed && rail.expandedGroups[gkey + ":all"] !== true ? Math.max(0, lines.length - rail.outputPreviewLines) : 0
+          var fields = [{label:"Output",value:hidden ? lines.slice(hidden).join("\n") : output,hidden:hidden}]
           var details = entry.failed ? rail.errorDetails(entry) : ""
-          if (details) fields.push({label:"Details",value:details})
+          if (details) fields.push({label:"Details",value:details,hidden:0})
           return fields
         }
         Column {
           width: resultCol.width
           spacing: 4
           Text { x: resultCol.grouped ? 24 : 36; text: modelData.label; color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+          Text {
+            objectName: "tool-earlier:" + (entry.id || entry.tool)
+            visible: modelData.hidden > 0
+            x: resultCol.grouped ? 24 : 36
+            text: "… " + modelData.hidden + " earlier lines · show all"
+            color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1
+            TapHandler { onTapped: rail.toggleGroupKey(gkey + ":all") }
+            ItemFocus { itemKey: gkey + ":all" }
+            HoverHandler { cursorShape: Qt.PointingHandCursor }
+          }
           Rectangle {
             width: parent.width; implicitHeight: outputText.implicitHeight + 32
             radius: 8; color: rail.codePanelColor
@@ -5631,6 +5868,54 @@ Item {
     }
   }
   Component {
+    id: editDiffPanel
+    Rectangle {
+      id: diffPanel
+      objectName: "edit-diff:" + (entry.path || "")
+      readonly property var rows: rail.diffRows(rail.entryDiff(entry))
+      readonly property var shown: rail.expandedGroups[gkey + ":all"] === true ? rows : rows.slice(0, rail.diffPreviewLines)
+      readonly property string language: rail.codeLanguage(entry.path)
+      width: parent ? parent.width : 400
+      implicitHeight: diffCol.implicitHeight + 12
+      radius: 6; color: rail.codePanelColor
+      border.width: 1; border.color: Theme.hairline
+      clip: true
+      Column {
+        id: diffCol
+        anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 6; bottomMargin: 6 }
+        Repeater {
+          model: diffPanel.shown
+          Rectangle {
+            readonly property color tone: modelData.sign === "+" ? Theme.green : modelData.sign === "-" ? Theme.red : "transparent"
+            width: diffCol.width; height: diffLine.implicitHeight + 3
+            color: modelData.sign === "+" ? Theme.diffAddedBg : modelData.sign === "-" ? Theme.diffRemovedBg : "transparent"
+            Rectangle { width: 2; height: parent.height; color: parent.tone; visible: modelData.sign !== " " }
+            Text {
+              id: diffLine
+              x: 10; width: parent.width - 16; anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.StyledText
+              text: "<font color=\"" + Qt.rgba(Theme.fg_muted.r, Theme.fg_muted.g, Theme.fg_muted.b, 0.75) + "\">"
+                + ("    " + modelData.number).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
+                + rail.highlightCode(modelData.text, diffPanel.language)
+              color: modelData.sign === " " ? Theme.fg_secondary : Theme.fg
+              font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 2
+              wrapMode: Text.NoWrap; elide: Text.ElideRight; maximumLineCount: 1
+            }
+          }
+        }
+        Text {
+          visible: diffPanel.rows.length > diffPanel.shown.length
+          topPadding: 6
+          text: "… " + (diffPanel.rows.length - diffPanel.shown.length) + " more lines · show all"
+          color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1
+          TapHandler { onTapped: rail.toggleGroupKey(gkey + ":all") }
+          ItemFocus { itemKey: gkey + ":all" }
+          HoverHandler { cursorShape: Qt.PointingHandCursor }
+        }
+      }
+    }
+  }
+  Component {
     id: editRow
     Rectangle {
       id: writeRow
@@ -5647,12 +5932,29 @@ Item {
         anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
         spacing: 8
         Icon { name: entry.failed ? "triangle-warning" : "file-content"; width: 16; height: 16; color: entry.failed ? Theme.red : mutedColor; Layout.alignment: Qt.AlignVCenter }
-        Text { text: entry.path && entry.path.indexOf(rail.selectedCwd + "/") === 0 ? entry.path.slice(rail.selectedCwd.length + 1) : (entry.path || entry.file); color: textColor; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; elide: Text.ElideMiddle; Layout.fillWidth: true }
+        Text { text: rail.pathMarkup(entry.path || entry.file); textFormat: Text.StyledText; color: textColor; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 2; elide: Text.ElideRight; Layout.fillWidth: true }
         Text { visible: entry.failed === true; text: "Failed"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
         Text { visible: !entry.failed && (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
         Text { visible: !entry.failed && (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
+        Icon {
+          id: diffToggle
+          objectName: "edit-diff-toggle:" + (entry.path || "")
+          visible: entry.failed === true || rail.entryDiff(entry).length > 0
+          name: expanded ? "chevron-down" : "chevron-right"
+          width: 11; height: 11; color: mutedColor
+          Layout.alignment: Qt.AlignVCenter
+        }
       }
-      TapHandler { onTapped: writeRow.openFile() }
+      TapHandler {
+        onTapped: (point) => diffToggle.visible && point.position.x > writeRow.width - 40 ? rail.toggleGroupKey(gkey) : writeRow.openFile()
+      }
+      ItemFocus { itemKey: "open:" + gkey; anchors.rightMargin: diffToggle.visible ? 28 : -4 }
+      Item {
+        visible: diffToggle.visible
+        anchors { right: parent.right; top: parent.top; bottom: parent.bottom; rightMargin: 6 }
+        width: 22
+        ItemFocus { itemKey: gkey }
+      }
     }
   }
 }
