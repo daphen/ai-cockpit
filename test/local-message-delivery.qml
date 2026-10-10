@@ -63,7 +63,7 @@ ShellRoot {
         test.check(state.feedFor("worker").some(item => item.text === "Offline copy" && item.delivery === "failed"),"Pi rejection did not mark the matching message failed")
         test.check(!!test.find(rail,"Not delivered"),"rejection tag was hidden while typing")
         test.check(state.feedFor("worker").some(item => String(item.text).indexOf("Pi rejected this request") >= 0),"rejection reason is missing")
-        test.click("Delete")
+        test.click("Discard")
       } else if (test.phase === 4) {
         test.check(!test.row("Offline copy"),"delete did not remove the local copy")
         test.check(rail.composerText === "Next draft","delete or resend disturbed the composer draft")
@@ -76,9 +76,8 @@ ShellRoot {
         test.history("Real history")
       } else if (test.phase === 5) {
         test.check(test.row("Slow steer").delivery === "accepted","delayed accepted steer was mislabelled")
-        test.check(!test.find(rail,"Resend"),"accepted message offers a duplicate resend")
-        var count = test.sent.length; test.click("Delete")
-        test.check(test.sent.length === count,"deleting a local copy touched the agent")
+        test.check(!test.find(rail,"Resend") && !test.find(rail,"Discard"),"accepted message offers resend or discard")
+        test.check(!!test.find(rail,"✓ sent"),"accepted message lacks its quiet sent status")
         test.history("Slow steer")
       } else if (test.phase === 6) {
         test.check(test.row("Slow steer") && !test.row("Slow steer").deliveryId,"later confirmed history was hidden or retained local controls")
@@ -86,13 +85,13 @@ ShellRoot {
         test.event({type:"error",session:"worker",error:"not delivered: worker is waiting on an unanswered question"})
       } else if (test.phase === 7) {
         test.check(test.row("Daemon rejection").delivery === "failed","explicit daemon rejection lacks failure tag")
-        test.click("Delete")
+        test.click("Discard")
         test.online = false; state.submit("worker",test.attachmentMessage)
       } else if (test.phase === 8) {
         test.online = true; test.click("Resend")
       } else if (test.phase === 9) {
         test.check(test.sent.filter(item => item.message === test.attachmentMessage).length === 1,"resend altered or duplicated attachment references or selected code")
-        console.log("PASS: not-delivered tag, delete and resend clicks; attachment and selected-code preservation, Pi and daemon rejections, delayed acceptance, confirmed history and agent isolation")
+        console.log("PASS: not-delivered tag, discard and resend clicks, quiet sent status; attachment and selected-code preservation, Pi and daemon rejections, delayed acceptance, confirmed history and agent isolation")
         Qt.quit()
       }
       test.phase++

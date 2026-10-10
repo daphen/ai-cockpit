@@ -3261,31 +3261,39 @@ Item {
                   font.pixelSize: rail.fsMeta - 3; font.bold: true
                 }
               }
+              // Delivery is a quiet footnote while it's going fine; only a failure gets a row and actions.
+              Text {
+                objectName: "delivery-status"
+                visible: turnDel.localDelivery === "pending" || turnDel.localDelivery === "accepted"
+                text: turnDel.localDelivery === "accepted" ? "✓ sent" : "sending…"
+                color: turnDel.cardMutedColor
+                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 2
+                anchors.verticalCenter: parent.verticalCenter
+              }
             }
 
             Flow {
-              visible: !!turnDel.localDelivery
+              visible: turnDel.localDelivery === "failed"
               width: cardCol.width
               spacing: 8
               Text {
-                text: turnDel.localDelivery === "failed" ? "Not delivered"
-                    : turnDel.localDelivery === "accepted" ? "Accepted · awaiting transcript" : "Awaiting confirmation"
-                color: turnDel.localDelivery === "failed" ? Theme.orange : turnDel.cardMutedColor
+                text: "Not delivered"
+                color: Theme.orange
                 font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
                 height: 24; verticalAlignment: Text.AlignVCenter
-              }
-              PrimaryButton {
-                text: "Delete"; primary: false; implicitHeight: 24
-                onClicked: {
-                  rail.agentd.dismissLocalEcho(rail.selectedRaw, turnDel.turn.deliveryId)
-                  rail.feedTick++; rail._resyncFeed()
-                }
               }
               PrimaryButton {
                 visible: turnDel.localDelivery === "failed"
                 text: "Resend"; primary: false; implicitHeight: 24
                 onClicked: {
                   rail.agentd.resendLocalEcho(rail.selectedRaw, turnDel.turn.deliveryId)
+                  rail.feedTick++; rail._resyncFeed()
+                }
+              }
+              PrimaryButton {
+                text: "Discard"; primary: false; implicitHeight: 24
+                onClicked: {
+                  rail.agentd.dismissLocalEcho(rail.selectedRaw, turnDel.turn.deliveryId)
                   rail.feedTick++; rail._resyncFeed()
                 }
               }
