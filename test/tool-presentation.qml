@@ -95,8 +95,8 @@ ShellRoot {
           {type:"message",id:"f2",parentId:"f1",message:{role:"toolResult",toolCallId:"try2",toolName:"edit",content:[{type:"text",text:"Edited"}]}}
         ]}})
       } else if (phase === 12) {
-        var count = find(rail,item => item.text === "1 failed")
-        check(count && !Qt.colorEqual(count.color,Theme.red),"a retried failure is still painted red")
+        check(!find(rail,item => item.text === "Work details · 2 tools"),"a two-tool turn still shows a Work details header")
+        check(!find(rail,item => item.text === "Failed" && item.visible),"a retried failure is still marked failed")
         check(!named("tool-preview:try1"),"a retried failure still shows its error line")
         event({type:"response",command:"get_entries",data:{leafId:"g1",entries:[
           {type:"message",id:"c",parentId:null,message:{role:"assistant",model:"gpt-6.1-sol",content:[
@@ -106,9 +106,27 @@ ShellRoot {
           {type:"message",id:"g1",parentId:"c",message:{role:"toolResult",toolCallId:"stuck",toolName:"edit",isError:true,content:[{type:"text",text:"Permission denied"}]}}
         ]}})
       } else if (phase === 13) {
-        var red = find(rail,item => item.text === "1 failed")
+        var red = find(rail,item => item.text === "Failed")
         check(red && Qt.colorEqual(red.color,Theme.red) && named("tool-preview:stuck"),"an unresolved failure is not red with its error line")
-        console.log("PASS: read ranges, capped output with show all, highlighted inline diffs, retry notice clears, streamed tool arguments, expandable queue, useful default view, quiet retried failures")
+        event({type:"response",command:"get_entries",data:{leafId:"h2",entries:[
+          {type:"message",id:"d",parentId:null,message:{role:"assistant",model:"gpt-6.1-sol",content:[
+            {type:"text",text:"Ran the check twice."},
+            {type:"toolCall",id:"run1",name:"bash",arguments:{command:"python3 run.py > /tmp/run.log 2>&1; tail -18 /tmp/run.log"}},
+            {type:"toolCall",id:"run2",name:"bash",arguments:{command:"python3 run.py > /tmp/run.log 2>&1; tail -9 /tmp/run.log"}}
+          ]}},
+          {type:"message",id:"h1",parentId:"d",message:{role:"toolResult",toolCallId:"run1",toolName:"bash",content:[{type:"text",text:"first"}]}},
+          {type:"message",id:"h2",parentId:"h1",message:{role:"toolResult",toolCallId:"run2",toolName:"bash",content:[{type:"text",text:"second"}]}}
+        ]}})
+      } else if (phase === 14) {
+        check(find(rail,item => item.text === "python3 run.py  ×2"),"repeated runs are not merged under a plumbing-free title")
+        event({type:"tool_execution_start",toolCallId:"ask1",toolName:"ask_user",args:{method:"confirm",title:"Ship it?"}})
+      } else if (phase === 15) {
+        check(starting("❯ Ship it?"),"a live question does not read as a question")
+        event({type:"ask_answered",confirmed:true})
+      } else if (phase === 16) {
+        check(starting("❯ Ship it?  ↳ approved"),"the answer did not land on the question row")
+        check(!find(rail,item => String(item.text || "").indexOf("↳ approved") === 0),"the answer still shows as its own card")
+        console.log("PASS: read ranges, capped output with show all, highlighted inline diffs, retry notice clears, streamed tool arguments, expandable queue, useful default view, quiet retried failures, small turns without a header, merged repeat runs, answered questions inline")
         Qt.quit()
       }
       phase++

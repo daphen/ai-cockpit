@@ -34,17 +34,19 @@ ShellRoot {
       if (phase === 0) {
         event({type:"roster",sessions:[{id:"worker",name:"worker",cwd:"/tmp",status:"idle"}]})
         rail.jumpToSession("worker")
-        event({type:"response",command:"get_entries",data:{leafId:"r2",entries:[
+        event({type:"response",command:"get_entries",data:{leafId:"r3",entries:[
           {type:"message",id:"a",parentId:null,message:{role:"assistant",model:"gpt-6.1-sol",content:[
             {type:"text",text:"The answer stays readable."},
             {type:"toolCall",id:"read",name:"read",arguments:{path:"/tmp/source.qml"}},
-            {type:"toolCall",id:"bash",name:"bash",arguments:{command:"check fixture"}}
+            {type:"toolCall",id:"bash",name:"bash",arguments:{command:"check fixture"}},
+            {type:"toolCall",id:"read2",name:"read",arguments:{path:"/tmp/other.qml"}}
           ]}},
           {type:"message",id:"r1",parentId:"a",message:{role:"toolResult",toolCallId:"read",toolName:"read",content:[{type:"text",text:"SOURCE_ONLY_NEOVIM"}]}},
-          {type:"message",id:"r2",parentId:"r1",message:{role:"toolResult",toolCallId:"bash",toolName:"bash",isError:true,content:[{type:"text",text:"Error: Fixture failure\nCommand exited with code 1"}]}}
+          {type:"message",id:"r2",parentId:"r1",message:{role:"toolResult",toolCallId:"bash",toolName:"bash",isError:true,content:[{type:"text",text:"Error: Fixture failure\nCommand exited with code 1"}]}},
+          {type:"message",id:"r3",parentId:"r2",message:{role:"toolResult",toolCallId:"read2",toolName:"read",content:[{type:"text",text:"SOURCE_ONLY_NEOVIM"}]}}
         ]}})
       } else if (phase === 1) {
-        check(find(rail,item => String(item.text || "").startsWith("The answer stays readable.")) && label("Work details · 2 tools") && label("1 failed"),"reply or compact failure summary missing")
+        check(find(rail,item => String(item.text || "").startsWith("The answer stays readable.")) && label("Work details · 3 tools") && label("1 failed"),"reply or compact failure summary missing")
         check(!label("read source.qml"),"source reads crowd the default view")
         check(label("check fixture  — failed") && named("tool-preview:bash"),"unresolved failure hidden from the default view")
         click(details())

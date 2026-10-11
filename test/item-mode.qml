@@ -34,15 +34,17 @@ ShellRoot {
       if (phase === 0) {
         event({type:"roster",sessions:[{id:"worker",name:"worker",cwd:"/tmp",status:"idle"}]})
         rail.jumpToSession("worker")
-        event({type:"response",command:"get_entries",data:{leafId:"r2",entries:[
+        event({type:"response",command:"get_entries",data:{leafId:"r3",entries:[
           {type:"message",id:"a",parentId:null,message:{role:"assistant",model:"gpt-6.1-sol",content:[
             {type:"text",text:"Did two things."},
             {type:"toolCall",id:"bash",name:"bash",arguments:{command:"seq 30"}},
-            {type:"toolCall",id:"edit",name:"edit",arguments:{path:"/tmp/view.qml",edits:[{oldText:"a",newText:"b"}]}}
+            {type:"toolCall",id:"edit",name:"edit",arguments:{path:"/tmp/view.qml",edits:[{oldText:"a",newText:"b"}]}},
+            {type:"toolCall",id:"read",name:"read",arguments:{path:"/tmp/view.qml"}}
           ]}},
           {type:"message",id:"r1",parentId:"a",message:{role:"toolResult",toolCallId:"bash",toolName:"bash",content:[{type:"text",text:longOutput}]}},
           {type:"message",id:"r2",parentId:"r1",message:{role:"toolResult",toolCallId:"edit",toolName:"edit",content:[{type:"text",text:"Edited"}],
-            details:{diff:"-1 old\n+1 new"}}}
+            details:{diff:"-1 old\n+1 new"}}},
+          {type:"message",id:"r3",parentId:"r2",message:{role:"toolResult",toolCallId:"read",toolName:"read",content:[{type:"text",text:"source"}]}}
         ]}})
       } else if (phase === 1) {
         rail.exitInsert(); rail.forceActiveFocus()

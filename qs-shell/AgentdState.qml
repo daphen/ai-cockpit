@@ -626,6 +626,14 @@ Item {
   // become "mcp <server> <tool>" / "mcp <server> search:<x>" — not "bash mcp".
   // Normalize an ask_user result into the words the user chose: {"confirmed":true}
   // reads as approved, a typed value reads as itself.
+  // User-bash approval asks carry a sentinel title + JSON payload; render the actual command.
+  function _askQuestion(a) {
+    var q = String(a.title || a.message || "question")
+    if (a.title === "__cockpit_user_bash__") {
+      try { q = "! " + String(JSON.parse(String(a.message || "")).command || "") } catch (e) {}
+    }
+    return q
+  }
   function _askAnswerText(r) {
     if (r === undefined || r === null) return ""
     if (typeof r === "string") {
@@ -814,12 +822,7 @@ Item {
           // The QUESTION AND ANSWER live here in the transcript (the answer is the
           // tool call's result) — render them as a persistent row, or the answered
           // question only ever existed as an optimistic push the next rebuild ate.
-          var q = String(a.title || a.message || "question")
-          // User-bash approval asks carry a sentinel title + JSON payload; render
-          // the actual command (matches the live echo, which retires against this row).
-          if (a.title === "__cockpit_user_bash__") {
-            try { q = "! " + String(JSON.parse(String(a.message || "")).command || "") } catch (e) {}
-          }
+          var q = _askQuestion(a)
           var ans = _askAnswerText(resultInfo.result)
           items.push({ kind: "cmd", tool: "ask", id: b.id,
                        text: ans ? ("❯ " + q + "  ↳ " + _clip(ans)) : ("❯ " + q),
@@ -1258,7 +1261,11 @@ Item {
                 : (m.value !== undefined ? String(m.value) : ""))
       var asked = asks[sid]
       var bp = userBashPayload(asked)
-      if (label && !bp) {
+      var liveAsk = (feeds[sid] || []).slice().reverse().find(it => it.kind === "cmd" && it.tool === "ask" && it.partial)
+      if (label && !bp && liveAsk) {
+        liveAsk.text = liveAsk.text.split("  ↳ ")[0] + "  ↳ " + label
+        feedGen++
+      } else if (label && !bp) {
         // Carry the QUESTION with the echo: the card vanishes on answer, so a bare
         // "↳ approved" left no trace of what was approved — consecutive answers read
         // as one duplicated reply.
@@ -1337,7 +1344,10 @@ Item {
       _curToolLive.set(sid, true)
       _curToolId.set(sid, m.toolCallId || "")
       curToolGen++
-      if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
+      if (tn === "ask_user") {
+        _push(sid, { kind: "cmd", tool: "ask", text: "❯ " + _askQuestion(args), command: "", id: m.toolCallId,
+                     argumentsText: _safeJson(args), result: "", detailsText: "", partial: true, failed: false })
+      } else if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
         _push(sid, { kind: "edit", tool: tn, file: _base(args.path || ""), path: args.path || "",
                      add: (tn === "write" || tn === "create") && args.content ? String(args.content).split("\n").length : 0,
                      del: 0, id: m.toolCallId, needle: _editNeedle(tn, args),
@@ -1405,6 +1415,10 @@ Item {
         activity.detailsText = finalFields.detailsText
         activity.partial = false
         activity.failed = failed
+        if (activity.tool === "ask") {
+          var answer = _askAnswerText(finalFields.result)
+          if (answer) activity.text = activity.text.split("  ↳ ")[0] + "  ↳ " + _clip(answer)
+        }
         feedGen++
       }
       if (!activity && m.toolName === "edit" && det && det.patch) {

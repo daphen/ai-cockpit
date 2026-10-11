@@ -591,6 +591,12 @@ Item {
   function activityRows(items) {
     var out = [], group = null
     for (var entry of activityEntries(items)) {
+      var last = out[out.length - 1]
+      if (entry.kind !== "edit" && last && last.kind !== "edits" && _isShell(entry) && _isShell(last)
+          && commandTitle(entry.command || entry.text) === commandTitle(last.command || last.text)) {
+        out[out.length - 1] = Object.assign({}, entry, { runs: (last.runs || [last]).concat([entry]) })
+        continue
+      }
       if (entry.kind !== "edit") { group = null; out.push(entry); continue }
       if (!group) { group = {kind:"edits",files:[]}; out.push(group) }
       var file = group.files.find(row => row.path === entry.path)
@@ -605,6 +611,20 @@ Item {
       file.partial = entry.partial === true
     }
     return out
+  }
+  function _isShell(entry) { return entry.tool === "bash" || entry.tool === "shell" }
+  // A shell command's first line without output plumbing (redirects, a trailing tail/head); quoted text is kept.
+  function commandTitle(command) {
+    var line = String(command || "").split("\n")[0].replace(/^\s*bash\s+/, "")
+    var tokens = line.match(/\d?>>?&\d|&>>?|(?:[^\s"';|&]+|"(?:[^"\\]|\\.)*"?|'[^']*'?)+|&&|\|\||[;|&]/g) || [], kept = []
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i]
+      if (/^(?:;|\||&&)$/.test(token) && /^(?:tail|head)$/.test(tokens[i + 1] || "")) break
+      if (/^(?:\d|&)?>>?$/.test(token)) { i++; continue }
+      if (/^(?:\d?>>?&\d|(?:\d|&)?>>?[^&"'][^"']*)$/.test(token)) continue
+      kept.push(token)
+    }
+    return kept.join(" ") || line
   }
   function toolFiles(entry) {
     var out = entry.path ? [String(entry.path)] : []
@@ -644,10 +664,10 @@ Item {
     }
     var tools = activityEntries(items)
     if (!tools.length) return rows
-    rows.push([{ key: ekey + "-tools", run: () => toggleGroupKey(ekey + "-tools") }])
+    if (!smallTurn(tools)) rows.push([{ key: ekey + "-tools", run: () => toggleGroupKey(ekey + "-tools") }])
     var compact = activityRows(items), unresolved = unresolvedFailures(tools)
     var currentId = agentd ? agentd.curToolIdFor(selectedRaw) : ""
-    var shown = groupOpen(ekey + "-tools") ? compact : compact.filter(activity => usefulActivity(activity, unresolved, currentId))
+    var shown = smallTurn(tools) || groupOpen(ekey + "-tools") ? compact : compact.filter(activity => usefulActivity(activity, unresolved, currentId))
     function addFile(file, gkey) {
       var row = [{ key: "open:" + gkey, run: () => openFileRef(file.path) }]
       var diff = entryDiff(file)
@@ -796,10 +816,12 @@ Item {
     return tools.filter((tool, index) => tool.failed === true
       && !tools.slice(index + 1).some(later => later.failed !== true && later.partial !== true && _attemptKey(later) === _attemptKey(tool)))
   }
+  // A turn this small gains nothing from a "Work details" header; its rows show directly.
+  function smallTurn(tools) { return tools.length <= 2 }
   function usefulActivity(activity, unresolved, currentId) {
     if (activity.kind === "edits") return true
     var rows = activity.kind === "group" ? (activity.cmds || []) : [activity]
-    return rows.some(row => (currentId && row.id === currentId) || unresolved.indexOf(row) >= 0
+    return rows.some(row => (currentId && row.id === currentId) || (row.runs || [row]).some(run => unresolved.indexOf(run) >= 0)
       || (!row.failed && !sourceTool(row) && ["read", "read_file", "ls", "list", "glob", "find"].indexOf(row.tool) < 0))
   }
   function sourceTool(entry) {
@@ -1568,6 +1590,7 @@ Item {
     if (tool === "grep" || tool === "ripgrep" || tool === "search_files"
         || tool === "glob" || tool === "find") return "magnifier"
     if (tool === "bash" || tool === "shell") return "keyboard"
+    if (tool === "ask") return "msg-bubble-user"
     return "gear-2"
   }
 
@@ -3135,6 +3158,8 @@ Item {
         // own model property, so model.d is only readable at the delegate root.
         readonly property var turn: model.d
         readonly property bool isUser: turnDel.turn.kind === "user"
+        // Assistant blocks sit flush so one reply's rounds read as one flow; cards keep their room.
+        readonly property int padY: isNote && !userExpanded ? 8 : (isUser ? 16 : 8)
         readonly property string localDelivery: rail.agentd && turnDel.turn.deliveryId
           ? rail.agentd.localDeliveryFor(rail.selectedRaw, turnDel.turn.deliveryId) : ""
         readonly property bool isHandoff: isUser && !!turnDel.turn.sender
@@ -3160,7 +3185,7 @@ Item {
             rightMargin: feedView.shadowGutter - (turnDel.isUser && !turnDel.isNote ? 0 : 12)
           }
           width: (parent.width - 2 * feedView.shadowGutter) * (turnDel.isUser && !turnDel.isNote ? 0.9 : 1) + (turnDel.isUser && !turnDel.isNote ? 0 : 24)
-          implicitHeight: cardCol.implicitHeight + (turnDel.isNote && !turnDel.userExpanded ? 16 : 32)
+          implicitHeight: cardCol.implicitHeight + 2 * turnDel.padY
           radius: 18
           color: "transparent"
           border.width: (!turnDel.isUser || turnDel.isNote) && (turnDel.cursor || fhov.hovered) ? 1 : 0
@@ -3223,7 +3248,7 @@ Item {
 
           Column {
             id: cardCol
-            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: turnDel.isUser ? 24 : 36; rightMargin: turnDel.isUser ? 24 : 36; topMargin: turnDel.isNote && !turnDel.userExpanded ? 8 : 16 }
+            anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: turnDel.isUser ? 24 : 36; rightMargin: turnDel.isUser ? 24 : 36; topMargin: turnDel.padY }
             spacing: turnDel.isNote && !turnDel.userExpanded ? 8 : 16
 
             // Turn header — the Nucleo glyph is the ONLY colored signifier;
@@ -5134,7 +5159,8 @@ Item {
       spacing: 9
       readonly property var compactItems: rail.activityRows(items)
       readonly property var tools: rail.activityEntries(items)
-      readonly property bool toolsOpen: rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
+      readonly property bool smallTurn: rail.smallTurn(tools)
+      readonly property bool toolsOpen: smallTurn || rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
       readonly property var unresolved: rail.unresolvedFailures(tools)
       // Closed shows what other harnesses show by default: changes, actions, live and unresolved work; reads stay behind the toggle.
       readonly property var shownTools: {
@@ -5154,7 +5180,7 @@ Item {
         spacing: 8
         Icon {
           name: expanded ? "chevron-down" : "chevron-right"
-          width: 16; height: 16; color: actCol.parent.mutedColor
+          width: 12; height: 12; color: actCol.parent.mutedColor
           anchors.verticalCenter: parent.verticalCenter
         }
         Text {
@@ -5177,7 +5203,7 @@ Item {
         }
       }
       Item {
-        visible: actCol.tools.length > 0
+        visible: actCol.tools.length > 0 && !actCol.smallTurn
         x: 12; width: actCol.width - 24; height: detailsRow.implicitHeight
         ItemFocus { itemKey: ekey + "-tools"; anchors.fill: detailsRow }
       RowLayout {
@@ -5267,7 +5293,8 @@ Item {
           }
           text: ((entry.tool === "read" || entry.tool === "read_file") && rail.toolFiles(entry).length
             ? "read " + rail.toolFiles(entry)[0].split("/").pop() + rail.readRange(entry)
-            : (entry.tool === "bash" || entry.tool === "shell" ? String(entry.command || entry.text || "").split("\n")[0].replace(/^\s*bash\s+/, "") : entry.text)) + (cmdCol.isFailed ? "  — failed" : "")
+            : (cmdCol.isShell ? rail.commandTitle(entry.command || entry.text) : entry.text))
+                + (entry.runs ? "  ×" + entry.runs.length : "") + (cmdCol.isFailed ? "  — failed" : "")
                 + (liveNow ? "  · " + rail.runningToolLabel(rail.selectedRaw).split("· ").pop() : "")
           color: cmdCol.isErr ? Theme.red : (cmdCol.isFailed ? Theme.red : Theme.fg_secondary)
           font.family: Theme.fontFamily
@@ -5280,12 +5307,13 @@ Item {
         }
         Icon {
           visible: cmdCol.canExpand
+          opacity: cmdCol.open || cmdHover.hovered || (rail.itemMode && rail.itemFocus === gkey) ? 1 : 0
           name: cmdCol.open ? "chevron-down" : "chevron-right"
           width: 11; height: 11; color: Theme.fg_muted
           Layout.alignment: Qt.AlignVCenter
         }
         TapHandler { enabled: cmdCol.canExpand; onTapped: rail.toggleGroupKey(gkey) }
-        HoverHandler { enabled: cmdCol.canExpand; cursorShape: Qt.PointingHandCursor }
+        HoverHandler { id: cmdHover; enabled: cmdCol.canExpand; cursorShape: Qt.PointingHandCursor }
       }
       }
       Loader {
@@ -5302,61 +5330,66 @@ Item {
   }
   Component {
     id: editGroup
-    Rectangle {
-      id: writeCard
+    Item {
+      id: writeCardBox
       width: parent ? parent.width : 400
-      implicitHeight: writeCardCol.implicitHeight
-      radius: 10
-      color: Qt.rgba((Theme.canvas.r + rail.userCardBottom.r) / 2,
-                     (Theme.canvas.g + rail.userCardBottom.g) / 2,
-                     (Theme.canvas.b + rail.userCardBottom.b) / 2, 1)
-      border.width: 1; border.color: Theme.hairline
-      readonly property var files: parent.entry.files
-      Column {
-        id: writeCardCol
-        width: parent.width
-        Item {
-          width: parent.width; implicitHeight: writeTitle.implicitHeight + 24
-          RowLayout {
-            id: writeHeading
-            anchors.fill: parent; anchors.margins: 12
-            spacing: 8
-            Icon {
-              name: "square-plus"; width: 16; height: 16; color: Theme.fg_muted
-              Layout.minimumWidth: 16; Layout.maximumWidth: 16
-              Layout.minimumHeight: 16; Layout.maximumHeight: 16
+      implicitHeight: writeCard.implicitHeight + 12
+      Rectangle {
+        id: writeCard
+        y: 6; width: parent.width
+        implicitHeight: writeCardCol.implicitHeight
+        radius: 10
+        color: Qt.rgba((Theme.canvas.r + rail.userCardBottom.r) / 2,
+                       (Theme.canvas.g + rail.userCardBottom.g) / 2,
+                       (Theme.canvas.b + rail.userCardBottom.b) / 2, 1)
+        border.width: 1; border.color: Theme.hairline
+        readonly property var files: writeCardBox.parent.entry.files
+        Column {
+          id: writeCardCol
+          width: parent.width
+          Item {
+            width: parent.width; implicitHeight: writeTitle.implicitHeight + 24
+            RowLayout {
+              id: writeHeading
+              anchors.fill: parent; anchors.margins: 12
+              spacing: 8
+              Icon {
+                name: "square-plus"; width: 16; height: 16; color: Theme.fg_muted
+                Layout.minimumWidth: 16; Layout.maximumWidth: 16
+                Layout.minimumHeight: 16; Layout.maximumHeight: 16
+              }
+              Text {
+                id: writeTitle
+                text: (writeCard.files.some(file => file.partial) ? "Editing " : writeCard.files.some(file => file.failed) ? "File changes · " : "Edited ") + writeCard.files.length + " files"
+                color: Theme.fg_secondary; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+                elide: Text.ElideRight; Layout.maximumWidth: Math.max(0, writeHeading.width - writeDiff.implicitWidth - 48)
+              }
+              Row {
+                id: writeDiff
+                spacing: 6
+                Text { text: "+" + writeCard.files.reduce((total,file) => total + file.add,0); color: Theme.green; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+                Text { text: "-" + writeCard.files.reduce((total,file) => total + file.del,0); color: Theme.red; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+              }
+              Item { Layout.fillWidth: true }
             }
-            Text {
-              id: writeTitle
-              text: (writeCard.files.some(file => file.partial) ? "Editing " : writeCard.files.some(file => file.failed) ? "File changes · " : "Edited ") + writeCard.files.length + " files"
-              color: Theme.fg_secondary; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
-              elide: Text.ElideRight; Layout.maximumWidth: Math.max(0, writeHeading.width - writeDiff.implicitWidth - 48)
-            }
-            Row {
-              id: writeDiff
-              spacing: 6
-              Text { text: "+" + writeCard.files.reduce((total,file) => total + file.add,0); color: Theme.green; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
-              Text { text: "-" + writeCard.files.reduce((total,file) => total + file.del,0); color: Theme.red; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
-            }
-            Item { Layout.fillWidth: true }
           }
-        }
-        Repeater {
-          model: writeCard.files
-          Column {
-            width: writeCardCol.width
-            Rectangle { width: parent.width; height: 1; color: Theme.hairline }
-            Loader {
-              width: parent.width
-              property bool grouped: true
-              property var entry: modelData
-              property string gkey: rail.toolKey(writeCard.parent.gkey, entry, index)
-              property bool expanded: rail.expandedGroups[gkey] === true
-              property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === writeCard.parent.cardKey
-                && rail.activityFileRefs({kind:"turn",items:writeCard.parent.items})[rail.fileChoiceCur] === entry.path
-              property color textColor: writeCard.parent.textColor
-              property color mutedColor: writeCard.parent.mutedColor
-              sourceComponent: editActivityRow
+          Repeater {
+            model: writeCard.files
+            Column {
+              width: writeCardCol.width
+              Rectangle { width: parent.width; height: 1; color: Theme.hairline }
+              Loader {
+                width: parent.width
+                property bool grouped: true
+                property var entry: modelData
+                property string gkey: rail.toolKey(writeCardBox.parent.gkey, entry, index)
+                property bool expanded: rail.expandedGroups[gkey] === true
+                property bool fileSelected: rail.fileSelectOpen && rail.fileChoiceKey === writeCardBox.parent.cardKey
+                  && rail.activityFileRefs({kind:"turn",items:writeCardBox.parent.items})[rail.fileChoiceCur] === entry.path
+                property color textColor: writeCardBox.parent.textColor
+                property color mutedColor: writeCardBox.parent.mutedColor
+                sourceComponent: editActivityRow
+              }
             }
           }
         }
@@ -5948,6 +5981,7 @@ Item {
           id: diffToggle
           objectName: "edit-diff-toggle:" + (entry.path || "")
           visible: entry.failed === true || rail.entryDiff(entry).length > 0
+          opacity: expanded || writeHover.hovered || (rail.itemMode && (rail.itemFocus === gkey || rail.itemFocus === "open:" + gkey)) ? 1 : 0
           name: expanded ? "chevron-down" : "chevron-right"
           width: 11; height: 11; color: mutedColor
           Layout.alignment: Qt.AlignVCenter

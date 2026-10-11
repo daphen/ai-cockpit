@@ -104,10 +104,10 @@ ShellRoot {
         var selected = test.find(rail, item => item.cursor === true && item.turn && item.turn.kind === "turn")
         var selectedCard = selected && test.find(selected, item => item.radius === 18 && item.border && item.border.width === 1)
         var selectedContent = selectedCard && selectedCard.children.find(item => item.spacing === 16)
-        test.check(selectedCard && selectedCard.border.color.a > 0 && selectedContent && selectedContent.y === 16
+        test.check(selectedCard && selectedCard.border.color.a > 0 && selectedContent && selectedContent.y === 8
                    && selectedContent.anchors.leftMargin === 36 && selectedContent.anchors.rightMargin === 36
                    && Math.abs(test.label("The ").mapToItem(selectedCard,0,0).x - 24) < 1
-                   && Math.abs(selectedCard.height - selectedContent.height - 32) < 1,
+                   && Math.abs(selectedCard.height - selectedContent.height - 16) < 1,
                    "selected article must have a purple outline and equal top/bottom padding")
         test.check(test.countLabels(rail, "Sol") === 0, "agent replies still show a model header")
         test.check(!test.find(rail, item => item.name === "sparkle-3" && item.parent.visible && !test.find(item.parent, child => child.text && child.text.indexOf("From ") === 0)), "agent replies still show a sparkle icon")
