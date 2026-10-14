@@ -51,7 +51,7 @@ if [ "$COCKPIT_INSTANCE" != "main" ]; then
   safe_instance=$(printf '%s' "$COCKPIT_INSTANCE" | tr -c 'A-Za-z0-9_-' '_')
   mirror="$HOME/.local/state/cockpit/instance-$safe_instance-shell"
   mkdir -p "$mirror"; rm -f "$mirror"/*.qml
-  for f in "$PWD"/qs-shell/*.qml; do ln -s "$f" "$mirror/$(basename "$f")"; done
+  for f in "$PWD"/qs-shell/*.{qml,py}; do ln -sf "$f" "$mirror/$(basename "$f")"; done
   shellDir="$mirror"
 fi
 for v in SCOPE NEW_CWD AGENTD_SOCKS AGENTD_SOCK TITLE VM VM_USER VM_HOST DEMO DEV; do
