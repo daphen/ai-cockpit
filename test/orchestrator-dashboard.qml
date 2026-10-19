@@ -15,7 +15,7 @@ ShellRoot {
   FileView { id: calls; path: Quickshell.env("HOME") + "/workspace-call"; blockAllReads: true; printErrors: false }
   FloatingWindow {
     visible: true; implicitWidth: 720; implicitHeight: 800
-    Rail { id: rail; anchors.fill: parent; scopeMode: "work"; instanceName: "orchestrator-test"; agentd: state; nvimSock: Quickshell.env("HOME") + "/nvim.sock" }
+    Rail { id: rail; anchors.fill: parent; scopeMode: "work"; instanceName: "orchestrator-test"; agentd: state; nvimSock: Quickshell.env("HOME") + "/nvim.sock"; remoteNvimSock: nvimSock }
   }
   Timer {
     interval: 100; running: true; repeat: true
@@ -34,6 +34,7 @@ ShellRoot {
       var args = JSON.parse(text)
       if (test.phase === 1 && args[1] === "conductor") {
         if (args[2] !== "/remote-host/src/lovable" || args[6] !== "lovable-orchestrator") throw new Error("orchestrator landing lost its remote cwd or role: " + text)
+        if (args[8] !== "") throw new Error("VM editor was told to fetch its own checkout through agentd: " + text)
         rail.jumpToSession("worker"); test.phase++
       } else if (test.phase === 2 && args[1] === "worker") {
         if (args[6] !== "lovable-worker") throw new Error("worker landing lost its role")

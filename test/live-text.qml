@@ -4,6 +4,7 @@ import "."
 
 ShellRoot {
   id: test
+  property int settleTicks: 0
   property int phase: 0
   property int activeRequests: 0
   property int hiddenRequests: 0
@@ -36,6 +37,7 @@ ShellRoot {
       if (test.phase === 0) {
         test.broadcast({ type: "roster", sessions: [{ id: "ticket-a", name: "ticket-a", cwd: "/tmp/fixture", status: "streaming" }] })
       } else if (test.phase === 1) {
+        if (++test.settleTicks < 3) return   // a session switch fetches and builds once the roster collapse ends
         test.broadcast({ type: "response", command: "get_entries", session: "ticket-a", data: { entries: [] } })
         hidden.selectedSession = ""
         test.activeRequests = 0; test.hiddenRequests = 0

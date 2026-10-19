@@ -9,18 +9,18 @@ ShellRoot {
   property int ticks: 0
   property bool ready: false
   property bool dirtyReady: false
-  readonly property string vm: "/home/david_karlsson_lovable_dev/src/"
-  readonly property string mirror: Quickshell.env("HOME") + "/work/lovable.daphen-every-123"
+  readonly property string vm: Quickshell.env("HOME") + "-vm/src/"
+  readonly property string checkout: vm + "lovable-every-123"
   readonly property string socket: Quickshell.env("HOME") + "/nvim.sock"
   Process {
     running: true
-    command: ["sh", "-c", 'mkdir -p "$HOME/.config/niri/scripts" "$HOME/work/lovable" "$HOME/work/lovable.daphen-every-123"; touch "$HOME/work/lovable.daphen-every-123/dirty.txt"; printf \'#!/bin/sh\necho "$*" >> "$HOME/calls"\necho "blocked dirty $2" >&2\nexit 7\n\' > "$HOME/.config/niri/scripts/vm-wt"; chmod +x "$HOME/.config/niri/scripts/vm-wt"; : > "$HOME/calls"']
+    command: ["sh", "-c", 'mkdir -p "$HOME/.config/niri/scripts" "$HOME-vm/src/lovable" "$HOME-vm/src/lovable-every-123"; touch "$HOME-vm/src/lovable-every-123/dirty.txt"; printf \'#!/bin/sh\necho "$*" >> "$HOME/calls"\necho "blocked dirty $2" >&2\nexit 7\n\' > "$HOME/.config/niri/scripts/vm-wt"; chmod +x "$HOME/.config/niri/scripts/vm-wt"; : > "$HOME/calls"']
     onExited: (code, status) => { if (code) throw new Error("setup failed"); test.ready = true }
   }
-  Process { running: ready; command: ["nvim", "--headless", "--listen", socket, "-c", "cd " + mirror] }
+  Process { running: ready; command: ["nvim", "--headless", "--listen", socket, "-c", "cd " + checkout] }
   Process {
     id: dirtyEditor
-    property string lua: '(function() local cwd=(vim.uv or vim.loop).cwd(); vim.cmd("edit "..vim.fn.fnameescape(' + JSON.stringify(mirror + "/dirty.txt") + ')); vim.api.nvim_buf_set_lines(0,0,-1,false,{"dirty"}); return cwd end)()'
+    property string lua: '(function() local cwd=(vim.uv or vim.loop).cwd(); vim.cmd("edit "..vim.fn.fnameescape(' + JSON.stringify(checkout + "/dirty.txt") + ')); vim.api.nvim_buf_set_lines(0,0,-1,false,{"dirty"}); return cwd end)()'
     command: ["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"]
     stdout: StdioCollector { id: dirtyOutput }
     onExited: (code, status) => { if (code) throw new Error("editor setup failed"); test.dirtyReady = true }
@@ -35,7 +35,7 @@ ShellRoot {
     visible: true
     implicitWidth: 720
     implicitHeight: 800
-    Rail { id: rail; anchors.fill: parent; agentd: state; scopeMode: "work"; focused: true; nvimSock: test.socket }
+    Rail { id: rail; anchors.fill: parent; agentd: state; scopeMode: "work"; focused: true; nvimSock: test.socket; remoteNvimSock: test.socket }
   }
   TestEvent { id: input }
   FileView { id: calls; path: Quickshell.env("HOME") + "/calls" }
@@ -75,7 +75,7 @@ ShellRoot {
       } else if (phase === 3 && rail.lifecycleMessage.indexOf("exit 7") >= 0) {
         calls.reload(); dirtyEditor.running = true; phase++
       } else if (phase === 4 && dirtyReady) {
-        check(dirtyOutput.text.trim() === Quickshell.env("HOME") + "/work/lovable", "cwd was not released")
+        check(dirtyOutput.text.trim() === vm + "lovable", "cwd was not released")
         check(calls.text().trim() === "--reap EVERY-123", "wrong canonical command")
         check(state.sessions.some(function(s) { return s.name === "ticket-worker" }), "row removed early")
         openActions(); phase++

@@ -31,7 +31,7 @@ ShellRoot {
   }
   function row(text) { return rail.groupedFeed.find(item => item.kind === "user" && item.text === text) }
   function find(item, text) {
-    if (item.visible && item.text === text) return item
+    if (item.visible && (item.text === text || item.objectName === text)) return item
     for (var child of item.children || []) { var found = find(child,text); if (found) return found }
     return null
   }
@@ -58,6 +58,8 @@ ShellRoot {
       } else if (test.phase === 2) {
         test.check(test.sent.filter(item => item.message === "Offline copy").length === 1,"resend did not use the normal transport exactly once")
         test.check(test.row("Offline copy").delivery === "pending","resend retained failure status")
+        var pending = test.find(rail,"delivery-status")
+        test.check(pending && pending.delivery === "pending" && pending.children[0].visible && pending.children[0].running && !pending.children[1].visible, "pending message lacks its spinner")
         test.reply(false)
       } else if (test.phase === 3) {
         test.check(state.feedFor("worker").some(item => item.text === "Offline copy" && item.delivery === "failed"),"Pi rejection did not mark the matching message failed")
@@ -77,7 +79,9 @@ ShellRoot {
       } else if (test.phase === 5) {
         test.check(test.row("Slow steer").delivery === "accepted","delayed accepted steer was mislabelled")
         test.check(!test.find(rail,"Resend") && !test.find(rail,"Discard"),"accepted message offers resend or discard")
-        test.check(!!test.find(rail,"✓ sent"),"accepted message lacks its quiet sent status")
+        var status = test.find(rail,"delivery-status"), header = status && status.parent
+        test.check(status && status.delivery === "accepted" && status.children[1].visible && !status.children[0].visible && !test.find(rail,"✓ sent"), "accepted message lacks its sent check")
+        test.check(Math.abs(status.x + status.width - header.width) < 0.5, "sent check is not at the right edge of the header")
         test.history("Slow steer")
       } else if (test.phase === 6) {
         test.check(test.row("Slow steer") && !test.row("Slow steer").deliveryId,"later confirmed history was hidden or retained local controls")

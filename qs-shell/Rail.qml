@@ -35,6 +35,9 @@ Item {
   // on. Never rebuild this path here: a guessed shared name is how the rail ended up
   // talking to a socket a newer Cockpit had already unlinked.
   property string nvimSock: ""
+  property string localNvimSock: nvimSock
+  property string remoteNvimSock: ""
+  signal editorRequested(string socket)
   property bool focused: false
   signal focusNvim()
   signal requestFocus()   // a click in the rail should pull focus here
@@ -189,6 +192,7 @@ Item {
     id: feedScroll
     view: feedView
     chatVisible: rail.view === "chat"
+    indexOffset: rail._feedOffset
     onWantCursorAtEnd: (force) => {
       // "The end" is the end of the FEED. With no feed rows, navTotal - 1 is the last
       // roster row, and honouring it here is what dropped the cursor onto an unrelated
@@ -261,15 +265,16 @@ Item {
     lifecycleProc.action = action; lifecycleProc.ticket = target.ticket; lifecycleProc.session = target.session
     lifecycleProc.command = [Quickshell.env("HOME") + "/.config/niri/scripts/vm-wt", "--" + action, target.ticket]
     if (action === "reap") {
-      var mirror = _localPath(_sessionCwdOf(target.session)), parentRepo = mirror.replace(/\.[^/]+$/, "")
-      if (!nvimSock.length || parentRepo === mirror) {
+      var checkout = _sessionCwdOf(target.session), socket = _editorSocket(checkout)
+      var parentRepo = checkout.replace(/\/lovable[.-][^/]+$/, "/lovable")
+      if (!socket || parentRepo === checkout) {
         lifecycleMessage = "REAP " + target.ticket + " blocked: bound editor or parent repo unavailable"
         feedbackPill.show(lifecycleMessage); closeLifecycle(); return
       }
-      var lua = '(function() local m=' + JSON.stringify(mirror) + '; local p=' + JSON.stringify(parentRepo)
+      var lua = '(function() local m=' + JSON.stringify(checkout) + '; local p=' + JSON.stringify(parentRepo)
         + '; for _,b in ipairs(vim.api.nvim_list_bufs()) do local n=vim.api.nvim_buf_get_name(b); if n~="" and vim.bo[b].modified and (n==m or n:sub(1,#m+1)==m.."/") then return "BLOCK modified file: "..n end end'
         + '; local cwd=(vim.uv or vim.loop).cwd(); if cwd==m or cwd:sub(1,#m+1)==m.."/" then vim.cmd("noautocmd cd "..vim.fn.fnameescape(p)) end; return "OK" end)()'
-      lifecycleProc.command = ["sh", "-c", 'r=$(nvim --server "$1" --remote-expr "$2" 2>&1); c=$?; if [ "$c" -ne 0 ] || [ "$r" != OK ]; then echo "$r" >&2; exit 125; fi; exec "$HOME/.config/niri/scripts/vm-wt" --reap "$3"', "reap-check", nvimSock, "luaeval(" + JSON.stringify(lua) + ")", target.ticket]
+      lifecycleProc.command = ["sh", "-c", 'r=$(nvim --server "$1" --remote-expr "$2" 2>&1); c=$?; if [ "$c" -ne 0 ] || [ "$r" != OK ]; then echo "$r" >&2; exit 125; fi; exec "$HOME/.config/niri/scripts/vm-wt" --reap "$3"', "reap-check", socket, "luaeval(" + JSON.stringify(lua) + ")", target.ticket]
     }
     lifecycleMessage = (action === "reap" ? "REAP " : "Turn off ") + target.ticket + "…"
     closeLifecycle(); lifecycleProc.running = true
@@ -387,7 +392,7 @@ Item {
       "ls ~/.pi/agent/prompts 2>/dev/null | sed 's/\\.md$//'; " +
       "for d in ~/.pi/agent/skills/*/; do [ -d \"$d\" ] && basename \"$d\" | sed 's|^|skill:|'; done"]
     stdout: StdioCollector {
-      onStreamFinished: rail.commands = ["goal", "handover"]
+      onStreamFinished: rail.commands = ["goal", "handover", "reload"]
         .concat(String(this.text || "").split("\n").filter(s => s.length > 0))
     }
   }
@@ -424,6 +429,8 @@ Item {
       // a file reference, not a snippet to yank.
       if (kind === "inline" && /^(?:[\w.@~-]+\/)+[\w.@-]+\.\w{1,6}(?::\d+)?$/.test(String(m[3]).trim()))
         kind = "file"
+      else if (kind === "inline" && /^https?:\/\/\S+$/.test(String(m[3]).trim()))
+        kind = "url"
       var runnable = kind === "fence" && _shellLanguage(m[1])
       if ((mode === "hint" && !(kind === "url" || kind === "file" || runnable)) ||
           (mode === "yank" && !(kind === "url" || kind === "inline" || kind === "fence" || kind === "file"))) continue
@@ -432,7 +439,7 @@ Item {
         kind: runnable ? "shell" : kind,
         value: kind === "fence" ? m[2]
           : kind === "file" ? String(m[6] !== undefined ? (m[6] + (m[7] || "")) : m[3]).trim()
-          : kind === "inline" ? m[3] : (m[4] || m[5]),
+          : kind === "inline" ? m[3] : String(m[4] || m[5] || m[3]).trim(),
         start: base + m.index,
         end: base + m.index + m[0].length
       })
@@ -524,20 +531,19 @@ Item {
     // span (palette dark blue wins over the font tag) — a zero-width space after
     // :// breaks the re-detection, invisibly.
     function safeLabel(x) { return String(x).replace("://", "://\u200B") }
-    var out = String(t || "").replace(/\[([^\]]*)\]\(([^\s)]+)\)/g,
-      function (all, label, url) {
-        return "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(label) + "</u></font>](" + url + ")"
-      })
-    // Bare URLs too: Qt autolinks them but paints with the PALETTE link color
-    // (near-invisible dark blue on the dark ground), ignoring linkColor — so wrap
-    // them into explicit colored markdown links ourselves.
-    return out.replace(/(^|[\s])(https?:\/\/[^\s)<>"]+)/g, function (all, pre, url) {
-      return pre + "[<font color=\"" + rail.summaryHex + "\"><u>" + safeLabel(url) + "</u></font>](" + url + ")"
-    })
+    // Qt's markdown reader drops the link when the label holds raw HTML, so emit an HTML anchor.
+    function link(label, url) {
+      return "<a href=\"" + String(url).replace(/&/g, "&amp;").replace(/"/g, "&quot;") + "\"><font color=\""
+        + rail.summaryHex + "\"><u>" + safeLabel(label) + "</u></font></a>"
+    }
+    return String(t || "")
+      .replace(/\[([^\]]*)\]\(([^\s)]+)\)/g, (all, label, url) => link(label, url))
+      .replace(/`(https?:\/\/[^\s`<>"]+)`/g, (all, url) => link(url, url))
+      .replace(/(^|[\s])(https?:\/\/[^\s)<>"]+)/g, (all, pre, url) => pre + link(url, url))
   }
+
   // agentd emits a `changes` diff only at TURN END, so an idle session's rows would
-  // show no numbers. Ask for the on-demand local diff instead, mapping the session's
-  // cwd through the vm-sync mirror so it works for remote sessions too.
+  // show no numbers. Ask for the on-demand diff instead.
   property var _changesAsked: ({})
   function _ensureChanges() {
     if (!agentd || !selectedRaw || _changesAsked[selectedRaw]) return
@@ -550,8 +556,7 @@ Item {
     }
     if (!cwd) return
     _changesAsked[selectedRaw] = true
-    var localCwd = _localPath(cwd)
-    agentd.refreshChanges(selectedRaw, localCwd)
+    agentd.refreshChanges(selectedRaw, cwd)
   }
 
   // decorateMarkdown injects hint labels INTO the prose text; a path that became its
@@ -1021,38 +1026,6 @@ Item {
     property int n: 0
     onTriggered: { rail.landNvim(rail.selectedRaw); n++; if (n >= 3) { running = false; n = 0; rail._landed = true } }
   }
-  // Remote lovbox sessions report a BOX path (/home/lovable/…). The local nvim
-  // edits those files via the SSHFS mount, so rewrite box paths to the Cockpit mirror.
-  // Remote path → its local mutagen mirror. One entry per remote we sync: the old
-  // lovbox rooted at /home/lovable, and the dev VM whose worktrees live under
-  // ~<vmuser>/src (vm-wt mirrors those to ~/lovbox/vm). Without the VM entry,
-  // live-follow cd'd nvim to a VM-absolute path that does not exist locally, which
-  // is why the editor came up on an empty buffer.
-  readonly property var _mirrors: [
-    { remote: "/home/lovable",
-      local: Quickshell.env("HOME") + "/lovbox/cockpit" },
-    // The VM's worktrees mirror into REAL local git worktrees (…/work/lovable.daphen-<t>),
-    // not a bare directory: gitsigns, hunk jumping and the dashboard all need a
-    // repository, and a plain mirror has none — mutagen has to skip .git because a
-    // worktree's .git is a FILE holding a VM-absolute gitdir.
-    { remote: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable-",
-      local: Quickshell.env("HOME") + "/work/lovable.daphen-" },
-    { remote: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/src/lovable.",
-      local: Quickshell.env("HOME") + "/work/lovable." }
-  ]
-  function _localPath(p) {
-    var s = String(p || "")
-    for (var i = 0; i < _mirrors.length; i++) {
-      var m = _mirrors[i]
-      if (s === m.remote) return m.local
-      // Plain prefix, NOT only at a "/" boundary: the VM entry ends in "lovable-" so a
-      // path like …/src/lovable-every-2741 has no slash after the prefix. Requiring one
-      // silently matched nothing, so every remote cwd passed through as a VM path,
-      // isdirectory() failed, and nvim never changed directory.
-      if (s.indexOf(m.remote) === 0) return m.local + s.substring(m.remote.length)
-    }
-    return s
-  }
   // Remote = the cwd is not under THIS machine's home. agentd reports cwd as the
   // machine running pi sees it, so a path outside our own $HOME can only be another
   // box. Hardcoding /home/lovable only matched the old lovbox and read the dev VM
@@ -1063,16 +1036,12 @@ Item {
     var home = String(Quickshell.env("HOME") || "/home/daphen")
     return !(s === home || s.indexOf(home + "/") === 0)
   }
-  // Inverse of _localPath: a path under the local mirror → the path the BOX sees.
-  // Needed because pi runs IN the box, so an @attachment must be a box path.
-  function _remotePath(p) {
-    var s = String(p || "")
-    for (var i = 0; i < _mirrors.length; i++) {
-      var m = _mirrors[i]
-      if (s === m.local) return m.remote
-      if (s.indexOf(m.local) === 0) return m.remote + s.substring(m.local.length)
-    }
-    return s
+  function _editorSocket(cwd) { return scopeMode === "work" && _isRemote(cwd) ? remoteNvimSock : localNvimSock }
+  function _contextSocket(data) {
+    if (!data.editor) return localNvimSock
+    for (var socket of [localNvimSock, remoteNvimSock])
+      if (socket && socket.split("/").pop() === data.editor) return socket
+    return ""
   }
   // ── image paste ─────────────────────────────────────────────────────────────
   property var pastedImages: []   // filenames pasted this session, shown as composer chips
@@ -1085,11 +1054,14 @@ Item {
   onComposerKeyChanged: planMenu = null
   readonly property var codeAttachments: codeDrafts[composerKey] || []
   FileView { id: editorContextFile; preload: false; blockAllReads: true; printErrors: false }
-  function receiveEditorContext(path) {
-    editorContextFile.path = path
+  function receiveEditorContext(input) {
     var data
-    try { data = JSON.parse(editorContextFile.text()) } catch (e) { return "could not read editor context" }
+    try {
+      if (String(input).charAt(0) === "{") data = JSON.parse(input)
+      else { editorContextFile.path = input; data = JSON.parse(editorContextFile.text()) }
+    } catch (e) { return "could not read editor context" }
     if (data.session !== selectedRaw || data.mode !== scopeMode) return "selected session changed; attach again"
+    if (!_contextSocket(data)) return "editor does not belong to this window"
     if (data.kind === "menu") {
       planMenu = data; planChoice = 0; exitInsert(); requestFocus()
       return "accepted"
@@ -1119,12 +1091,14 @@ Item {
     Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval('require(\"plan-nvim\").menu()')"])
   }
   function choosePlan(index) {
-    if (!planMenu || !nvimSock) return
+    if (!planMenu) return
+    var socket = _contextSocket(planMenu)
+    if (!socket) return
     var action = planMenu.actions ? planMenu.actions[index] : index + 1
     var lua = 'require("plan-nvim").menu(' + JSON.stringify(action) + ',' + JSON.stringify(planMenu.path) + ')'
     planMenu = null
     if (action === "cancel") return
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
+    Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
   }
   FileView {
     id: planSubmitFile
@@ -1145,11 +1119,18 @@ Item {
     }
   }
   function sendPlanDraft() {
-    if (planSubmit.running || !planDraft || !nvimSock) return
+    if (planSubmit.running || !planDraft) return
+    var socket = _contextSocket(planDraft)
+    if (!socket) return
     planSubmit.key = composerKey; planSubmit.draftText = composerText; planSubmit.codes = codeDrafts[composerKey]
-    planSubmitFile.setText(JSON.stringify({ id: planDraft.id, text: attachRefs(composerText) }))
-    var lua = 'require("plan-nvim").submit_compose(' + JSON.stringify(planSubmitFile.path) + ')'
-    planSubmit.command = ["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"]
+    var payload = JSON.stringify({ id: planDraft.id, text: attachRefs(composerText) }), lua
+    if (socket === remoteNvimSock)
+      lua = 'require("plan-nvim").submit_compose(vim.json.decode(' + JSON.stringify(payload) + '))'
+    else {
+      planSubmitFile.setText(payload)
+      lua = 'require("plan-nvim").submit_compose(' + JSON.stringify(planSubmitFile.path) + ')'
+    }
+    planSubmit.command = ["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"]
     planSubmit.running = true
   }
   // pi needs @references in the prompt: each [image N] token is replaced IN PLACE
@@ -1161,30 +1142,21 @@ Item {
       for (var i = 0; i < pastedImages.length; i++)
         if (String(pastedImages[i]).indexOf(stem + ".") === 0) { f = pastedImages[i]; break }
       if (!f) return all
-      if (pasteViaSsh) return "@" + vmPasteDir + "/" + f
-      return pasteRemote ? "@.heidr-pastes/" + f
-                         : "@" + Quickshell.env("HOME") + "/.cache/heidr-pastes/" + f
+      return "@" + (pasteViaSsh ? vmPasteDir : pasteDir) + "/" + f
     })
     for (var code of codeAttachments) {
       var fence = "```"
       while (code.text.indexOf(fence) >= 0) fence += "`"
-      text += "\n\nSelected code: " + _remotePath(code.path) + ":" + code.l1 + "-" + code.l2
+      text += "\n\nSelected code: " + code.path + ":" + code.l1 + "-" + code.l2
         + "\n" + fence + (code.lang || "") + "\n" + code.text + "\n" + fence
         + (code.fromPlan ? "\nAnswer in chat; do not edit the plan." : "")
     }
     return text
   }
-  readonly property bool pasteRemote: {
-    var cwd = _sessionCwdOf(selectedRaw)
-    return _isRemote(cwd)
-  }
-  readonly property bool pasteViaSsh: pasteRemote && _sessionCwdOf(selectedRaw).indexOf(
+  readonly property bool pasteViaSsh: _sessionCwdOf(selectedRaw).indexOf(
     "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/") === 0
   readonly property string vmPasteDir: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/.cache/heidr-pastes"
-  property string pasteDirFor: {
-    if (!pasteRemote || pasteViaSsh) return Quickshell.env("HOME") + "/.cache/heidr-pastes"
-    return rail._localPath(_sessionCwdOf(selectedRaw)) + "/.heidr-pastes"
-  }
+  readonly property string pasteDir: Quickshell.env("HOME") + "/.cache/heidr-pastes"
   Process {
     id: pasteProc
     stdout: StdioCollector {
@@ -1203,7 +1175,7 @@ Item {
       }
     }
   }
-  // VM caches do not depend on a ticket mirror and cannot enter a project commit.
+  // VM caches cannot enter a project commit.
   function _pushPasteRemote(name) {
     if (!pasteViaSsh) return
     var vmuser = cockpitEnv("VM_USER") || "david_karlsson_lovable_dev"
@@ -1213,7 +1185,7 @@ Item {
             + " -o ControlMaster=auto -o ControlPath=" + Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-vm-cm"
             + " -o ControlPersist=600 -o ConnectTimeout=15"
     var rdir = vmPasteDir
-    var local = pasteDirFor + "/" + name
+    var local = pasteDir + "/" + name
     Quickshell.execDetached(["sh", "-c",
       ssh + " " + vmuser + "@" + host + " 'mkdir -p " + JSON.stringify(rdir) + "' && "
       + "scp " + ssh.substring(4) + " " + JSON.stringify(local) + " "
@@ -1226,7 +1198,7 @@ Item {
       // Teach the host repo to ignore the paste stash the moment it exists: without
       // this, agents running `git add -A` commit screenshots, and the changes view
       // counts them as project files.
-      'd=' + JSON.stringify(rail.pasteDirFor) + '; mkdir -p "$d" || exit 0; ' +
+      'd=' + JSON.stringify(rail.pasteDir) + '; mkdir -p "$d" || exit 0; ' +
       'g=$(cd "$d/.." && git rev-parse --absolute-git-dir 2>/dev/null); ' +
       'if [ -n "$g" ]; then grep -qxF ".heidr-pastes/" "$g/info/exclude" 2>/dev/null || { mkdir -p "$g/info"; echo ".heidr-pastes/" >> "$g/info/exclude"; }; fi; ' +
       't=$(wl-paste --list-types 2>/dev/null | grep -m1 "^image/"); ' +
@@ -1276,68 +1248,47 @@ Item {
     if (!slug || !nvimSock.length) return
     landNvim(selectedRaw, "plan")
   }
-  function landNvim(sid, view) {
+  Process {
+    id: planLookup
+    property string sid: ""
+    property string plan: ""
+    property string cwd: ""
+    property string mode: ""
+    stdout: StdioCollector { id: planLookupOutput }
+    onExited: (code, status) => {
+      var session = rail._sessionOf(sid)
+      if (rail.selectedRaw !== sid || rail.scopeMode !== mode || !session
+          || String(session.plan || "") !== plan || String(session.cwd || "") !== cwd) return
+      if (code !== 0) { feedbackPill.show("Could not check the VM checkout plan"); return }
+      rail.landNvim(sid, "plan", planLookupOutput.text.trim() === "1" ? rail.remoteNvimSock : rail.localNvimSock)
+    }
+  }
+  function landNvim(sid, view, chosenSocket) {
     if (!sid || !agentd) return
     var ss = _sessionOf(sid)
     var cwd = ss ? String(ss.cwd || "") : "", plan = ss ? String(ss.plan || "") : ""
     if (!cwd) return
+    var socket = chosenSocket || _editorSocket(cwd)
+    if (!socket) { feedbackPill.show("VM editor is connecting"); return }
+    if (!chosenSocket && socket === remoteNvimSock && view === "plan" && plan) {
+      if (planLookup.running) return
+      planLookup.sid = sid; planLookup.plan = plan; planLookup.cwd = cwd; planLookup.mode = scopeMode
+      planLookup.command = ["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify('vim.fn.filereadable(' + JSON.stringify(cwd + "/.plans/" + plan + ".md") + ')') + ")"]
+      planLookup.running = true
+      return
+    }
     _landedFor = sid + "@" + cwd + "#" + plan
-    var localCwd = rail._localPath(cwd)
-    var latest = rail._localPath(String(agentd.lastEditFor(sid) || ""))
+    var localCwd = chosenSocket === localNvimSock
+      ? Quickshell.env("HOME") + "/personal/notes/storage" : cwd
+    var latest = view === "plan" ? "" : String(agentd.lastEditFor(sid) || "")
     if (latest && latest.charAt(0) !== "/") latest = localCwd + "/" + latest
-    if (!nvimSock.length) return
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr",
-      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
+    editorRequested(socket)
+    Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr",
+      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) && socket !== remoteNvimSock ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
   }
   function showWorkspace(view) {
     landNvim(selectedRaw, view)
     focusNvim()
-  }
-
-  Process {
-    id: mirrorPrepare
-    property string sessionName: ""
-    property string remoteCwd: ""
-    property bool rerun: false
-    stdout: StdioCollector { id: mirrorOutput }
-    stderr: StdioCollector { id: mirrorError }
-    onExited: (code, status) => {
-      if (rerun || rail.selectedRaw !== sessionName || rail._sessionCwdOf(sessionName) !== remoteCwd) {
-        rerun = false
-        Qt.callLater(rail._prepareSelectedMirror)
-        return
-      }
-      if (code !== 0) {
-        var detail = (mirrorError.text || mirrorOutput.text || "exit " + code).replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").trim()
-        feedbackPill.show("Local mirror unavailable: " + detail.slice(0, 180))
-        console.warn("mirror preparation failed for " + sessionName + ": " + detail)
-        return
-      }
-      var ss = rail._sessionOf(sessionName)
-      var local = rail._localPath(remoteCwd)
-      if (rail.agentd) rail.agentd.refreshChanges(sessionName)
-      if (!rail.nvimSock.length) return
-      var args = [rail.scopeMode, sessionName, local, String(ss.plan || ""), "dashboard", "", String(ss.profile || ""), String(ss.scope || ""), remoteCwd].map(JSON.stringify).join(",")
-      var lua = '(function() local m=require("cockpit"); local d=m.dashboard_snapshot(); if d.active and d.model.cwd=='
-        + JSON.stringify(local) + ' then m.workspace(' + args + ') end; require("cockpit.chin").refresh(); return "" end)()'
-      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
-    }
-  }
-  function _prepareSelectedMirror() { _alignMirror(selectedRaw) }
-  function _alignMirror(sid) {
-    var cwd = _sessionCwdOf(sid)
-    if (!cwd || !rail._isRemote(cwd) || !/\/src\/lovable[.-][^/]+$/.test(cwd)) return
-    if (mirrorPrepare.running) { mirrorPrepare.rerun = true; return }
-    var ticket = cwd.match(/(every-\d+)(?:-|$)/i)
-    if (!ticket) return
-    var args = [Quickshell.env("HOME") + "/.config/niri/scripts/vm-sync", "--prepare"]
-    if (!/\/src\/lovable-every-\d+$/i.test(cwd)) args.push("--remote-cwd", cwd)
-    args.push(ticket[1])
-    mirrorPrepare.rerun = false
-    mirrorPrepare.sessionName = sid
-    mirrorPrepare.remoteCwd = cwd
-    mirrorPrepare.command = args
-    mirrorPrepare.running = true
   }
 
   function openInNvim(path, baseCwd, line, column) {
@@ -1346,21 +1297,22 @@ Item {
     if (p.indexOf("~/") === 0) p = Quickshell.env("HOME") + p.substring(1)
     if (p.charAt(0) !== "/") {
       var cwd = String(baseCwd || changesCwd || "")
-      var repoPath = rail._localPath(cwd ? cwd + "/" + p : p)
+      var repoPath = cwd ? cwd + "/" + p : p
       if (/^(inbox|journal|meetings|memory|plans|references|reviews)\//.test(p)) {
         alternate = repoPath
         p = Quickshell.env("HOME") + "/personal/notes/storage/" + p
       } else p = repoPath
     }
-    p = rail._localPath(p)
-    alternate = rail._localPath(alternate)
+    var socket = _editorSocket(p)
+    if (!socket) { feedbackPill.show("VM editor is connecting"); return }
+    editorRequested(socket)
     var row = Math.max(1, Number(line) || 1), col = Math.max(1, Number(column) || 1)
     var lua = '(function() local p=' + JSON.stringify(p) + '; local alt=' + JSON.stringify(alternate)
       + '; if vim.fn.filereadable(p)~=1 and alt~="" and vim.fn.filereadable(alt)==1 then p=alt end'
       + '; if vim.fn.filereadable(p)~=1 then vim.notify("file no longer exists: "..p, vim.log.levels.WARN); return "" end'
       + '; vim.cmd.CockpitEdit(p); if vim.api.nvim_buf_get_name(0)~=p then return "" end'
       + '; vim.api.nvim_win_set_cursor(0, {' + row + ',' + (col - 1) + '}); return "" end)()'
-    Quickshell.execDetached(["nvim", "--server", nvimSock, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
+    Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"])
     rail.focusNvim()
   }
   function openRequestedFile(sid, path, line, column) {
@@ -1826,8 +1778,6 @@ Item {
     if (!f) return { name: daemonUp ? "no sessions" : "disconnected", rawName: "", state: "", status: "idle" }
     return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
   }
-  onSelectedStatusChanged: if (selectedStatus === "idle") Qt.callLater(rail._prepareSelectedMirror)
-  onSelectedCwdChanged: Qt.callLater(rail._prepareSelectedMirror)
 
   function fleetActivityColors(sid) {
     agentd ? agentd.curToolGen : 0
@@ -1920,7 +1870,7 @@ Item {
   // ── new session ─────────────────────────────────────────────────────────────
   // Enter on the roster's last row opens this: pick where it runs, name it, done.
   // local  → an agentd session in the lovable scope at the main checkout
-  // remote → `vm-wt <ticket>`, which also makes the worktree + devenv slice + mirror
+  // remote → `vm-wt <ticket>`, which also makes the worktree + worker session
   property bool newOpen: false
   property string newMode: ""      // "" = choosing, then "local" | "remote"
   // Remote (VM worktree) sessions are a LOVABLE concept — the personal scope has no
@@ -2184,11 +2134,11 @@ Item {
   property bool _restoring: false
 
   onSelectedRawChanged: {
-    Qt.callLater(rail._prepareSelectedMirror)
     rememberRecent(selectedRaw)
     rememberSelection(selectedRaw)
     _ensureChanges()
     if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
+    var hadPrevious = _prevSelected !== ""
     if (_prevSelected) {
       var m = _seenAt
       if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
@@ -2200,6 +2150,11 @@ Item {
     // Restore the panel (chat/files) this session was last viewed on.
     view = _viewFor[selectedRaw] || "chat"
     _feedReset = true
+    if (hadPrevious) beginSwitchFade()
+    else if (selectedRaw) {
+      if (agentd) agentd.select(selectedRaw)
+      if (_landed) landNvim(selectedRaw)
+    }
     // Report the rebuild, don't just do it: synced() is what consumes a pending jump, and
     // it was only ever reached from the stream debounce. Switching to an IDLE session on a
     // quiet daemon produced no further ticks, so the jump queued below never ran at all —
@@ -2221,16 +2176,12 @@ Item {
       _restoring = false
       feedScroll.toEnd()
     }
-    if (agentd) agentd.select(selectedRaw)
     // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
     // every switch, so the editor always tracks the session you're viewing.
     // First switch retries (nvim's RPC socket may not be up yet); after nvim has
     // answered once, land EXACTLY once per switch — the 3x retry re-ran cd +
     // dashboard three times and the buffer visibly blinked on every session change.
-    if (selectedRaw) {
-      if (_landed) rail.landNvim(selectedRaw)
-      else { landTimer.n = 0; landTimer.restart() }
-    }
+    if (selectedRaw && !_landed) { landTimer.n = 0; landTimer.restart() }
   }
 
   function _sessionOf(sid) {
@@ -2248,6 +2199,7 @@ Item {
   function _followsSelected(sid) {
     var session = _sessionOf(sid), selected = _sessionOf(selectedRaw)
     return !!session && !!selected && session.id === selected.id
+      && nvimSock === _editorSocket(String(session.cwd || ""))
   }
   Connections {
     target: rail.agentd
@@ -2260,44 +2212,40 @@ Item {
       })
     }
     function onSessionSettled(sid) {
-      var cwd = rail._sessionCwdOf(sid)
-      if (cwd && rail._isRemote(cwd)) rail._alignMirror(sid)
-      else if (rail.agentd) rail.agentd.refreshChanges(sid, cwd)
+      if (rail.agentd) rail.agentd.refreshChanges(sid, rail._sessionCwdOf(sid))
     }
     function onFileActivity(sid, path, line, needleB64, addedLines, editId) {
-      if (!rail.nvimSock.length) return
-      var session = rail._sessionOf(sid), cwd = rail._sessionCwdOf(sid)
-      if (!session || !cwd) return
-      var lcwd = rail._localPath(cwd), p = rail._localPath(String(path))
-      if (p.charAt(0) !== "/") p = lcwd + "/" + p
+      var session = rail._sessionOf(sid), cwd = rail._sessionCwdOf(sid), socket = rail._editorSocket(cwd)
+      if (!session || !cwd || !socket) return
+      var p = String(path)
+      if (p.charAt(0) !== "/") p = cwd + "/" + p
       var rows = addedLines === null ? 'nil' : 'vim.json.decode(' + JSON.stringify(JSON.stringify(addedLines)) + ')'
       var lua = "local m=require('cockpit');local recorded=m.record_edit("
-              + JSON.stringify(rail.scopeMode) + "," + JSON.stringify(session.id) + "," + JSON.stringify(lcwd) + ","
+              + JSON.stringify(rail.scopeMode) + "," + JSON.stringify(session.id) + "," + JSON.stringify(cwd) + ","
               + JSON.stringify(p) + "," + rows + ",false," + Date.now() + "," + Number(line || 0) + "," + JSON.stringify(editId) + ");"
       if (rail._followsSelected(sid))
-        lua += "if recorded then m.follow_remote(" + JSON.stringify(lcwd) + "," + JSON.stringify(p) + ","
+        lua += "if recorded then m.follow_remote(" + JSON.stringify(cwd) + "," + JSON.stringify(p) + ","
              + (rail.focused ? 'true' : 'false') + "," + (line > 0 ? String(line) : 'nil') + ","
              + JSON.stringify(String(needleB64 || "")) + "," + rows + ") end;"
-      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
+      Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr",
         'luaeval(' + JSON.stringify("(function() " + lua + "return '' end)()") + ')'])
     }
     function onEditMarksSnapshot(sid, path, rows, at, line, editId) {
-      if (!rail.nvimSock.length) return
-      var session = rail._sessionOf(sid), cwd = rail._sessionCwdOf(sid)
-      if (!session || !cwd) return
-      var lcwd = rail._localPath(cwd), p = rail._localPath(String(path))
-      if (p.charAt(0) !== "/") p = lcwd + "/" + p
+      var session = rail._sessionOf(sid), cwd = rail._sessionCwdOf(sid), socket = rail._editorSocket(cwd)
+      if (!session || !cwd || !socket) return
+      var p = String(path)
+      if (p.charAt(0) !== "/") p = cwd + "/" + p
       var lua = "local m=require('cockpit');local d=m.dashboard_snapshot();local recorded,changed=m.record_edit("
-              + JSON.stringify(rail.scopeMode) + "," + JSON.stringify(session.id) + "," + JSON.stringify(lcwd) + ","
+              + JSON.stringify(rail.scopeMode) + "," + JSON.stringify(session.id) + "," + JSON.stringify(cwd) + ","
               + JSON.stringify(p) + ",vim.json.decode(" + JSON.stringify(JSON.stringify(rows)) + "),true,"
               + Number(at || 0) + "," + Number(line || 0) + "," + JSON.stringify(editId) + ");"
       if (rail._followsSelected(sid))
-        lua += "if recorded then m.follow_remote(" + JSON.stringify(lcwd) + "," + JSON.stringify(p) + ","
+        lua += "if recorded then m.follow_remote(" + JSON.stringify(cwd) + "," + JSON.stringify(p) + ","
              + (rail.focused ? '(changed or (d.active and d.model.identity==' + JSON.stringify(session.id)
-                + ' and d.model.cwd==' + JSON.stringify(lcwd) + '))' : 'false')
+                + ' and d.model.cwd==' + JSON.stringify(cwd) + '))' : 'false')
              + "," + Number(line || 1) + ",nil,{}) end;"
       lua += "return ''"
-      Quickshell.execDetached(["nvim", "--server", rail.nvimSock, "--remote-expr",
+      Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr",
         'luaeval(' + JSON.stringify("(function() " + lua + " end)()") + ')'])
     }
   }
@@ -2736,7 +2684,7 @@ Item {
       if (featuredStreaming && agentd && selectedRaw) agentd.abortTool(selectedRaw)
     }
   }
-  readonly property color railGroundColor: Theme.canvas
+  readonly property color railGroundColor: Theme.bgDim
   Rectangle { anchors.fill: parent; color: rail.railGroundColor; z: -1 }
   Canvas {
     id: dotGrid
@@ -2806,8 +2754,55 @@ Item {
     if (!t) return ""
     return t.key ? ("k:" + t.key) : (String(t.kind) + ":" + String(t.text || t.command || "").slice(0, 80))
   }
+  // Animations share the GUI thread with transcript parsing and row building (~8ms a row), so a
+  // switch fetches nothing until the roster collapse ends, then builds newest-first and fades in.
+  property int _feedShown: -1
+  readonly property int _feedOffset: _feedShown >= 0 ? Math.max(0, groupedFeed.length - _feedShown) : 0
+  readonly property int feedFillStep: 4
+  readonly property int feedFillFirst: 8
+  // An Animator runs on the render thread, so the feed build and nvim repaint on a switch
+  // cannot stall it. It only writes feedView.opacity back when it stops or finishes.
+  OpacityAnimator { id: feedFade; target: feedView; duration: Motion.base; easing.type: Easing.OutCubic }
+  function fadeFeedIn() {
+    if (feedFade.running ? feedFade.to === 1 : feedView.opacity >= 1) return
+    feedFade.stop(); feedFade.to = 1; feedFade.duration = 220; feedFade.start()
+  }
+  Timer {
+    id: switchSettle
+    interval: Motion.slow + 20
+    onTriggered: {
+      if (rail.agentd && rail.selectedRaw) rail.agentd.select(rail.selectedRaw)
+      if (rail._landed && rail.selectedRaw) rail.landNvim(rail.selectedRaw)
+      rail._resyncFeed()
+    }
+  }
+  Timer {
+    id: feedFill
+    interval: 16; repeat: true
+    onTriggered: {
+      rail._feedShown += rail.feedFillStep
+      if (rail._feedShown >= rail.groupedFeed.length) { rail._feedShown = -1; stop() }
+      rail._resyncFeed()
+      if (rail._feedShown >= 0 && !feedScroll.following) return
+      if (rail._feedShown < 0 && feedScroll.mode === "free" && rail.cur >= rail.rSize)
+        feedScroll.cursorMoved(rail.cur - rail.rSize, rail.cur - rail.rSize === rail.groupedFeed.length - 1)
+      rail.fadeFeedIn()
+    }
+  }
+  function beginSwitchFade() {
+    feedFill.stop(); _feedShown = -1
+    feedFade.stop(); feedFade.to = 0; feedFade.duration = Motion.base; feedFade.start()
+    switchSettle.restart()
+  }
   function syncFeedModel() {
+    if (switchSettle.running) return
     var arr = groupedFeed
+    if (arr.length > feedFillStep && (_feedReset || (feedModel.count === 0 && _feedShown < 0))) {
+      feedFade.stop(); feedView.opacity = 0; _feedShown = feedFillFirst; feedFill.restart()
+    } else if (_feedShown < 0) {
+      fadeFeedIn()
+    }
+    if (_feedShown >= 0) arr = arr.slice(Math.max(0, arr.length - _feedShown))
     if (_feedReset) {
       _feedReset = false
       feedModel.clear()
@@ -2853,7 +2848,6 @@ Item {
   Timer {
     id: feedDebounce; interval: 120
     onTriggered: {
-      if (rail.insert && rail.composerText.length) return
       rail.feedTick++
       rail._resyncFeed()
     }
@@ -3145,14 +3139,17 @@ Item {
         transform: Translate { y: turnDel.introY }
         layer.enabled: turnIntro.running
         layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: turnDel.introBlur }
-        Component.onCompleted: { turnIntro.start(); rail.probeCardCreates++ }
+        Component.onCompleted: {
+          if (rail._feedShown >= 0) { opacity = 1; introBlur = 0; introY = 0 } else turnIntro.start()
+          rail.probeCardCreates++
+        }
         ParallelAnimation {
           id: turnIntro
           NumberAnimation { target: turnDel; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.InOutQuad }
           NumberAnimation { target: turnDel; property: "introY"; from: 4; to: 0; duration: 150; easing.type: Easing.OutCubic }
           NumberAnimation { target: turnDel; property: "introBlur"; from: 0.125; to: 0; duration: 150; easing.type: Easing.InOutQuad }
         }
-        property int rowIndex: index
+        property int rowIndex: index + rail._feedOffset
         readonly property real cardHeight: card.height   // for the feedGeom probe
         // Capture the row's turn once: nested Repeaters shadow `model` with their
         // own model property, so model.d is only readable at the delegate root.
@@ -3233,8 +3230,9 @@ Item {
           HoverHandler { id: fhov }
           TapHandler {
             onTapped: eventPoint => {
-              const point = fullMessageButton.mapFromItem(card, eventPoint.position.x, eventPoint.position.y)
-              if (fullMessageButton.visible && fullMessageButton.contains(point)) return
+              const disclosure = turnDel.isHandoff ? noteDisclosure : fullMessageButton
+              const point = disclosure.mapFromItem(card, eventPoint.position.x, eventPoint.position.y)
+              if (disclosure.visible && disclosure.contains(point)) return
               var pending = [card]
               while (pending.length) {
                 var item = pending.pop()
@@ -3253,47 +3251,70 @@ Item {
 
             // Turn header — the Nucleo glyph is the ONLY colored signifier;
             // the label stays neutral and a touch bigger than the body text.
-            Row {
-              spacing: 8
+            Item {
               visible: turnDel.isUser
-              Icon {
-                name: turnDel.isUser && !turnDel.isHandoff ? "paper-plane-2" : "sparkle-3"
-                variantSize: turnDel.isUser && !turnDel.isHandoff ? 12 : 0
-                width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter
-                color: turnDel.cardAccent
-              }
-              Text {
-                text: turnDel.turn.sender ? "From " + turnDel.turn.sender.replace(/\s+\(user-approved\)$/, "") : "You"
-                color: turnDel.cardContentColor
-                font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(600)
-                font.pixelSize: turnDel.isNote ? rail.fsMeta : rail.fsName; font.weight: 600
-                anchors.verticalCenter: parent.verticalCenter
-              }
-              // A steer redirected a LIVE turn — visibly different from a normal
-              // prompt, so "why did it abort" has its answer in the header.
-              Rectangle {
-                visible: turnDel.isSteering || (turnDel.isHandoff && turnDel.turn.steered === true)
-                implicitWidth: steerCap.implicitWidth + 12
-                implicitHeight: 17; radius: 8.5
-                color: "transparent"
-                border.width: 1; border.color: Theme.orange
-                anchors.verticalCenter: parent.verticalCenter
+              width: cardCol.width
+              height: userHeader.height
+              Row {
+                id: userHeader
+                spacing: 8
+                Icon {
+                  name: turnDel.isUser && !turnDel.isHandoff ? "paper-plane-2" : "sparkle-3"
+                  variantSize: turnDel.isUser && !turnDel.isHandoff ? 12 : 0
+                  width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter
+                  color: turnDel.cardAccent
+                }
                 Text {
-                  id: steerCap; anchors.centerIn: parent
-                  text: "steer"
-                  color: Theme.orange
-                  font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(700)
-                  font.pixelSize: rail.fsMeta - 3; font.bold: true
+                  text: turnDel.turn.sender ? "From " + turnDel.turn.sender.replace(/\s+\(user-approved\)$/, "") : "You"
+                  width: turnDel.isHandoff ? Math.min(implicitWidth, Math.max(0, cardCol.width - noteDisclosure.width - 32 - (steerBadge.visible ? steerBadge.width + 8 : 0))) : implicitWidth
+                  elide: Text.ElideRight
+                  color: turnDel.cardContentColor
+                  font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(600)
+                  font.pixelSize: turnDel.isNote ? rail.fsMeta : rail.fsName; font.weight: 600
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+                PrimaryButton {
+                  id: noteDisclosure
+                  visible: turnDel.isHandoff
+                  implicitHeight: 22
+                  implicitWidth: noteLabel.width + 24
+                  anchors.verticalCenter: parent.verticalCenter
+                  primary: false
+                  text: turnDel.userExpanded ? "Collapse" : "Read full message"
+                  onClicked: rail.clickAt(rail.rSize + turnDel.rowIndex)
+                  TextMetrics {
+                    id: noteLabel
+                    text: noteDisclosure.text
+                    font { family: Theme.fontFamily; pixelSize: noteDisclosure.fontPixelSize; weight: 500 }
+                  }
+                }
+                // A steer redirected a LIVE turn — visibly different from a normal
+                // prompt, so "why did it abort" has its answer in the header.
+                Rectangle {
+                  id: steerBadge
+                  visible: turnDel.isSteering || (turnDel.isHandoff && turnDel.turn.steered === true)
+                  implicitWidth: steerCap.implicitWidth + 12
+                  implicitHeight: 17; radius: 8.5
+                  color: "transparent"
+                  border.width: 1; border.color: Theme.orange
+                  anchors.verticalCenter: parent.verticalCenter
+                  Text {
+                    id: steerCap; anchors.centerIn: parent
+                    text: "steer"
+                    color: Theme.orange
+                    font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(700)
+                    font.pixelSize: rail.fsMeta - 3; font.bold: true
+                  }
                 }
               }
-              // Delivery is a quiet footnote while it's going fine; only a failure gets a row and actions.
-              Text {
+              Item {
                 objectName: "delivery-status"
-                visible: turnDel.localDelivery === "pending" || turnDel.localDelivery === "accepted"
-                text: turnDel.localDelivery === "accepted" ? "✓ sent" : "sending…"
-                color: turnDel.cardMutedColor
-                font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 2
-                anchors.verticalCenter: parent.verticalCenter
+                readonly property string delivery: turnDel.localDelivery
+                visible: delivery === "pending" || delivery === "accepted"
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                width: 14; height: 14
+                Spinner { anchors.centerIn: parent; visible: parent.delivery === "pending"; running: visible; color: turnDel.cardMutedColor; dotSize: 1.6 }
+                Icon { anchors.fill: parent; visible: parent.delivery === "accepted"; name: "check"; color: turnDel.cardMutedColor }
               }
             }
 
@@ -3355,7 +3376,7 @@ Item {
 
             PrimaryButton {
               id: fullMessageButton
-              visible: turnDel.compactUser
+              visible: turnDel.compactUser && !turnDel.isHandoff
               width: Math.min(cardCol.width, implicitWidth)
               implicitHeight: 28
               radius: Theme.radiusSm
@@ -4663,6 +4684,16 @@ Item {
                 composerInput.forceActiveFocus()
                 return
               }
+              // pi's /reload is TUI-only; under agentd, restarting the scope's agentd respawns every pi.
+              if (/^\/reload\s*$/.test(text)) {
+                Quickshell.execDetached(["bash", "-c",
+                  "cockpit-agentd-restart " + rail.scopeMode + " >> \"$HOME/.local/state/cockpit/agentd-restart.log\" 2>&1"])
+                if (rail.agentd) rail.agentd._setTransient(rail.selectedRaw, "reload", "info",
+                  "↻ restarting the " + rail.scopeMode + " agentd — sessions resume on next use; log: ~/.local/state/cockpit/agentd-restart.log", 15000)
+                text = ""
+                composerInput.forceActiveFocus()
+                return
+              }
               var gm = text.match(/^\/goal\s*([\s\S]*)$/)
               if (gm) {
                 var g = gm[1].trim()
@@ -5688,14 +5719,25 @@ Item {
       }
     }
   }
+  component InlineAttachmentSurface: Rectangle {
+    readonly property color contentColor: Theme.fg
+    color: Theme.mode === "light" ? Theme.surface : "transparent"
+    border.width: Theme.mode === "light" ? 1 : 0
+    border.color: Theme.hairlineSoft
+    ButtonSurface {
+      anchors.fill: parent
+      visible: Theme.mode === "dark"
+      primary: false
+      radius: parent.radius
+    }
+  }
   Component {
     id: inlineAttachmentChip
     Item {
       width: imagePill.width + (token.trailing ? 7 : 0)
       height: rail.bodyLeading
-      ButtonSurface {
+      InlineAttachmentSurface {
         id: imagePill
-        inverted: Theme.mode === "dark"
         width: imagePillRow.implicitWidth + 16
         height: rail.bodyLeading
         radius: height / 2
@@ -5703,7 +5745,7 @@ Item {
           id: imagePillRow
           anchors.centerIn: parent
           spacing: 6
-          Icon { name: "image"; width: 12; height: 12; color: imagePill.inverted ? "#3F8C69" : "#86D7B0"; anchors.verticalCenter: parent.verticalCenter }
+          Icon { name: "image"; width: 12; height: 12; color: "#3F8C69"; anchors.verticalCenter: parent.verticalCenter }
           Text {
             text: token.label
             color: imagePill.contentColor
@@ -5719,9 +5761,8 @@ Item {
     Item {
       width: filePill.width + (token.trailing ? 7 : 0)
       height: rail.bodyLeading
-      ButtonSurface {
+      InlineAttachmentSurface {
         id: filePill
-        inverted: Theme.mode === "dark"
         width: filePillRow.implicitWidth + 16
         height: rail.bodyLeading
         radius: height / 2
@@ -5729,7 +5770,7 @@ Item {
           id: filePillRow
           anchors.centerIn: parent
           spacing: 6
-          Icon { name: "file-content"; width: 12; height: 12; color: filePill.inverted ? "#9A6500" : "#F2C572"; anchors.verticalCenter: parent.verticalCenter }
+          Icon { name: "file-content"; width: 12; height: 12; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
           Text {
             text: token.label
             color: filePill.contentColor
@@ -5962,6 +6003,7 @@ Item {
       id: writeRow
       objectName: "writeFileRow"
       readonly property bool hovered: writeHover.hovered
+      readonly property bool hasDiff: entry.failed === true || rail.entryDiff(entry).length > 0
       function openFile() { rail.openFileRef(entry.path) }
       HoverHandler { id: writeHover; cursorShape: Qt.PointingHandCursor }
       implicitHeight: rail.fsMeta + (grouped ? 24 : 14)
@@ -5969,30 +6011,32 @@ Item {
       color: fileSelected ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.08) : "transparent"
       border.width: fileSelected ? 1 : 0
       border.color: Theme.hairline
+      readonly property bool chevronShown: hasDiff && (expanded || writeHover.hovered || (rail.itemMode && (rail.itemFocus === gkey || rail.itemFocus === "open:" + gkey)))
       RowLayout {
-        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: 12
+        anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: writeRow.chevronShown ? 31 : 12
+        Behavior on anchors.rightMargin { NumberAnimation { duration: Motion.fast; easing.type: Easing.OutCubic } }
         spacing: 8
         Icon { name: entry.failed ? "triangle-warning" : "file-content"; width: 16; height: 16; color: entry.failed ? Theme.red : mutedColor; Layout.alignment: Qt.AlignVCenter }
         Text { text: rail.pathMarkup(entry.path || entry.file); textFormat: Text.StyledText; color: textColor; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 2; elide: Text.ElideRight; Layout.fillWidth: true }
         Text { visible: entry.failed === true; text: "Failed"; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
         Text { visible: !entry.failed && (entry.add + entry.del) > 0; text: "+" + entry.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
         Text { visible: !entry.failed && (entry.add + entry.del) > 0; text: "-" + entry.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta }
-        Icon {
-          id: diffToggle
-          objectName: "edit-diff-toggle:" + (entry.path || "")
-          visible: entry.failed === true || rail.entryDiff(entry).length > 0
-          opacity: expanded || writeHover.hovered || (rail.itemMode && (rail.itemFocus === gkey || rail.itemFocus === "open:" + gkey)) ? 1 : 0
-          name: expanded ? "chevron-down" : "chevron-right"
-          width: 11; height: 11; color: mutedColor
-          Layout.alignment: Qt.AlignVCenter
-        }
+      }
+      Icon {
+        id: diffToggle
+        objectName: "edit-diff-toggle:" + (entry.path || "")
+        anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
+        opacity: writeRow.chevronShown ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: Motion.fast; easing.type: Easing.OutCubic } }
+        name: expanded ? "chevron-down" : "chevron-right"
+        width: 11; height: 11; color: mutedColor
       }
       TapHandler {
-        onTapped: (point) => diffToggle.visible && point.position.x > writeRow.width - 40 ? rail.toggleGroupKey(gkey) : writeRow.openFile()
+        onTapped: (point) => writeRow.hasDiff && point.position.x > writeRow.width - 40 ? rail.toggleGroupKey(gkey) : writeRow.openFile()
       }
-      ItemFocus { itemKey: "open:" + gkey; anchors.rightMargin: diffToggle.visible ? 28 : -4 }
+      ItemFocus { itemKey: "open:" + gkey; anchors.rightMargin: writeRow.hasDiff ? 28 : -4 }
       Item {
-        visible: diffToggle.visible
+        visible: writeRow.hasDiff
         anchors { right: parent.right; top: parent.top; bottom: parent.bottom; rightMargin: 6 }
         width: 22
         ItemFocus { itemKey: gkey }

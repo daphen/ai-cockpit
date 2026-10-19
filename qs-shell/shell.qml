@@ -17,8 +17,39 @@ ShellRoot {
     }
     readonly property string modeStatePath: Quickshell.env("HOME") + "/.local/state/cockpit/mode-" + instanceName
     property string scopeMode: startupMode
+    property string remoteEditorSocket: ""
+    property string editorSocket: ""
+    onScopeModeChanged: if (scopeMode === "personal") editorSocket = ""
+    Process {
+      running: true
+      command: ["vmctl", "editor", win.instanceName, Quickshell.instanceId]
+      stdout: SplitParser {
+        onRead: data => {
+          var socket = data.trim()
+          if (!socket || socket === win.remoteEditorSocket) return
+          win.remoteEditorSocket = socket
+          if (win.scopeMode === "work") Qt.callLater(() => rail.landNvim(rail.selectedRaw))
+        }
+      }
+    }
     property bool modeReady: false
     readonly property var agentd: scopeMode === "work" ? workAgentd : personalAgentd
+    FileView {
+      id: ticketCache
+      path: Quickshell.env("HOME") + "/.local/state/lovable/cycle.json"
+      watchChanges: true
+      printErrors: false
+      onFileChanged: reload()
+      adapter: JsonAdapter {
+        property var tickets: []
+        property var session_tickets: []
+      }
+    }
+    TicketStatuses {
+      id: ticketStatuses
+      sessions: dashboard.workers
+      enabled: win.dashboardActive && dashboard.showSessions
+    }
     readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
     function envSockPaths() {
       var raw = String(Quickshell.env("COCKPIT_AGENTD_SOCKS") || Quickshell.env("HEIDR_AGENTD_SOCKS") || "").trim()
@@ -151,7 +182,8 @@ ShellRoot {
       onActivated: rail.showWorkspace("diff")
     }
 
-    FocusCache { nvimSocket: term.nvimSocket }
+    FocusCache { nvimSocket: term.localNvimSocket }
+    FocusCache { nvimSocket: win.remoteEditorSocket }
 
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
@@ -213,6 +245,7 @@ ShellRoot {
       // Parent binding for the pane's nvim: its NVIM_LISTEN_ADDRESS is unique to THIS
       // instance, so cockpit-cross can target its own Cockpit without asking niri anything.
       function nvimSock(): string   { return term.nvimSocket }
+      function clipboardText(kind: string): string { return term.clipboardText(kind) }
       function attachAgentd(path: string): string { return workAgentd.attachSocket(path) ? "ok" : "rejected" }
       function focusRoster(): string { win.pane = "rail"; rail.focusRoster(); return "ok" }
       // Super+i ask-jump: land on the session that needs an answer.
@@ -352,16 +385,53 @@ ShellRoot {
               blurAmount: 0
               first: TermView {
                 id: term
+                nvimSocket: win.editorSocket
                 anchors.fill: parent
                 active: !win.dashboardActive
                 enabled: !win.dashboardActive
                 Component.onCompleted: forceActiveFocus()
                 onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+                SequentialAnimation {
+                  id: termSwitchFade
+                  OpacityAnimator { target: term; to: 0; duration: Motion.base; easing.type: Easing.OutCubic }
+                  OpacityAnimator { target: term; to: 1; duration: 220; easing.type: Easing.OutCubic }
+                }
+                Connections {
+                  target: rail
+                  function onSelectedRawChanged() { termSwitchFade.restart() }
+                }
               }
               second: Dashboard {
                 id: dashboard
                 anchors.fill: parent
                 model: (chin.st.dashboard && chin.st.dashboard.model) || ({})
+                sessions: win.agentd.sessions
+                tickets: ticketCache.adapter.tickets.concat(ticketCache.adapter.session_tickets)
+                ticketStates: ticketStatuses.states
+                askFor: sid => { win.agentd.askGen; return win.agentd.askFor(sid) }
+                answerSendingFor: sid => !!win.agentd._answerIntents[sid]
+                onAnswerRequested: (sid, payload) => win.agentd.answerAsk(sid, payload)
+                onPromptRequested: (sid, text) => win.agentd.isBusy(sid) ? win.agentd.steer(sid, text) : win.agentd.sendPrompt(sid, text)
+                onPrRequested: url => Qt.openUrlExternally(url)
+                activityFor: sid => rail.fleetActivityColors(sid)
+                activityLabelFor: sid => {
+                  win.agentd.curToolGen
+                  if (win.agentd.isInterrupting(sid)) return "stopping"
+                  if (!win.agentd.isBusy(sid)) return rail.fleetActivityColors(sid).length ? "subagents" : "idle"
+                  if (!win.agentd.curToolLiveFor(sid)) return "thinking"
+                  var tool = win.agentd.curToolFor(sid).toLowerCase()
+                  if (["edit", "write", "create", "str_replace", "bash-write"].includes(tool)) return "coding"
+                  if (["read", "grep", "glob", "find", "ls", "ripgrep", "search_files"].includes(tool)) return "reading"
+                  if (["bash", "shell"].includes(tool)) return "bash"
+                  return tool || "thinking"
+                }
+                taskFor: sid => {
+                  var feed = win.agentd.feedFor(sid)
+                  for (var i = feed.length - 1; i >= 0; i--)
+                    if (feed[i].taskTitle) return feed[i].taskTitle
+                  return ""
+                }
+                onSessionRequested: sid => { win.pane = "rail"; rail.jumpToSession(sid) }
                 enabled: win.dashboardActive
                 onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
                 onFocusRequested: direction => win.tryFocus(direction)
@@ -379,7 +449,7 @@ ShellRoot {
               width: paneLayout.terminalCornerRadius
               height: paneLayout.terminalCornerRadius
               z: 2
-              readonly property color maskColor: Theme.canvas
+              readonly property color maskColor: Theme.bgDim
               onMaskColorChanged: requestPaint()
               onPaint: {
                 var ctx = getContext("2d")
@@ -410,9 +480,10 @@ ShellRoot {
           // seam instead of rendering as a phantom row under an in-grid statusline.
           Chin {
             id: chin
+            remoteSocket: term.nvimSocket !== term.localNvimSocket ? term.nvimSocket : ""
             width: parent.width
             height: parent.height - renderStack.height
-            color: Theme.canvas
+            color: Theme.bgDim
           }
         }
 
@@ -423,7 +494,7 @@ ShellRoot {
           y: parent.height - chin.height
           width: 1 + 2 / win.termDpr
           height: chin.height
-          color: Theme.canvas
+          color: Theme.bgDim
         }
 
         // Divider stops at the chin's top hairline — the two meet in a clean
@@ -434,7 +505,7 @@ ShellRoot {
           width: 1
           height: parent.height - chin.height
           opacity: win.railReveal
-          color: Theme.canvas
+          color: Theme.bgDim
         }
 
         Rail {
@@ -451,6 +522,9 @@ ShellRoot {
           instanceName: win.instanceName
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
           nvimSock: term.nvimSocket
+          localNvimSock: term.localNvimSocket
+          remoteNvimSock: win.remoteEditorSocket
+          onEditorRequested: socket => win.editorSocket = socket
           focused: win.pane === "rail"
           onFocusNvim: win.pane = "nvim"
           onRequestFocus: win.pane = "rail"

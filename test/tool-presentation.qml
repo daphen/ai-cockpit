@@ -35,17 +35,19 @@ ShellRoot {
       if (phase === 0) {
         event({type:"roster",sessions:[{id:"worker",name:"worker",cwd:"/tmp",status:"idle"}]})
         rail.jumpToSession("worker")
-        event({type:"response",command:"get_entries",data:{leafId:"r3",entries:[
+        event({type:"response",command:"get_entries",data:{leafId:"r4",entries:[
           {type:"message",id:"a",parentId:null,message:{role:"assistant",model:"gpt-6.1-sol",content:[
             {type:"text",text:"Tools follow."},
             {type:"toolCall",id:"read",name:"read",arguments:{path:"/tmp/view.qml",offset:10,limit:20}},
             {type:"toolCall",id:"bash",name:"bash",arguments:{command:"seq 30"}},
-            {type:"toolCall",id:"edit",name:"edit",arguments:{path:"/tmp/view.qml",edits:[{oldText:"a",newText:"b"}]}}
+            {type:"toolCall",id:"edit",name:"edit",arguments:{path:"/tmp/view.qml",edits:[{oldText:"a",newText:"b"}]}},
+            {type:"toolCall",id:"write",name:"write",arguments:{path:"/tmp/new.qml",content:"a\nb\nc\n"}}
           ]}},
           {type:"message",id:"r1",parentId:"a",message:{role:"toolResult",toolCallId:"read",toolName:"read",content:[{type:"text",text:"SOURCE_ONLY_NEOVIM"}]}},
           {type:"message",id:"r2",parentId:"r1",message:{role:"toolResult",toolCallId:"bash",toolName:"bash",content:[{type:"text",text:longOutput}]}},
           {type:"message",id:"r3",parentId:"r2",message:{role:"toolResult",toolCallId:"edit",toolName:"edit",content:[{type:"text",text:"Edited"}],
-            details:{diff:" 11   Item {\n-12     property int count: 1\n+12     property int count: 2\n 13   }"}}}
+            details:{diff:" 11   Item {\n-12     property int count: 1\n+12     property int count: 2\n 13   }"}}},
+          {type:"message",id:"r4",parentId:"r3",message:{role:"toolResult",toolCallId:"write",toolName:"write",content:[{type:"text",text:"Wrote"}]}}
         ]}})
       } else if (phase === 1) {
         check(starting("seq 30") && !starting("read view.qml"),"default view should show commands and hide reads")
@@ -62,6 +64,14 @@ ShellRoot {
         check(named("tool-output:bash").text.indexOf("line 1\n") === 0,"show all did not reveal the full output")
         var toggle = named("edit-diff-toggle:/tmp/view.qml")
         check(toggle,"edit row offers no diff")
+        var ends = []
+        find(rail,function(row) {
+          if (row.objectName !== "writeFileRow" || !row.visible) return false
+          var del = find(row,item => item.visible && /^-\d+$/.test(String(item.text || "")))
+          if (del) ends.push(Math.round(del.mapToItem(row,del.width,0).x - row.width))
+          return false
+        })
+        check(ends.length === 2 && ends[0] === -12 && ends[1] === -12,"edit counts do not sit flush at the row's right padding: " + JSON.stringify(ends))
         gui.wait(30); input.mouseClick(toggle,5,toggle.height/2,Qt.LeftButton,Qt.NoModifier,0)
       } else if (phase === 5) {
         var panel = named("edit-diff:/tmp/view.qml")

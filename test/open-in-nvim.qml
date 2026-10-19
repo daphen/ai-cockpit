@@ -45,9 +45,9 @@ ShellRoot {
       }
       else if (phase === 4 && rail.selectedRaw === "remote") { open("remote", remoteRoot + "/src/remote.ts", 9, 1); phase++ }
       else if (phase === 5 && calls.length === 2) {
-        if (calls[1].indexOf(Quickshell.env("HOME") + "/work/lovable.daphen-every-7/src/remote.ts") < 0 || calls[1].indexOf("{9,0}") < 0)
-          throw new Error("remote mirror or cursor missing: " + calls[1])
-        console.log("PASS: agent tool opens local and mirrored files only for the selected session")
+        if (calls[1].indexOf(remoteRoot + "/src/remote.ts") < 0 || calls[1].indexOf("{9,0}") < 0)
+          throw new Error("remote path or cursor missing: " + calls[1])
+        console.log("PASS: agent tool opens local and remote files only for the selected session")
         Qt.quit()
       }
     }

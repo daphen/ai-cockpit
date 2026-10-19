@@ -23,7 +23,7 @@ ShellRoot {
       if (test.phase === 0) {
         state.onLine(JSON.stringify({type:"roster",sessions:[{id:"worker",name:"worker",cwd:"/tmp",status:"idle"}]}),0)
         rail.jumpToSession("worker")
-        var text = test.destinations.map(url => "[Reference](" + url + ")").join("\n\n")
+        var text = test.destinations.map(url => "[Reference](" + url + ")").join("\n\n") + "\n\nOpen this: `https://id-preview--abc.lovable.app/__component/preview/Button`"
         state.onLine(JSON.stringify({type:"response",command:"get_entries",session:"worker",data:{leafId:"a",entries:[
           {id:"a",parentId:null,type:"message",message:{role:"assistant",content:[{type:"text",text:text}]}}
         ]}}),0)
@@ -37,10 +37,14 @@ ShellRoot {
           rows.push({y:rect.y,height:rect.height})
           from = pos + "Reference".length
         }
+        var codeRect = prose.positionToRectangle(plain.indexOf("id-preview--abc") + 4)
+        var links = rows.map(r => prose.linkAt(5, r.y + r.height / 2)).concat([prose.linkAt(codeRect.x + 2, codeRect.y + codeRect.height / 2)])
+        var wanted = test.destinations.concat(["https://id-preview--abc.lovable.app/__component/preview/Button"])
+        if (JSON.stringify(links) !== JSON.stringify(wanted)) throw new Error("rendered links are not clickable: " + JSON.stringify(links))
         running = false
         prose.grabToImage(function(result) {
           if (!result.saveToFile(Quickshell.env("COCKPIT_LINK_CAPTURE"))) throw new Error("Link capture failed")
-          console.log("PASS: captured web, absolute-path, relative-path, and file-URL links; LINK_STYLE " + JSON.stringify({mode:Theme.mode,color:rail.summaryHex,rows:rows}))
+          console.log("PASS: clickable and captured web, absolute-path, relative-path, and file-URL links; LINK_STYLE " + JSON.stringify({mode:Theme.mode,color:rail.summaryHex,rows:rows}))
           Qt.quit()
         })
       }

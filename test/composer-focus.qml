@@ -5,6 +5,7 @@ import Quickshell
 import "."
 ShellRoot {
   id: test
+  property int settleTicks: 0
   property int phase: 0
   property string pane: "rail"
   onPaneChanged: pane === "rail" ? rail.forceActiveFocus() : editor.forceActiveFocus()
@@ -55,6 +56,7 @@ ShellRoot {
         state.onLine(JSON.stringify({type:"response",command:"get_entries",session:"worker",data:{leafId:"a",entries:[{id:"a",parentId:null,type:"message",message:{role:"assistant",content:[{type:"text",text:"A focusable agent reply"}]}}]}}),0)
         rail.forceActiveFocus()
       } else if (test.phase === 1) {
+        if (++test.settleTicks < 3) return   // a session switch fetches and builds once the roster collapse ends
         check(selected(rail) > 0, "fixture has no initial rail selection")
         check(frame().children.some(item => item.border && item.border.width === 1 && Qt.colorEqual(item.border.color, Theme.hairline)), "unfocused composer lacks its subtle outline")
         click(composer(), 20, composer().height / 2)

@@ -35,7 +35,8 @@ public:
   Q_PROPERTY(QString gridInfo READ gridInfo NOTIFY dprChanged)
   // The nvim RPC socket THIS instance's nvim listens on. Per-instance, so the rail
   // never talks to a path a different Cockpit may have unlinked.
-  Q_PROPERTY(QString nvimSocket READ nvimSocket CONSTANT)
+  Q_PROPERTY(QString nvimSocket READ nvimSocket WRITE setNvimSocket NOTIFY nvimSocketChanged)
+  Q_PROPERTY(QString localNvimSocket READ localNvimSocket CONSTANT)
   qreal dpr() const { return guiDpr_ > 0 ? guiDpr_ : 1.0; }
   QString gridInfo() const {
     return QString("cols=%1 rows=%2 cellW=%3 cellH=%4 padT=%5 padB=%6 itemH=%7 dpr=%8 slack=%9")
@@ -44,6 +45,9 @@ public:
       .arg(height() - rows_ * cellH_ - padT_ - padB_);
   }
   QString nvimSocket() const { return nvimSocket_; }
+  QString localNvimSocket() const;
+  void setNvimSocket(const QString &socket);
+  Q_INVOKABLE QString clipboardText(const QString &kind) const;
 
   // false when focus is in the rail → hide the terminal cursor.
   Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
@@ -52,6 +56,7 @@ public:
 
 signals:
   void activeChanged();
+  void nvimSocketChanged();
   void dprChanged();
 
 protected:
@@ -68,6 +73,8 @@ protected:
 
 private:
   void createSurface();
+  void startFrontend();
+  void stopFrontend();
   void hugGridRight(qreal viewW);
   void pasteText(const QString &t);
   bool sendKey(QKeyEvent *e, uint32_t action);   // true when librio consumed it
@@ -100,6 +107,7 @@ private:
   // is not joined on rio_surface_free and could still fire during teardown.
   static void onWakeup(void *userdata, rio_surface_id_t surface);
   static void onAction(void *userdata, rio_surface_id_t surface, rio_action_s action);
+  static void onClipboardWrite(void *userdata, rio_surface_id_t surface, uint8_t kind, const char *utf8);
   static void onCloseSurface(void *userdata, rio_surface_id_t surface);
   uintptr_t bridgeId_ = 0;
 

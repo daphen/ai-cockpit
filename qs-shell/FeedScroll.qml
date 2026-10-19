@@ -15,6 +15,7 @@ QtObject {
 
   property var view: null          // the feed ListView
   property bool chatVisible: true  // the chat view is the one on screen
+  property int indexOffset: 0      // rows not built yet above the model while a feed fills in
 
   //   follow — stuck to the newest content, the default
   //   free   — the user scrolled away and is reading; nothing auto-moves
@@ -124,6 +125,6 @@ QtObject {
       return
     }
     _stick = false
-    view.positionViewAtIndex(idx, ListView.Contain)
+    if (idx - indexOffset >= 0) view.positionViewAtIndex(idx - indexOffset, ListView.Contain)
   }
 }

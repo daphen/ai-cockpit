@@ -29,7 +29,9 @@ import Quickshell.Io
 ShellRoot {
   id: shell
   property string position: "nvim"
-  FocusCache { nvimSocket: Quickshell.env("NVIM_LISTEN_ADDRESS") }
+  property string editorSocket: ""
+  FocusCache { nvimSocket: shell.editorSocket }
+  Timer { interval: 1; running: true; onTriggered: shell.editorSocket = Quickshell.env("NVIM_LISTEN_ADDRESS") }
   IpcHandler {
     target: "cockpit"
     function focusRight(): string { shell.position = "rail"; return "consumed" }

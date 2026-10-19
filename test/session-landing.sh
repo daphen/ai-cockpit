@@ -36,17 +36,25 @@ if [[ "${1:-}" == "test/live-follow.qml" ]]; then
   export COCKPIT_TEST_LUA="${COCKPIT_TEST_LUA:-$HOME/.config/nvim/lua}"
   [[ -r "$COCKPIT_TEST_LUA/cockpit/init.lua" ]] || { echo "Cockpit Lua source missing: $COCKPIT_TEST_LUA" >&2; exit 1; }
 fi
-if [[ "${1:-test/session-landing.qml}" == "test/session-landing.qml" || "${1:-}" == "test/mirror-preparation.qml" || "${1:-}" == "test/open-in-nvim.qml" ]]; then
-  mkdir -p "$tmp/home/.config/niri/scripts" "$tmp/home/bin"
-  cp test/fake-mirror-prepare.sh "$tmp/home/.config/niri/scripts/vm-sync"
+if [[ "${1:-test/session-landing.qml}" == "test/session-landing.qml" || "${1:-}" == "test/open-in-nvim.qml" ]]; then
+  mkdir -p "$tmp/home/bin"
   printf '#!/usr/bin/env sh\nprintf "%%s\\n" "$*" >> "$HOME/nvim-calls"\n' > "$tmp/home/bin/nvim"
-  chmod +x "$tmp/home/.config/niri/scripts/vm-sync" "$tmp/home/bin/nvim"
-  touch "$tmp/home/mirror-calls" "$tmp/home/mirror-done" "$tmp/home/nvim-calls"
+  chmod +x "$tmp/home/bin/nvim"
+  touch "$tmp/home/nvim-calls"
   export PATH="$tmp/home/bin:$PATH"
 fi
-if [[ "${1:-}" == "test/live-text.qml" || "${1:-}" == "test/mirror-preparation.qml" ]]; then
+if [[ "${1:-}" == "test/session-card-questions.qml" ]]; then
+  mkdir -p "$tmp/home/bin"
+  printf '#!/bin/sh\nexit 0\n' > "$tmp/home/bin/vm-wt"
+  printf '#!/bin/sh\necho active > "$HOME/reap-state"\necho "$*" > "$HOME/reap-log"\n' > "$tmp/home/bin/systemd-run"
+  printf '#!/bin/sh\n[ "$2" = is-active ] && cat "$HOME/reap-state" 2>/dev/null || true\n' > "$tmp/home/bin/systemctl"
+  printf '#!/bin/sh\ncat "$HOME/reap-log" 2>/dev/null\necho ": exit status 22"\necho "cockpit-reap-every-42.service: Consumed 1s CPU time"\n' > "$tmp/home/bin/journalctl"
+  printf '#!/bin/sh\n[ "$*" = "pr comment 125061 --repo lovablelabs/lovable --body @claude review" ] && exit 0\necho "unexpected gh $*" >&2\nexit 3\n' > "$tmp/home/bin/gh"
+  chmod +x "$tmp/home/bin/"*
+  export PATH="$tmp/home/bin:$PATH" COCKPIT_AGENT_PROFILE=coding HEIDR_AGENT_PROFILE=coding
+fi
+if [[ "${1:-}" == "test/live-text.qml" ]]; then
   sock="$tmp/agentd-personal.sock"
-  [[ "${1:-}" != "test/mirror-preparation.qml" ]] || sock="$tmp/runtime/agentd-lovable.sock"
   python3 test/fake-agentd.py "$sock" >"$tmp/server.log" 2>&1 &
   server_pid=$!
   for _ in $(seq 1 50); do [[ -S "$sock" ]] && break; sleep 0.1; done

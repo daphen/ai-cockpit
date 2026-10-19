@@ -232,19 +232,6 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     fcntl(wakePipe_[i], F_SETFD, fcntl(wakePipe_[i], F_GETFD) | FD_CLOEXEC);
   }
 
-  {
-    std::lock_guard<std::mutex> lk(g_bridgeMtx);
-    bridgeId_ = g_nextBridge++;
-    g_bridges[bridgeId_] = this;
-  }
-  rio_runtime_config_s rc{};
-  rc.userdata = reinterpret_cast<void *>(bridgeId_);
-  rc.wakeup_cb = &TermView::onWakeup;
-  rc.action_cb = &TermView::onAction;
-  rc.close_surface_cb = &TermView::onCloseSurface;
-  engine_ = rio_engine_new(&rc);
-  if (!engine_) qFatal("rio_engine_new failed");
-
   // Colors are process-wide in librio (one theme resolves every surface's cells);
   // this process hosts one terminal, so that is exactly the desktop theme.
   loadThemeColors();  // fg/bg/cursor + palette 0-15 for the current theme mode
@@ -263,16 +250,56 @@ TermView::TermView(QQuickItem *parent) : QQuickPaintedItem(parent) {
     });
   }
 
-  createSurface();
+  startFrontend();
+}
 
-  // Worker thread owns the render snapshot + rasterization. librio's own IO thread
-  // pumps the PTY and pings wakeup_cb, which nudges the worker through the pipe.
-  wViewW_ = (int)(cols_ * cellW_ + padL_ + padR_);
-  wViewH_ = (int)(rows_ * cellH_ + padT_ + padB_);
+QString TermView::localNvimSocket() const { return nvimSocketForInstance(); }
+
+QString TermView::clipboardText(const QString &kind) const {
+  return QGuiApplication::clipboard()->text(kind == "*" ? QClipboard::Selection : QClipboard::Clipboard);
+}
+
+void TermView::setNvimSocket(const QString &socket) {
+  const QString next = socket.isEmpty() ? localNvimSocket() : socket;
+  if (next == nvimSocket_) return;
+  stopFrontend();
+  nvimSocket_ = next;
+  startFrontend();
+  emit nvimSocketChanged();
+}
+
+void TermView::startFrontend() {
+  quit_.store(false);
+  closed_.store(false);
+  kittyCache_.clear();
+  { std::lock_guard<std::mutex> lk(frameMtx_); frame_ = QImage(); }
+  {
+    std::lock_guard<std::mutex> lk(g_bridgeMtx);
+    bridgeId_ = g_nextBridge++;
+    g_bridges[bridgeId_] = this;
+  }
+  rio_runtime_config_s rc{};
+  rc.userdata = reinterpret_cast<void *>(bridgeId_);
+  rc.wakeup_cb = &TermView::onWakeup;
+  rc.action_cb = &TermView::onAction;
+  rc.clipboard_write_cb = &TermView::onClipboardWrite;
+  rc.close_surface_cb = &TermView::onCloseSurface;
+  engine_ = rio_engine_new(&rc);
+  if (!engine_) qFatal("rio_engine_new failed");
+  applyThemeColors();
+  createSurface();
+  wViewW_ = width() > 0 ? (int)width() : (int)(cols_ * cellW_ + padL_ + padR_);
+  wViewH_ = height() > 0 ? (int)height() : (int)(rows_ * cellH_ + padT_ + padB_);
   worker_ = std::thread(&TermView::workerLoop, this);
 }
 
 TermView::~TermView() {
+  stopFrontend();
+  if (wakePipe_[0] >= 0) ::close(wakePipe_[0]);
+  if (wakePipe_[1] >= 0) ::close(wakePipe_[1]);
+}
+
+void TermView::stopFrontend() {
   quit_.store(true);
   wakeWorker();
   if (worker_.joinable()) worker_.join();   // frees the render state on its way out
@@ -300,8 +327,6 @@ TermView::~TermView() {
     child_ = -1;
   }
   if (engine_) { rio_engine_free(engine_); engine_ = nullptr; }
-  if (wakePipe_[0] >= 0) ::close(wakePipe_[0]);
-  if (wakePipe_[1] >= 0) ::close(wakePipe_[1]);
 }
 
 void TermView::onWakeup(void *userdata, rio_surface_id_t) {
@@ -309,6 +334,16 @@ void TermView::onWakeup(void *userdata, rio_surface_id_t) {
   std::lock_guard<std::mutex> lk(g_bridgeMtx);
   auto it = g_bridges.find(reinterpret_cast<uintptr_t>(userdata));
   if (it != g_bridges.end()) it->second->wakeWorker();
+}
+
+void TermView::onClipboardWrite(void *userdata, rio_surface_id_t, uint8_t kind, const char *utf8) {
+  const QString text = QString::fromUtf8(utf8);
+  std::lock_guard<std::mutex> lk(g_bridgeMtx);
+  auto it = g_bridges.find(reinterpret_cast<uintptr_t>(userdata));
+  if (it == g_bridges.end()) return;
+  QMetaObject::invokeMethod(it->second, [text, kind] {
+    QGuiApplication::clipboard()->setText(text, kind == 1 ? QClipboard::Selection : QClipboard::Clipboard);
+  }, Qt::QueuedConnection);
 }
 
 void TermView::onAction(void *userdata, rio_surface_id_t, rio_action_s action) {
@@ -404,7 +439,9 @@ void TermView::createSurface() {
   // prevents a live instance from being stolen.
   const QByteArray cmdEnv = cockpitEnv("COCKPIT_CMD");
   const char *cmd = cmdEnv.constData();
-  if (!cmd || !*cmd) cmd = "nvim --server \"$NVIM_LISTEN_ADDRESS\" --remote-ui; exec \"$SHELL\" -l";
+  if (!cmd || !*cmd) cmd = nvimSocket_ == localNvimSocket()
+    ? "nvim --server \"$NVIM_LISTEN_ADDRESS\" --remote-ui; exec \"$SHELL\" -l"
+    : "exec sh -c 'while :; do nvim --server \"$NVIM_LISTEN_ADDRESS\" --remote-ui; sleep 1; done'";
   // A named program is spawned as given (no login wrapper), so `-l -c` reproduces
   // the login shell the cockpit always had.
   const char *args[] = { "-l", "-c", cmd };

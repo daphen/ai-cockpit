@@ -8,6 +8,7 @@ ShellRoot {
   property int phase: 0
   property var sent: []
   property int serial: 0
+  property string requestedSocket: ""
   property int railWidth: 720
   property bool grewSmoothly: false
   property bool shrankSmoothly: false
@@ -41,6 +42,13 @@ ShellRoot {
     command: ["nvim", "--headless", "-u", "NONE", "--listen", Quickshell.env("HOME") + "/nvim.sock", "--cmd",
       'lua package.preload["plan-nvim"]=function() return {menu=function(i,p) vim.fn.writefile({vim.json.encode({choice=i,path=p})},os.getenv("HOME").."/menu-call") end,submit_compose=function(p) vim.fn.writefile(vim.fn.readfile(p),os.getenv("HOME").."/plan-submit-result"); return "sent" end} end']
   }
+  Process {
+    running: true; stdinEnabled: true
+    command: ["nvim", "--headless", "-u", "NONE", "--listen", Quickshell.env("HOME") + "/remote.sock", "--cmd",
+      'lua package.preload["plan-nvim"]=function() return {menu=function(i,p) vim.fn.writefile({vim.json.encode({choice=i,path=p})},os.getenv("HOME").."/remote-menu") end,submit_compose=function(p) vim.fn.writefile({vim.json.encode(p)},os.getenv("HOME").."/remote-submit"); return "sent" end} end']
+  }
+  FileView { id: remoteMenu; path: Quickshell.env("HOME") + "/remote-menu"; blockAllReads: true; printErrors: false }
+  FileView { id: remoteSubmitted; path: Quickshell.env("HOME") + "/remote-submit"; blockAllReads: true; printErrors: false }
   FloatingWindow {
     id: window
     property string pane: "rail"
@@ -54,7 +62,9 @@ ShellRoot {
     Rail {
       id: rail; anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
       width: test.railWidth; agentd: state; scopeMode: "personal"; instanceName: "code-context-test"; nvimSock: Quickshell.env("HOME") + "/nvim.sock"
+      remoteNvimSock: Quickshell.env("HOME") + "/remote.sock"
       focused: window.pane === "rail"
+      onEditorRequested: socket => test.requestedSocket = socket
       onFocusNvim: window.pane = "nvim"
       onRequestFocus: window.pane = "rail"
       onActiveFocusChanged: if (activeFocus) window.pane = "rail"
@@ -166,7 +176,21 @@ ShellRoot {
         test.check(test.grewSmoothly && test.shrankSmoothly, "attachment height jumped instead of transitioning both ways")
         test.attach(); rail.scopeMode = "work"
         test.check(rail.codeAttachments.length === 0 && test.attach() !== "accepted", "attachment leaked across scopes")
-        console.log("PASS: code badges, animated height/wrapping, mouse removal, payloads, draft isolation, plan menu and focus round-trips")
+        rail.scopeMode = "personal"; rail.jumpToSession("target")
+        rail.openRequestedFile("target", "/tmp/nonexistent-remote-editor-reference", 1, 1)
+        test.check(test.requestedSocket === rail.localNvimSock, "personal /tmp reference routed to VM")
+        test.check(rail.receiveEditorContext(JSON.stringify({session:"target",mode:"personal",editor:"foreign.sock",kind:"code"})) !== "accepted", "foreign editor accepted")
+        test.check(rail.receiveEditorContext(JSON.stringify({session:"target",mode:"personal",editor:"remote.sock",kind:"menu",path:"/vm/plan.md",title:"Remote plan",labels:["Open plan"],actions:[1]})) === "accepted", "remote inline menu rejected")
+        rail.choosePlan(0)
+      } else if (test.phase === 13) {
+        remoteMenu.reload()
+        test.check(JSON.parse(remoteMenu.text()).path === "/vm/plan.md", "remote menu replied to visible local editor")
+        test.check(rail.receiveEditorContext(JSON.stringify({id:"remote-compose",session:"target",mode:"personal",editor:"remote.sock",kind:"compose",title:"remote action"})) === "accepted", "remote compose rejected")
+        rail.prefillComposer("remote value ✓"); rail.sendPlanDraft()
+      } else if (test.phase === 14) {
+        remoteSubmitted.reload()
+        test.check(JSON.parse(remoteSubmitted.text()).text.indexOf("remote value ✓") === 0 && JSON.parse(remoteSubmitted.text()).text.indexOf(test.selectedCode) >= 0 && rail.planDraft === null, "remote inline submission failed: " + remoteSubmitted.text() + "; draft=" + JSON.stringify(rail.planDraft) + "; text=" + rail.composerText)
+        console.log("PASS: code badges, animation, payloads, isolation, local filename + remote value menus and original-editor replies")
         Qt.quit()
       }
       test.phase++

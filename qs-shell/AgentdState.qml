@@ -670,6 +670,11 @@ Item {
     if (name === "list" || name === "ls")          { var d = a.path || a.dir || a.directory || ""; return "ls " + (d ? _rel(d) : "") }
     if (name === "webfetch" || name === "web_fetch" || name === "fetch") return "fetch " + _clip(a.url || a.uri)
     if (name === "websearch" || name === "web_search") return "web " + _clip(a.query || a.q)
+    if (name === "codemode") {
+      var code = String(a.code || ""), calls = [], m, re = /\btools\.(\w+)\s*\(/g
+      while ((m = re.exec(code))) if (calls.indexOf(m[1]) < 0) calls.push(m[1])
+      return "script " + _clip(calls.length ? calls.join(", ") : code.replace(/^\s*\/\/ @options:.*\n/, ""))
+    }
     if (name === "agent_send")   return "send → " + (a.agent || "?") + " · " + _clip(a.message)
     if (name === "agent_steer")  return "steer → " + (a.agent || "?") + " · " + _clip(a.message)
     if (name === "agent_spawn")  return "spawn → " + (a.name || _base(a.dir || "?")) + (a.detached ? " (top-level)" : "")

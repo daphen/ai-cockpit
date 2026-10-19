@@ -14,7 +14,7 @@ import QsLib
 Rectangle {
   id: chin
   implicitHeight: 36
-  color: Theme.canvas
+  color: Theme.bgDim
 
   readonly property color fg: Theme.mode === "light" ? "#23272B" : "#FAFAFA"
   readonly property color muted: Theme.mode === "light" ? "#747D84" : "#909090"
@@ -25,6 +25,25 @@ Rectangle {
   readonly property color green: Theme.mode === "light" ? "#4B8069" : "#97B5A6"
   readonly property color sky: Theme.mode === "light" ? "#287FA6" : "#7DD3FC"
   property var st: ({})
+  property string remoteSocket: ""
+  onRemoteSocketChanged: {
+    st = remoteSocket ? { path: "VM editor connecting" } : ({})
+    remoteState.running = false
+    if (remoteSocket) remoteState.running = true
+    else localState.reload()
+  }
+  Process {
+    id: remoteState
+    command: ["nvim", "-l", Quickshell.env("COCKPIT_EDITOR_STATE_SCRIPT"), chin.remoteSocket]
+    stdout: SplitParser {
+      onRead: data => { try { chin.st = JSON.parse(data) } catch (e) {} }
+    }
+    onExited: if (chin.remoteSocket) chin.st = { path: "VM editor disconnected" }
+  }
+  Timer {
+    interval: 1000; repeat: true; running: chin.remoteSocket.length > 0
+    onTriggered: if (!remoteState.running) remoteState.running = true
+  }
   readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE")
       || Quickshell.env("HEIDR_INSTANCE") || "main"
   function _n(v) { return typeof v === "number" ? v : 0 }
@@ -99,11 +118,14 @@ Rectangle {
   }
 
   FileView {
+    id: localState
     path: Quickshell.env("HOME") + "/.local/state/cockpit/chin-" + chin.instanceName + ".json"
     watchChanges: true
     onFileChanged: reload()
     onLoaded: {
-      try { chin.st = JSON.parse(String(text())) } catch (e) { /* partial write; next change reloads */ }
+      if (!chin.remoteSocket) {
+        try { chin.st = JSON.parse(String(text())) } catch (e) { /* partial write; next change reloads */ }
+      }
     }
   }
 

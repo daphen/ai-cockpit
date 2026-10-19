@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 export COCKPIT_ASSET_DIR="$PWD/assets"
+export COCKPIT_EDITOR_STATE_SCRIPT="$PWD/qs-shell/editor-state.lua"
 [ -f build/qml/Heidr/libheidr_termplugin.so ] || {
   echo "plugin missing — build first: nix-shell --run 'cmake --build build -j'"; exit 1; }
 
@@ -86,7 +87,7 @@ export QML_IMPORT_PATH="$QML2_IMPORT_PATH"
 export LD_LIBRARY_PATH="$PWD/build:${LD_LIBRARY_PATH:-}"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
 _user=$(id -un)
-export PATH="$HOME/.local/bin:/etc/profiles/per-user/$_user/bin:$HOME/.nix-profile/bin:$PATH:/run/current-system/sw/bin"
+export PATH="$PATH:$HOME/.local/bin:/etc/profiles/per-user/$_user/bin:$HOME/.nix-profile/bin:/run/current-system/sw/bin"
 echo "QML_IMPORT_PATH=$QML_IMPORT_PATH"
 # NO workspace placement here: a relaunch must come back on the workspace that was
 # hosting it. Pinning it to the named `lovable` workspace yanked the cockpit off the
