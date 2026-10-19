@@ -1776,7 +1776,7 @@ Item {
     // No sessions at all (daemon up but idle, or the tunnel dropped) — everything
     // downstream reads .name, so hand back a placeholder rather than undefined.
     if (!f) return { name: daemonUp ? "no sessions" : "disconnected", rawName: "", state: "", status: "idle" }
-    return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status }
+    return { name: shortName(f.name), rawName: f.name, state: stateLabel(f.status), status: f.status, remote: f.remote === true }
   }
 
   function fleetActivityColors(sid) {
@@ -1820,50 +1820,31 @@ Item {
   // session. `parent` is the parent's NAME; roots are top-level sessions.
   readonly property var rosterList: {
     if (!live) return mockRoster
-    var all = liveSessions, children = {}, roots = [], activeKids = [], activeCwd = ""
+    var all = liveSessions, roots = []
     for (var i = 0; i < all.length; i++) {
       var s = all[i]
-      // The ACTIVE session lives in the header glance, not the list — its
-      // children lead the list, ↳-nested as if under the header.
-      if (s.name === rail.selectedRaw) { activeCwd = s.cwd || ""; continue }
       // Only the orchestrator that HOLDS the role belongs in the roster. Handover stands
-      // the other host's one down but leaves it registered, and showing both reads as two
-      // conductors (David, 2026-08-25).
+      // the other host's one down but leaves it registered (David, 2026-08-25).
       if (String(s.profile || "").indexOf("orchestrator") >= 0
           && rail.orchScope.length && String(s.scope || "") !== rail.orchScope) continue
-      if (s.parent === rail.selectedRaw) activeKids.push(s)
-      else if (s.parent && all.some(x => x.name === s.parent))
-        (children[s.parent] = children[s.parent] || []).push(s)
-      else roots.push(s)
+      if (s.parent && all.some(x => x.name === s.parent)) continue
+      roots.push(s)
     }
-    // STABLE order: name only. Recency-first meant the list reshuffled every time a
-    // session emitted an event — dots jumped in the collapsed row and rows swapped places
-    // under the cursor while reading (David, 2026-08-25). The only thing that changes
-    // position now is you activating a session, which lifts it into the header glance.
-    var byName = (a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0
-    roots.sort(byName)
-    activeKids.sort(byName)
-    for (var key in children) children[key].sort(byName)
+    // STABLE order: name only, so tabs never reshuffle while something streams.
+    roots.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
     var out = []
-    function walk(s, depth, parentCwd) {
+    for (var r = 0; r < roots.length; r++) {
+      var s = roots[r]
       out.push({ name: shortName(s.name), rawName: s.name, idle: stateLabel(s.status),
                  status: s.status, offline: !!s.offline, linked: !!s.parent, cwd: s.cwd || "",
                  hasWorktree: /\.daphen-|\/work\//.test(s.cwd || ""),
-                 // A devenv slice belongs to a WORKTREE, not to the main checkout. Local
-                 // worktrees are <repo>.daphen-<t>, VM ones <repo>-<t>; the plain repo
-                 // root (…/work/lovable, …/src/lovable) has none, so a session opened
-                 // there — an orchestrator, a one-off — must not claim one.
-                 // …and never a CHILD in its parent's worktree: the babysitter/watcher
-                 // shares the ticket session's cwd, but the slice belongs to the parent.
-                 devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || "") && s.cwd !== parentCwd,
+                 // A devenv slice belongs to a WORKTREE (<repo>.daphen-<t> locally,
+                 // <repo>-<t> on the VM), never to the plain repo root.
+                 devenv: /\.daphen-[^/]+$|\/lovable-[^/]+$/.test(s.cwd || ""),
                  remote: rail._isRemote(s.cwd), scope: s.scope || "",
                  profile: s.profile || "", plan: s.plan || "",
-                 depth: Math.min(depth, 1) })  // one level deep only
-      var kids = children[s.name] || []
-      for (var j = 0; j < kids.length; j++) walk(kids[j], depth + 1, s.cwd || "")
+                 depth: 0 })
     }
-    for (var k = 0; k < activeKids.length; k++) walk(activeKids[k], 1, activeCwd)
-    for (var r = 0; r < roots.length; r++) walk(roots[r], 0)
     return out
   }
 
@@ -2366,11 +2347,11 @@ Item {
   // no contentY math anywhere. For a message taller than the panel, wheel-scroll to
   // read the rest; j/k move card-to-card.
   function moveDown() {
-    if (cur < rSize && rosterExpanded) { cur = Math.min(cur + 1, rSize - 1); return }   // stay in roster
+    if (cur < rSize && rosterExpanded) return   // tabs move with h/l
     cur = Math.min(cur + 1, navTotal - 1)
   }
   function moveUp() {
-    if (cur < rSize) { cur = Math.max(cur - 1, 0); return }   // stay in roster
+    if (cur < rSize) { if (!rosterExpanded) cur = Math.max(cur - 1, 0); return }
     cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
   }
 
@@ -2521,9 +2502,18 @@ Item {
       toggleCurBash()
       return true
     }
-    // Ctrl+j → jump into the main view; Ctrl+k → back to the roster top.
-    if (ctrl && e.key === Qt.Key_J) { cur = (rSize < navTotal) ? rSize : Math.max(0, navTotal - 1); return true }
-    if (ctrl && e.key === Qt.Key_K) { cur = 0; return true }
+    // Panels stack tabs → feed → composer; Ctrl+j/Ctrl+k step down/up between them.
+    var onTabs = rosterExpanded && cur < rSize
+    if (ctrl && e.key === Qt.Key_J) {
+      if (onTabs && navTotal > rSize) { rosterOverride = false; cur = navTotal - 1 }
+      else enterInsert()
+      return true
+    }
+    if (ctrl && e.key === Qt.Key_K) { if (!onTabs) focusRoster(); return true }
+    if (onTabs && !ctrl && (e.key === Qt.Key_H || e.key === Qt.Key_L)) {
+      cur = Math.max(0, Math.min(rSize - 1, cur + (e.key === Qt.Key_L ? 1 : -1)))
+      return true
+    }
     switch (e.key) {
     case Qt.Key_I:      enterInsert(); return true
     case Qt.Key_Escape:
@@ -3006,7 +2996,7 @@ Item {
   TaskTimeline {
     id: taskTimeline
     objectName: "sessionTaskTimeline"
-    anchors { right: parent.right; rightMargin: 2; top: parent.top; topMargin: 20; bottom: chin.top }
+    anchors { right: parent.right; rightMargin: 2; top: parent.top; topMargin: 20 + rosterCard.y + rosterCard.height; bottom: chin.top }
     z: 10
     visible: rail.view === "chat" && rail.taskSegments.length > 0
     segments: rail.taskSegments
@@ -3019,8 +3009,171 @@ Item {
     anchors.margins: 0
     // Breathing room at the window's top edge — cards used to start at y=0
     // with their first line clipped against the bezel.
-    anchors.topMargin: Theme.mode === "light" ? 0 : 16
+    anchors.topMargin: 16
     spacing: 0
+
+    // Session tabs: one per root session; subagent activity folds into its parent's orb.
+    Item {
+      id: rosterCard
+      objectName: "sessionTabs"
+      Layout.fillWidth: true
+      Layout.leftMargin: 14
+      Layout.rightMargin: 14
+      Layout.bottomMargin: 10
+      z: 25
+      implicitHeight: tabRow.height
+      readonly property real tabWidth: Math.max(150, Math.min(220,
+        (tabStrip.width - tabStrip.spacing * Math.max(0, rosterModel.count - 1)) / Math.max(1, rosterModel.count)))
+
+      Rectangle {
+        anchors { left: parent.left; right: parent.right; leftMargin: -14; rightMargin: -14
+                  top: parent.top; topMargin: -16 }
+        height: -anchors.topMargin + tabRow.height + 28
+        gradient: Gradient {
+          GradientStop { position: 0; color: rail.railGroundColor }
+          GradientStop { position: 0.45; color: Qt.alpha(rail.railGroundColor, 0.85) }
+          GradientStop { position: 1; color: Qt.alpha(rail.railGroundColor, 0) }
+        }
+      }
+      Item {
+        id: tabRow
+        anchors { left: parent.left; right: parent.right; top: parent.top }
+        height: 42
+        readonly property color face: Theme.mode === "light" ? "#E6E7EA" : "#101010"
+        ContrastCard {
+          anchors.fill: parent
+          cardRadius: 12; elevated: false; bevelWidth: 1
+          outlineColor: Theme.mode === "light" ? "#D3D5DA" : "#363636"
+          rimTop: Theme.mode === "light" ? "#E0E2E6" : "#333333"
+          rimBottom: Theme.mode === "light" ? "#E0E2E6" : "#2C2C2C"
+          faceTop: tabRow.face; faceUpper: tabRow.face; faceMid: tabRow.face; faceBottom: tabRow.face
+        }
+        TapHandler {}
+      }
+
+      ListView {
+        id: tabStrip
+        objectName: "sessionTabStrip"
+        anchors { left: tabRow.left; leftMargin: 4; right: newTab.left; rightMargin: 4; top: tabRow.top; topMargin: 4 }
+        height: 34
+        orientation: ListView.Horizontal
+        spacing: 4
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        model: rosterModel
+        readonly property int focusIndex: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur < rail.rSize
+          ? rail.cur : rail._rosterIndexOf(rail.selectedRaw)
+        onFocusIndexChanged: Qt.callLater(reveal)
+        onCountChanged: Qt.callLater(reveal)
+        onWidthChanged: Qt.callLater(reveal)
+        function maxX() { return Math.max(0, contentWidth - width) }
+        function reveal() {
+          if (focusIndex < 0) return
+          var x0 = focusIndex * (rosterCard.tabWidth + spacing), x1 = x0 + rosterCard.tabWidth
+          var target = contentX
+          if (x0 < contentX + 24) target = x0 - 24
+          else if (x1 > contentX + width - 24) target = x1 - width + 24
+          target = Math.max(0, Math.min(maxX(), target))
+          if (Math.abs(target - contentX) < 0.5) return
+          revealAnim.to = target; revealAnim.restart()
+        }
+        NumberAnimation { id: revealAnim; target: tabStrip; property: "contentX"; duration: Motion.base; easing.type: Easing.OutCubic }
+        WheelHandler {
+          onWheel: (ev) => {
+            var d = ev.angleDelta.x !== 0 ? ev.angleDelta.x : ev.angleDelta.y
+            revealAnim.stop()
+            tabStrip.contentX = Math.max(0, Math.min(tabStrip.maxX(), tabStrip.contentX - d * 0.6))
+          }
+        }
+        delegate: Item {
+          id: tab
+          objectName: "sessionTab"
+          readonly property var md: model.d
+          readonly property string sid: md.rawName || md.name
+          readonly property bool selected: sid === rail.selectedRaw
+          readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index
+          readonly property bool hasAsk: {
+            rail.agentd ? rail.agentd.askGen : 0
+            return rail.agentd ? rail.agentd.askFor(sid) !== null : false
+          }
+          readonly property var activityColors: rail.fleetActivityColors(sid)
+          readonly property bool offline: md.offline === true || md.status === "offline"
+          width: rosterCard.tabWidth
+          height: tabStrip.height
+          Component.onCompleted: rail.probeDotCreates++
+          Rectangle {
+            anchors.fill: parent
+            radius: 9
+            readonly property bool light: Theme.mode === "light"
+            color: light
+              ? (tab.selected ? "#FFFFFF" : Qt.tint(tabRow.face, Qt.rgba(1, 1, 1, tab.cursor ? 0.8 : tabHover.hovered ? 0.62 : 0.42)))
+              : Qt.tint(tabRow.face, tab.selected ? chin.itemSelected
+                                   : tab.cursor ? chin.itemCursor
+                                   : tabHover.hovered ? chin.itemHover : Qt.alpha(chin.fg, 0.045))
+            border.width: (light && tab.selected) || (tab.cursor && tab.selected) ? 1 : 0
+            border.color: light && !tab.cursor ? "#D3D5DA" : Qt.alpha(chin.fg, 0.25)
+            Behavior on color { ColorAnimation { duration: 140 } }
+          }
+          Item {
+            id: tabState
+            anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
+            width: 16; height: 16
+            ThinkingOrb {
+              objectName: "rootActivityOrb"
+              anchors.fill: parent
+              visible: !tab.hasAsk && tab.activityColors.length > 0
+              running: visible
+              activityColors: tab.activityColors
+              glow: activityColors.length ? activityColors[0] : rail.actionGlow(tab.sid)
+              seedKey: tab.sid
+            }
+            Rectangle {
+              objectName: "rootIdleDot"
+              anchors.centerIn: parent
+              visible: !tab.hasAsk && tab.activityColors.length === 0
+              width: 7; height: 7; radius: 3.5
+              color: rail.dotColor(tab.md.status || tab.md.state || "")
+            }
+            Rectangle {
+              anchors.centerIn: parent
+              visible: tab.hasAsk
+              width: 9; height: 9; radius: 4.5; color: Theme.orange
+              readonly property real pulsePhase: (OrbClock.now % 1200) / 1200
+              opacity: visible ? 0.675 + 0.325 * Math.cos(pulsePhase * 2 * Math.PI) : 1
+            }
+          }
+          Text {
+            anchors { left: tabState.right; leftMargin: 8; right: tabMark.visible ? tabMark.left : parent.right
+                      rightMargin: tabMark.visible ? 6 : 12; verticalCenter: parent.verticalCenter }
+            text: tab.md.name
+            elide: Text.ElideRight
+            color: tab.selected || tab.cursor || tabHover.hovered ? chin.fg : chin.muted
+            font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+            font.weight: tab.selected ? 600 : 400
+          }
+          Icon {
+            id: tabMark
+            anchors { right: parent.right; rightMargin: 10; verticalCenter: parent.verticalCenter }
+            visible: tab.offline || tab.md.remote === true
+            width: 13; height: 13
+            name: tab.offline ? "bolt-slash" : "cloud--outline--18"
+            color: tab.offline ? Theme.red : rail.skyAccent
+          }
+          HoverHandler { id: tabHover; cursorShape: Qt.PointingHandCursor }
+          TapHandler { onTapped: rail.clickAt(index) }
+        }
+      }
+      Rectangle {
+        id: newTab
+        objectName: "newSessionTab"
+        anchors { right: tabRow.right; rightMargin: 4; verticalCenter: tabStrip.verticalCenter }
+        width: 34; height: 34; radius: 9
+        color: newHover.hovered ? chin.itemHover : "transparent"
+        Icon { anchors.centerIn: parent; name: "plus--outline--18"; width: 14; height: 14; color: newHover.hovered ? chin.fg : chin.muted }
+        HoverHandler { id: newHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: rail.openNew() }
+      }
+    }
 
     Crossfade {
       Layout.fillWidth: true
@@ -3088,6 +3241,7 @@ Item {
       }
       enabled: rail.view === "chat"
       clip: false
+      displayMarginBeginning: rosterCard.height + 40
       spacing: 24
       model: feedModel
       boundsBehavior: Flickable.StopAtBounds
@@ -3574,531 +3728,6 @@ Item {
       spacing: 10
 
 
-      // Roster — inside the bottom sheet, above the composer. The chin carries the
-      // card styling; this block is just the rows (or the collapsed dots glance).
-      Item {
-        id: rosterCard
-        Layout.fillWidth: true
-        // Always clip: without it, collapsing rows slide over the composer during
-        // the toggle animation. The orb fits because the glance sizes to content.
-        clip: true
-        // The ONE geometry animation. The sheet has no Behavior of its own — its
-        // height binding follows this frame-by-frame, so container and content can
-        // never separate; rows are revealed by this clip and fade in slower.
-        // The glance stays as the HEADER when expanded — the active session lives
-        // there (big title + orb), never duplicated as a list row.
-        implicitHeight: glanceCol.implicitHeight + (rail.rosterExpanded ? rosterInner.implicitHeight + rosterInner.anchors.topMargin : 0) + 8
-        Behavior on implicitHeight {
-          NumberAnimation { duration: Motion.slow; easing.type: Easing.InOutQuad }
-        }
-
-        function collapsedOrbX(rowIndex) {
-          var count = 0
-          var rank = -1
-          for (var i = 0; i < rosterModel.count; i++) {
-            var data = rosterModel.get(i).d
-            if ((data.depth || 0) !== 0) continue
-            if (i === rowIndex) rank = count
-            count++
-          }
-          if (rank < 0) return width
-          var rightMargin = rail.featuredFleetStreaming ? 44 : 32
-          return width - rightMargin - (count * 16 + Math.max(0, count - 1) * 12) + rank * 28
-        }
-
-        // Glance = the active session's home in BOTH states: collapsed it is the
-        // whole roster; expanded it becomes the header above the others-list.
-        // Only the right-side status dots are collapsed-only (the list shows them).
-        Item {
-          id: glanceCol
-          anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 4 }
-          implicitHeight: 52
-          // The header is the roster's handle: click to open it (and close it again).
-          TapHandler {
-            onTapped: rail.rosterExpanded ? rail.rosterOverride = false : rail.focusRoster()
-          }
-          Row {
-            id: glanceName
-            // Row geometry, with the pill's own 9px inset subtracted so the MARKER —
-            // not the pill's border box — lands on the rows' 14px column.
-            anchors { left: parent.left; leftMargin: 5 }
-            y: ((rail.activeTask.length ? 44 : glanceCol.height) - height) / 2
-            spacing: 0
-            // On the ORCHESTRATOR this icon is also the handover switch — it already
-            // says which host runs the role, so a second pill was a duplicate. Hover
-            // expands it into a labelled control; elsewhere it stays a plain marker.
-            Rectangle {
-              id: locSlot
-              anchors.verticalCenter: parent.verticalCenter
-              readonly property bool isSwitch: rail.selectedIsOrchestrator
-              readonly property bool onVm: rail.orchScope === "work"
-              readonly property bool remote: {
-                if (isSwitch) return onVm
-                var arr = rail.liveSessions
-                for (var i = 0; i < arr.length; i++)
-                  if (arr[i].name === rail.selectedRaw) return rail._isRemote(arr[i].cwd)
-                return false
-              }
-              readonly property color locationTint: remote ? rail.skyAccent : rail.silverAccent
-              readonly property color tint: isSwitch ? (onVm ? rail.skyAccent : Theme.orange) : locationTint
-              readonly property bool expanded: isSwitch && (locHover.hovered || busy)
-              property bool busy: false
-              onOnVmChanged: busy = false
-              height: 22
-              // Same padding as the goal pill: 9px inset either side, 22 at rest.
-              width: expanded ? locRow.implicitWidth + 18 : 33   // 9 + 15 + 9
-              radius: 11
-              color: expanded ? Qt.alpha(locSlot.tint, 0.14) : "transparent"
-              border.width: 1
-              border.color: Qt.alpha(locSlot.tint, expanded ? 0.9 : 0.0)
-              // Always present: the header keeps ONE layout in both roster states, so the
-              // marker never leaves and the title never has to slide to fill its place.
-              // (It used to fade out on collapse, and Row drops invisible children — which
-              // is exactly what made the title lag into position.)
-              Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              Behavior on color { ColorAnimation { duration: 140 } }
-              Behavior on border.color { ColorAnimation { duration: 140 } }
-              clip: true
-              Row {
-                id: locRow
-                // Same reason as the goal pill: left-anchored so the glyph is a fixed
-                // pivot and the label is revealed, never shoved.
-                anchors { left: parent.left; leftMargin: 9
-                          verticalCenter: parent.verticalCenter }
-                spacing: 5
-                Spinner {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: locSlot.busy
-                  running: locSlot.busy
-                  color: locSlot.tint
-                }
-                Icon {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: !locSlot.busy
-                  width: 15; height: 15
-                  name: locSlot.remote ? "cloud--outline--18" : "laptop--outline--18"
-                  color: locSlot.locationTint
-                }
-                Icon {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: locSlot.expanded && !locSlot.busy
-                  width: 13; height: 13
-                  name: "toggle-3"
-                  color: locSlot.tint
-                  transform: Scale { origin.x: 6.5; xScale: locSlot.onVm ? -1 : 1 }
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: locSlot.expanded
-                  text: locSlot.busy ? "MOVING" : (locSlot.onVm ? "HERE" : "VM")
-                  color: locSlot.tint
-                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
-                }
-              }
-              HoverHandler { id: locHover; enabled: locSlot.isSwitch }
-              TapHandler {
-                enabled: locSlot.isSwitch && !locSlot.busy
-                onTapped: {
-                  locSlot.busy = true
-                  Quickshell.execDetached(["sh", "-c",
-                    "notify-send -t 3000 'Orchestrator' 'handover starting…'; " +
-                    "out=$($HOME/.local/bin/cockpit-handover 2>&1 | tail -3); " +
-                    "notify-send -t 8000 'Orchestrator' \"$out\""])
-                }
-              }
-            }
-            Column {
-              width: Math.max(0, glanceCol.width - locSlot.width - glanceName.spacing - 150)
-              anchors.verticalCenter: parent.verticalCenter
-              spacing: 1
-
-              Row {
-                spacing: 6
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: rail.selectedParent.length > 0
-                  text: rail.shortName(rail.selectedParent).toUpperCase()
-                  color: chin.muted
-                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta; weight: 600 }
-                }
-                Icon {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: rail.selectedParent.length > 0
-                  name: "chevron-right"
-                  width: 11; height: 11
-                  color: chin.muted
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
-                  color: chin.fg
-                  font { family: Theme.fontFamily; pixelSize: rail.fsName; bold: true }
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: !rail.activeTask.length && rail.selectedPlan.length > 0
-                    && rail.selectedPlan.toUpperCase() !== (rail.shortName(rail.selectedRaw) || "").toUpperCase()
-                  width: Math.min(implicitWidth, 240)
-                  elide: Text.ElideMiddle
-                  text: rail.selectedPlan
-                  color: chin.muted
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: text.length > 0
-                  text: rail.runningToolLabel(rail.selectedRaw)
-                  color: chin.muted
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                }
-              }
-            }
-          }
-          Text {
-            id: taskLabel
-            objectName: "activeTaskLabel"
-            visible: rail.activeTask.length > 0
-            anchors { left: glanceName.left; leftMargin: locSlot.width + glanceName.spacing
-                      right: parent.right; rightMargin: 58 }
-            y: glanceName.y + glanceName.height + 4
-            text: rail.activeTask
-            textFormat: Text.PlainText
-            elide: Text.ElideRight
-            color: chin.muted
-            font.family: Theme.fontFamily
-            font.pixelSize: rail.fsMeta - 1
-            HoverHandler { id: taskHover; cursorShape: Qt.PointingHandCursor }
-            TapHandler { onTapped: rail.prefillTask() }
-          }
-          // Right slot: watchdog status beside the location marker (expanded) or
-          // the sibling status dots (collapsed) — meta lives right, title left.
-          Row {
-            anchors { right: parent.right; rightMargin: 14 }
-            y: glanceName.y + (glanceName.height - height) / 2
-            spacing: 12
-            // HANDOVER SWITCH — only while the selected session IS the orchestrator, so
-            // the control lives with the role rather than floating over a worker's row.
-            // The glyph is the state: cloud = the role runs on the dev VM, laptop = here.
-            // Click to move it; the direction is derived, so one control works both ways.
-            // Sibling dots, then the active session's STATE as the final column. The
-            // state column is the rightmost thing in BOTH roster states, so the big orb
-            // never moves — collapsing just folds the sibling dots away beside it.
-            Item {
-              anchors.verticalCenter: parent.verticalCenter
-              height: 18
-              // dots + gap + the 20px column. The gap carries the orb's 12px overhang
-              // ONLY while the orb is drawn; idle it closes to the dots' own 12px rhythm.
-              width: (rail.rosterExpanded ? 0
-                     : glanceDots.width + (rail.featuredFleetStreaming ? 24 : 12)) + 20
-              Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              Item {
-                // One mounted slot crossfades working↔idle without restarting the orb on roster toggles.
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                width: 20; height: 20
-                Crossfade {
-                  anchors.centerIn: parent
-                  objectName: "featuredHeaderOrb"
-                  width: 44; height: 44
-                  showSecond: !rail.featuredFleetStreaming
-                  enterDuration: 250
-                  exitDuration: 250
-                  shift: 0
-                  inactiveScale: 0.25
-                  first: ThinkingOrb {
-                    anchors.fill: parent
-                    running: rail.featuredFleetStreaming
-                    nodes: 16
-                    activityColors: rail.featuredActivityColors
-                    glow: activityColors.length ? activityColors[0] : rail.actionGlow(rail.selectedRaw)
-                    seedKey: rail.selectedRaw
-                  }
-                  second: Rectangle {
-                    anchors.centerIn: parent
-                    width: 7; height: 7; radius: 3.5
-                    color: rail.dotColor(rail.selectedStatus)
-                  }
-                }
-              }
-              Row {
-              id: glanceDots
-              anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-              anchors.rightMargin: rail.featuredFleetStreaming ? 44 : 32
-              Behavior on anchors.rightMargin {
-                NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
-              }
-              spacing: 12
-              opacity: rail.rosterExpanded ? 0 : 1
-              Behavior on opacity { NumberAnimation { duration: 220 } }
-              Repeater {
-              // rosterModel, NOT a filtered array: the array's identity changed on every
-              // roster push, so every dot (and running spinner) was destroyed and rebuilt
-              // several times a second while anything streamed — the "blinking dots".
-              // Rows update in place via setProperty; the selected session's slot hides.
-              model: rosterModel
-              Item {
-                readonly property var md: model.d
-                readonly property bool self: (md.rawName || md.name) === rail.selectedRaw
-                visible: !self && (md.depth || 0) === 0
-                width: 16; height: 16
-                Component.onCompleted: rail.probeDotCreates++
-              }
-              }
-            }
-            }
-          }
-        }
-
-        ColumnLayout {
-          id: rosterInner
-          objectName: "sessionRosterRows"
-          opacity: rail.rosterExpanded ? 1 : 0
-          visible: opacity > 0.01
-          property real motionBlur: rail.rosterExpanded ? 0 : 0.125
-          property real motionY: rail.rosterExpanded ? 0 : -4
-          transform: Translate { y: rosterInner.motionY }
-          layer.enabled: rosterFade.running || rosterBlur.running || rosterShift.running
-          layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: rosterInner.motionBlur }
-          Behavior on opacity { NumberAnimation { id: rosterFade; duration: Motion.slow; easing.type: Easing.InOutQuad } }
-          Behavior on motionBlur { NumberAnimation { id: rosterBlur; duration: Motion.slow; easing.type: Easing.InOutQuad } }
-          Behavior on motionY { NumberAnimation { id: rosterShift; duration: Motion.slow; easing.type: Easing.OutCubic } }
-          anchors { left: parent.left; right: parent.right; top: glanceCol.bottom; topMargin: rail.activeTask.length ? 12 : 4 }
-          spacing: 3
-          Repeater {
-            model: rosterModel
-            Rectangle {
-              id: sessRow
-              // Republish the row's data under the name the delegate already uses, so the
-              // switch from an array model to a ListModel touches one line, not thirty.
-              readonly property var modelData: model.d
-              Layout.fillWidth: true
-              implicitHeight: 40
-              radius: height / 2   // pill rows (as before)
-              // `!rail.insert` matters: the cursor fill means "keyboard is here", so
-              // it must clear while the composer owns input (the feed + files
-              // delegates already guard this way).
-              readonly property bool cursor: rail.focused && !rail.insert && rail.cur === index
-              readonly property bool selected: (modelData.rawName || modelData.name) === rail.selectedRaw
-              readonly property bool streaming: modelData.status === "streaming"
-            readonly property bool hasAsk: {
-              rail.agentd ? rail.agentd.askGen : 0
-              return rail.agentd ? rail.agentd.askFor(modelData.rawName || modelData.name) !== null : false
-            }
-              color: cursor ? chin.itemCursor
-                   : selected ? chin.itemSelected
-                   : hov.hovered ? chin.itemHover : "transparent"
-              HoverHandler { id: hov }
-              // Collapsed: index doesn't map to the full list → just focus/expand.
-              TapHandler { onTapped: rail.rosterExpanded ? rail.clickAt(index) : rail.focusRoster() }
-              RowLayout {
-                anchors { fill: parent; leftMargin: 14 + (modelData.depth || 0) * 20; rightMargin: 14 }
-                spacing: 8
-                // Nesting connector for spawned subagents.
-                Text {
-                  visible: (modelData.depth || 0) > 0
-                  text: "↳"; color: chin.muted
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsName
-                  Layout.alignment: Qt.AlignVCenter
-                }
-                // Where the agent actually runs: cloud = a lovbox worktree, laptop =
-                // this machine. Same ink as the name it sits next to.
-                Icon {
-                  // Outline cuts, and both from the 18px set so their stroke weights match —
-                  // there is no laptop--outline--12. Drawn at 14 rather than 13 to give the
-                  // laptop's outline enough room to read as a laptop and not a rectangle.
-                  name: modelData.remote ? "cloud--outline--18" : "laptop--outline--18"
-                  width: 14; height: 14
-                  Layout.preferredWidth: 14; Layout.preferredHeight: 14
-                  Layout.alignment: Qt.AlignVCenter
-                  color: modelData.remote ? rail.skyAccent : rail.silverAccent
-                }
-                Text {
-                  text: modelData.name
-                  // Content-sized, so the spinner hugs the name's right edge instead of being
-                  // pushed to the row's edge. The cap comes from the ROW, never from this
-                  // item's own implicitWidth: capping a text by its own width — which is then
-                  // what elide reacts to — is self-referential and settles arbitrarily (it ate
-                  // the last glyph of the SHORT name while longer ones were fine). 190 is the
-                  // rest of the row: margins 28 + icon 14 + orb 16 + status 74 + devenv 15 +
-                  // five 8px gaps.
-                  Layout.fillWidth: false
-                  // The role badge eats from the NAME's budget, never from the orb/status
-                  // slots to its right — a long ticket name with a badge otherwise squeezed
-                  // the working orb.
-                  Layout.maximumWidth: Math.max(48, sessRow.width - 190 - (modelData.depth || 0) * 20
-                                                - (roleBadge.visible ? roleBadge.width + 8 : 0))
-                  elide: Text.ElideRight
-                  color: chin.fg
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsName
-                  // Bold marks SELECTION only. Streaming has the orb, and bolding for it too
-                  // meant two rows shouting at once with no way to tell which you were on.
-                  font.weight: sessRow.selected ? 600 : 400
-                }
-                // Role badge (agentd profiles): orchestrator / worker / reviewer / watcher.
-                // The daemon reports "profile" like "lovable-orchestrator" — show the last
-                // segment, muted, so identity reads without shouting over the name.
-                ChinCapLabel {
-                  id: roleBadge
-                  visible: text.length > 0
-                  text: {
-                    var p = String(sessRow.modelData.profile || sessRow.modelData.role || "")
-                    if (!p.length) return ""
-                    var seg = p.split("-")
-                    return seg[seg.length - 1]
-                  }
-                  color: chin.muted
-                }
-                // Spinner immediately right of the name. The slot is reserved even when idle
-                // so nothing shifts as a session starts or stops working. 20px is free (the
-                // row is a fixed 40px tall) and 20 is what it takes to LOOK bigger: the box
-                // draws a sphere ~0.83 of its size, so a 16px box was only ~13px of visible
-                // mesh next to 14px icons.
-                Item { Layout.fillWidth: true }   // state lives on the right edge
-                // needs-input beacon: the one roster state that outranks everything.
-                Rectangle {
-                  visible: sessRow.hasAsk
-                  implicitWidth: askCap.implicitWidth + 14
-                  implicitHeight: 20; radius: 10
-                  color: Theme.orange
-                  Layout.alignment: Qt.AlignVCenter
-                  Text {
-                    id: askCap; anchors.centerIn: parent
-                    text: "needs input"
-                    color: Theme.bg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 2; font.bold: true
-                  }
-                }
-                // Tool + elapsed while streaming: the only status WORDS left, and only
-                // when there is something to say. idle/asleep are the dot's job now.
-                Text {
-                  text: {
-                    rail.nowTick
-                    rail.agentd ? rail.agentd.curToolGen : 0
-                    if (sessRow.hasAsk || !sessRow.streaming) return ""
-                    var sid2 = modelData.rawName || modelData.name
-                    if (rail.agentd && rail.agentd.curToolLiveFor(sid2)) {
-                      var secs = Math.max(0, Math.round((Date.now() - rail.agentd.curToolAtFor(sid2)) / 1000))
-                      var el = secs >= 60 ? Math.floor(secs / 60) + "m" + String(secs % 60).padStart(2, "0") : secs + "s"
-                      return (rail.agentd.curToolFor(sid2) || "tool") + " · " + el
-                    }
-                    return ""
-                  }
-                  // Fade, never blink: the label appears the moment a tool starts and goes
-                  // the moment it ends, and toggling `visible` made every tool boundary a
-                  // flash. Opacity crossfades instead, and the item keeps its slot so the
-                  // row never reflows as the text comes and goes.
-                  opacity: text.length > 0 ? 1 : 0
-                  Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                  horizontalAlignment: Text.AlignRight
-                  Layout.alignment: Qt.AlignVCenter
-                  // Breathing room before the state slot: "bash-write · 2s" sat flush
-                  // against the orb and read as one glued token. 18 clears the orb's 12px
-                  // overhang past its column with a real gap left over.
-                  Layout.rightMargin: 18
-                  color: chin.muted
-                  font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
-                }
-                // Connection trouble is the only thing that earns an icon here: a worker
-                // whose daemon went away. Red, left of the state slot, absent otherwise —
-                // the green devenv plug that used to live on the right was decoration and
-                // pushed the dots off the edge.
-                Icon {
-                  visible: modelData.offline === true || modelData.status === "offline"
-                  name: "bolt-slash"
-                  width: 14; height: 14
-                  Layout.preferredWidth: visible ? 14 : 0
-                  Layout.preferredHeight: 14
-                  Layout.alignment: Qt.AlignVCenter
-                  color: Theme.red
-                }
-                // ONE state slot at the right edge, same vocabulary as the collapsed dots:
-                // orb = working, muted dot = resting, pulsing orange =
-                // needs input. The slot is always reserved so nothing shifts on a change.
-                Item {
-                  Layout.preferredWidth: 20; Layout.preferredHeight: 20
-                  Layout.alignment: Qt.AlignVCenter
-                  ThinkingOrb {
-                    anchors.fill: parent
-                    visible: sessRow.streaming && !sessRow.hasAsk && (modelData.depth || 0) > 0
-                    running: visible
-                    nodes: 13
-                    glow: rail.actionGlow(modelData.rawName || modelData.name)
-                    seedKey: modelData.rawName || modelData.name
-                    invertRing: Theme.mode === "light"
-                  }
-                  Rectangle {
-                    anchors.centerIn: parent
-                    visible: !sessRow.streaming && !sessRow.hasAsk && (modelData.depth || 0) > 0
-                    width: 7; height: 7; radius: 3.5
-                    color: rail.dotColor(modelData.status || modelData.state || "")
-                  }
-                  Rectangle {
-                    anchors.centerIn: parent
-                    visible: sessRow.hasAsk && (modelData.depth || 0) > 0
-                    width: 9; height: 9; radius: 4.5; color: Theme.orange
-                    readonly property real pulsePhase: (OrbClock.now % 1200) / 1200
-                    opacity: visible ? 0.675 + 0.325 * Math.cos(pulsePhase * 2 * Math.PI) : 1
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        // Root-session markers stay mounted while moving between the collapsed
-        // glance and expanded row, preserving orb shader phase exactly.
-        Repeater {
-          model: rosterModel
-          Item {
-            id: sharedRosterOrb
-            objectName: "sharedRosterOrb"
-            readonly property var md: model.d
-            readonly property bool rootSession: (md.depth || 0) === 0
-            readonly property var activityColors: !rootSession ? [] : rail.rosterExpanded
-              ? (md.status === "streaming" ? [rail.actionGlow(md.rawName || md.name)] : [])
-              : rail.fleetActivityColors(md.rawName || md.name)
-            readonly property bool hasAsk: {
-              rail.agentd ? rail.agentd.askGen : 0
-              return rail.agentd ? rail.agentd.askFor(md.rawName || md.name) !== null : false
-            }
-            width: rail.rosterExpanded ? 20 : 16
-            height: width
-            x: rail.rosterExpanded ? rosterCard.width - 34 : rosterCard.collapsedOrbX(index) - 14
-            y: rail.rosterExpanded ? rosterInner.y + index * 43 + 10
-              : glanceCol.y + glanceName.y + (glanceName.height - height) / 2
-            visible: rootSession
-            z: 5
-
-            Behavior on x { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
-            Behavior on y { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
-            Behavior on width { NumberAnimation { duration: Motion.base; easing.type: Easing.InOutQuad } }
-
-            ThinkingOrb {
-              objectName: "rootActivityOrb"
-              anchors.fill: parent
-              visible: !sharedRosterOrb.hasAsk && activityColors.length > 0
-              running: visible
-              activityColors: sharedRosterOrb.activityColors
-              glow: activityColors.length ? activityColors[0] : rail.actionGlow(sharedRosterOrb.md.rawName || sharedRosterOrb.md.name)
-              seedKey: sharedRosterOrb.md.rawName || sharedRosterOrb.md.name
-            }
-            Rectangle {
-              objectName: "rootIdleDot"
-              anchors.centerIn: parent
-              visible: !sharedRosterOrb.hasAsk && sharedRosterOrb.activityColors.length === 0
-              width: 7; height: 7; radius: 3.5
-              color: rail.dotColor(sharedRosterOrb.md.status || sharedRosterOrb.md.state || "")
-            }
-            Rectangle {
-              anchors.centerIn: parent
-              visible: sharedRosterOrb.hasAsk
-              width: 9; height: 9; radius: 4.5; color: Theme.orange
-              readonly property real pulsePhase: (OrbClock.now % 1200) / 1200
-              opacity: visible ? 0.675 + 0.325 * Math.cos(pulsePhase * 2 * Math.PI) : 1
-            }
-          }
-        }
-      }
-
       Item {
         id: attachments
         objectName: "composerAttachments"
@@ -4106,6 +3735,7 @@ Item {
         Layout.maximumWidth: chinCol.width
         Layout.topMargin: -chinCol.spacing
         readonly property bool populated: rail.codeAttachments.length > 0 || rail.planDraft !== null
+        visible: populated || height > 0.5
         implicitHeight: populated ? attachmentFlow.implicitHeight + chinCol.spacing : 0
         clip: true
         Behavior on implicitHeight {
@@ -4590,6 +4220,162 @@ Item {
         }
       }
 
+      Item {
+        id: composerContext
+        objectName: "composerContext"
+        Layout.fillWidth: true
+        Layout.topMargin: -2
+        Layout.bottomMargin: 2
+        Layout.minimumWidth: 0
+        visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
+        implicitHeight: glanceName.height
+        Row {
+          id: glanceName
+          // Row geometry, with the pill's own 9px inset subtracted so the MARKER —
+          // not the pill's border box — lands on the rows' 14px column.
+          anchors { left: parent.left; leftMargin: 5 }
+          spacing: 0
+          // On the ORCHESTRATOR this icon is also the handover switch — it already
+          // says which host runs the role, so a second pill was a duplicate. Hover
+          // expands it into a labelled control; elsewhere it stays a plain marker.
+          Rectangle {
+            id: locSlot
+            anchors.verticalCenter: parent.verticalCenter
+            readonly property bool isSwitch: rail.selectedIsOrchestrator
+            readonly property bool onVm: rail.orchScope === "work"
+            readonly property bool remote: {
+              if (isSwitch) return onVm
+              var arr = rail.liveSessions
+              for (var i = 0; i < arr.length; i++)
+                if (arr[i].name === rail.selectedRaw) return rail._isRemote(arr[i].cwd)
+              return false
+            }
+            readonly property color locationTint: remote ? rail.skyAccent : rail.silverAccent
+            readonly property color tint: isSwitch ? (onVm ? rail.skyAccent : Theme.orange) : locationTint
+            readonly property bool expanded: isSwitch && (locHover.hovered || busy)
+            property bool busy: false
+            onOnVmChanged: busy = false
+            height: 22
+            // Same padding as the goal pill: 9px inset either side, 22 at rest.
+            width: expanded ? locRow.implicitWidth + 18 : 33   // 9 + 15 + 9
+            radius: 11
+            color: expanded ? Qt.alpha(locSlot.tint, 0.14) : "transparent"
+            border.width: 1
+            border.color: Qt.alpha(locSlot.tint, expanded ? 0.9 : 0.0)
+            // Always present: the header keeps ONE layout in both roster states, so the
+            // marker never leaves and the title never has to slide to fill its place.
+            // (It used to fade out on collapse, and Row drops invisible children — which
+            // is exactly what made the title lag into position.)
+            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            Behavior on color { ColorAnimation { duration: 140 } }
+            Behavior on border.color { ColorAnimation { duration: 140 } }
+            clip: true
+            Row {
+              id: locRow
+              // Same reason as the goal pill: left-anchored so the glyph is a fixed
+              // pivot and the label is revealed, never shoved.
+              anchors { left: parent.left; leftMargin: 9
+                        verticalCenter: parent.verticalCenter }
+              spacing: 5
+              Spinner {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: locSlot.busy
+                running: locSlot.busy
+                color: locSlot.tint
+              }
+              Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !locSlot.busy
+                width: 15; height: 15
+                name: locSlot.remote ? "cloud--outline--18" : "laptop--outline--18"
+                color: locSlot.locationTint
+              }
+              Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: locSlot.expanded && !locSlot.busy
+                width: 13; height: 13
+                name: "toggle-3"
+                color: locSlot.tint
+                transform: Scale { origin.x: 6.5; xScale: locSlot.onVm ? -1 : 1 }
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: locSlot.expanded
+                text: locSlot.busy ? "MOVING" : (locSlot.onVm ? "HERE" : "VM")
+                color: locSlot.tint
+                font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+              }
+            }
+            HoverHandler { id: locHover; enabled: locSlot.isSwitch }
+            TapHandler {
+              enabled: locSlot.isSwitch && !locSlot.busy
+              onTapped: {
+                locSlot.busy = true
+                Quickshell.execDetached(["sh", "-c",
+                  "notify-send -t 3000 'Orchestrator' 'handover starting…'; " +
+                  "out=$($HOME/.local/bin/cockpit-handover 2>&1 | tail -3); " +
+                  "notify-send -t 8000 'Orchestrator' \"$out\""])
+              }
+            }
+          }
+          Column {
+            width: Math.max(0, composerContext.width - locSlot.width - 10)
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 1
+
+            Row {
+              // The tab already names the session; a task takes the line instead.
+              visible: !taskLabel.visible
+              spacing: 6
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: rail.selectedParent.length > 0
+                text: rail.shortName(rail.selectedParent).toUpperCase()
+                color: chin.muted
+                font { family: Theme.fontFamily; pixelSize: rail.fsMeta; weight: 600 }
+              }
+              Icon {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: rail.selectedParent.length > 0
+                name: "chevron-right"
+                width: 11; height: 11
+                color: chin.muted
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: (rail.shortName(rail.selectedRaw) || "lovable").toUpperCase()
+                color: chin.fg
+                font { family: Theme.fontFamily; pixelSize: rail.fsName; bold: true }
+              }
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: text.length > 0
+                text: rail.runningToolLabel(rail.selectedRaw)
+                color: chin.muted
+                font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
+              }
+            }
+          }
+        }
+        Text {
+          id: taskLabel
+          objectName: "activeTaskLabel"
+          visible: text.length > 0
+          anchors { left: glanceName.left; leftMargin: locSlot.width + glanceName.spacing
+                    right: parent.right; rightMargin: 14 }
+          y: glanceName.y + (glanceName.height - height) / 2
+          text: rail.activeTask || rail.selectedPlan
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: taskHover.hovered ? chin.fg : Qt.alpha(chin.fg, 0.82)
+          font.family: Theme.fontFamily
+          font.pixelSize: rail.fsMeta
+          HoverHandler { id: taskHover; enabled: rail.activeTask.length > 0; cursorShape: Qt.PointingHandCursor }
+          TapHandler { enabled: rail.activeTask.length > 0; onTapped: rail.prefillTask() }
+        }
+      }
+
       // Composer — real text input (i to enter, Esc/Ctrl+h to leave). Hidden while an
       // ask is pending: the question TAKES OVER the input rather than floating above a
       // composer that still looks ready for an unrelated message.
@@ -4623,7 +4409,7 @@ Item {
           Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
         }
         RowLayout {
-          anchors { fill: parent; leftMargin: 12; rightMargin: 12 }
+          anchors { fill: parent; leftMargin: 12; rightMargin: 52 }
           spacing: 8
           Icon {
             name: "chevron-right"; width: 14; height: 14
@@ -4813,6 +4599,28 @@ Item {
           }
           }
         }
+        // Concentric with the pill's one-line end cap: 7px clear of the frame on all sides.
+        Item {
+          objectName: "composerStatus"
+          anchors { right: parent.right; rightMargin: 7; top: parent.top; topMargin: 7 }
+          width: 38; height: 38
+          readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
+          readonly property bool asking: !!rail.pendingAsk
+          ThinkingOrb {
+            anchors.fill: parent
+            visible: !parent.asking && parent.colors.length > 0
+            running: visible
+            activityColors: parent.colors
+            glow: activityColors.length ? activityColors[0] : rail.actionGlow(rail.featured.rawName)
+            seedKey: rail.featured.rawName
+          }
+          Rectangle {
+            anchors.centerIn: parent
+            visible: parent.asking || parent.colors.length === 0
+            width: 10; height: 10; radius: 5
+            color: parent.asking ? Theme.orange : rail.dotColor(rail.featured.status)
+          }
+        }
       }
 
       // Keybind hints (QsLib KeyCap/CapLabel) — the chin is the ONE place bindings are
@@ -4966,8 +4774,8 @@ Item {
                 .concat([{ k: "C-v", l: "paste" }])
             }
             if (rail.curSection() === "roster") {
-              return [{ k: "⏎", l: "open" }, { k: "n", l: "new" },
-                      { k: "x", l: "kill" }, { k: "C-t", l: "collapse" }]
+              return [{ k: "h/l", l: "tabs" }, { k: "⏎", l: "open" }, { k: "n", l: "new" },
+                      { k: "x", l: "kill" }, { k: "C-j", l: "feed" }]
             }
             return [
               { k: "⇥",   l: rail.view === "files" ? "chat" : "files" },

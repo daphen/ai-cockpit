@@ -31,7 +31,7 @@ ShellRoot {
         if (rail.cur !== 0 || rail.insert) { console.error("roster entry did not select its first row"); Qt.quit(); return }
       } else if (test.phase === 3) {
         if (rail.cur !== 0 || rail.insert) { console.error("delayed feed update pulled the cursor out of the roster"); Qt.quit(); return }
-        keys.keyClick(Qt.Key_J,Qt.NoModifier,0)
+        keys.keyClick(Qt.Key_L,Qt.NoModifier,0)
         if (rail.cur !== 1) { console.error("roster did not receive navigation"); Qt.quit(); return }
         console.log("PASS: roster selection and navigation survive the next feed update after sending")
         Qt.quit()
