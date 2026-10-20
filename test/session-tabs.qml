@@ -92,8 +92,17 @@ ShellRoot {
         test.check(rail.insert, "C-j from the tabs with an empty feed did not reach the composer")
         test.history("")
       } else if (test.phase === 4) {
-        test.check(!label.visible && Math.abs(card.height - (strip.height + 8)) < 0.5, "empty task still shows a task line")
-        console.log("PASS: root-only tabs overflow into a scroll, keep the selected tab in view, fold subagent activity, and show the task line only when set")
+        test.check(!label.visible && Math.abs(card.height - (strip.height + 12)) < 0.5, "empty task still shows a task line")
+        rail.exitInsert(); rail.focusRoster(); rail.cur = rail.rSize - 1
+        test.key(Qt.Key_L)
+        test.check(rail.cur === 0, "l on the last tab did not wrap to the first")
+      } else if (test.phase === 5) {
+        test.check(test.inView(rail.rosterList[0].rawName || rail.rosterList[0].name), "wrapped-to first tab is not in view")
+        test.key(Qt.Key_H)
+        test.check(rail.cur === rail.rSize - 1, "h on the first tab did not wrap to the last")
+      } else if (test.phase === 6) {
+        test.check(test.inView(rail.rosterList[rail.rSize - 1].rawName || rail.rosterList[rail.rSize - 1].name), "wrapped-to last tab is not in view")
+        console.log("PASS: root-only tabs overflow into a scroll, keep the selected tab in view, fold subagent activity, and show the task line only when set, and h/l wrap around the ends")
         Qt.quit()
       }
       test.phase++

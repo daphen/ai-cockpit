@@ -2511,7 +2511,7 @@ Item {
     }
     if (ctrl && e.key === Qt.Key_K) { if (!onTabs) focusRoster(); return true }
     if (onTabs && !ctrl && (e.key === Qt.Key_H || e.key === Qt.Key_L)) {
-      cur = Math.max(0, Math.min(rSize - 1, cur + (e.key === Qt.Key_L ? 1 : -1)))
+      cur = (cur + (e.key === Qt.Key_L ? 1 : -1) + rSize) % rSize
       return true
     }
     switch (e.key) {
@@ -3038,15 +3038,17 @@ Item {
       Item {
         id: tabRow
         anchors { left: parent.left; right: parent.right; top: parent.top }
-        height: 42
-        readonly property color face: Theme.mode === "light" ? "#E6E7EA" : "#101010"
+        height: 46
+        readonly property color face: rail.userCardBottom
         ContrastCard {
           anchors.fill: parent
-          cardRadius: 12; elevated: false; bevelWidth: 1
+          cardRadius: 15; elevated: true; bevelWidth: 1
+          shadowColor: Theme.mode === "light" ? Qt.rgba(0.10, 0.12, 0.16, 0.10) : "#101010"
           outlineColor: Theme.mode === "light" ? "#D3D5DA" : "#363636"
           rimTop: Theme.mode === "light" ? "#E0E2E6" : "#333333"
           rimBottom: Theme.mode === "light" ? "#E0E2E6" : "#2C2C2C"
-          faceTop: tabRow.face; faceUpper: tabRow.face; faceMid: tabRow.face; faceBottom: tabRow.face
+          faceTop: Theme.mode === "light" ? rail.userCardBottom : rail.userCardTop
+          faceUpper: faceTop; faceMid: tabRow.face; faceBottom: tabRow.face
         }
         TapHandler {}
       }
@@ -3054,10 +3056,10 @@ Item {
       ListView {
         id: tabStrip
         objectName: "sessionTabStrip"
-        anchors { left: tabRow.left; leftMargin: 4; right: newTab.left; rightMargin: 4; top: tabRow.top; topMargin: 4 }
+        anchors { left: tabRow.left; leftMargin: 6; right: newTab.left; rightMargin: 6; top: tabRow.top; topMargin: 6 }
         height: 34
         orientation: ListView.Horizontal
-        spacing: 4
+        spacing: 6
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         model: rosterModel
@@ -3105,19 +3107,18 @@ Item {
             anchors.fill: parent
             radius: 9
             readonly property bool light: Theme.mode === "light"
-            color: light
-              ? (tab.selected ? "#FFFFFF" : Qt.tint(tabRow.face, Qt.rgba(1, 1, 1, tab.cursor ? 0.8 : tabHover.hovered ? 0.62 : 0.42)))
-              : Qt.tint(tabRow.face, tab.selected ? chin.itemSelected
-                                   : tab.cursor ? chin.itemCursor
-                                   : tabHover.hovered ? chin.itemHover : Qt.alpha(chin.fg, 0.045))
+            color: Qt.tint(tabRow.face, tab.selected ? chin.itemSelected
+                                      : tab.cursor ? chin.itemCursor
+                                      : tabHover.hovered ? chin.itemHover
+                                      : light ? Theme.surface : Qt.alpha(chin.fg, 0.045))
             border.width: (light && tab.selected) || (tab.cursor && tab.selected) ? 1 : 0
             border.color: light && !tab.cursor ? "#D3D5DA" : Qt.alpha(chin.fg, 0.25)
             Behavior on color { ColorAnimation { duration: 140 } }
           }
           Item {
             id: tabState
-            anchors { left: parent.left; leftMargin: 12; verticalCenter: parent.verticalCenter }
-            width: 16; height: 16
+            anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
+            width: 20; height: 20
             ThinkingOrb {
               objectName: "rootActivityOrb"
               anchors.fill: parent
@@ -3131,19 +3132,19 @@ Item {
               objectName: "rootIdleDot"
               anchors.centerIn: parent
               visible: !tab.hasAsk && tab.activityColors.length === 0
-              width: 7; height: 7; radius: 3.5
+              width: 8; height: 8; radius: 4
               color: rail.dotColor(tab.md.status || tab.md.state || "")
             }
             Rectangle {
               anchors.centerIn: parent
               visible: tab.hasAsk
-              width: 9; height: 9; radius: 4.5; color: Theme.orange
+              width: 10; height: 10; radius: 5; color: Theme.orange
               readonly property real pulsePhase: (OrbClock.now % 1200) / 1200
               opacity: visible ? 0.675 + 0.325 * Math.cos(pulsePhase * 2 * Math.PI) : 1
             }
           }
           Text {
-            anchors { left: tabState.right; leftMargin: 8; right: tabMark.visible ? tabMark.left : parent.right
+            anchors { left: tabState.right; leftMargin: 6; right: tabMark.visible ? tabMark.left : parent.right
                       rightMargin: tabMark.visible ? 6 : 12; verticalCenter: parent.verticalCenter }
             text: tab.md.name
             elide: Text.ElideRight
@@ -3166,7 +3167,7 @@ Item {
       Rectangle {
         id: newTab
         objectName: "newSessionTab"
-        anchors { right: tabRow.right; rightMargin: 4; verticalCenter: tabStrip.verticalCenter }
+        anchors { right: tabRow.right; rightMargin: 6; verticalCenter: tabStrip.verticalCenter }
         width: 34; height: 34; radius: 9
         color: newHover.hovered ? chin.itemHover : "transparent"
         Icon { anchors.centerIn: parent; name: "plus--outline--18"; width: 14; height: 14; color: newHover.hovered ? chin.fg : chin.muted }
