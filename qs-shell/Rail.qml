@@ -4620,8 +4620,8 @@ Item {
           width: inlineRow.implicitWidth + 22
           onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
           color: selected ? chin.itemSelected : inlineHover.hovered || cursor ? chin.itemHover : "transparent"
-          border.width: cursor ? 1.5 : 0
-          border.color: rail.activeRing
+          border.width: cursor ? 1.5 : selected ? 1 : 0
+          border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
           Row {
             id: inlineRow
