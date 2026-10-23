@@ -961,13 +961,14 @@ Item {
   }
 
   property string _feedSid: ""
-  function _entriesToFeed(entries, leafId) {
+  function _entriesToFeed(entries, leafId, olderTasks) {
     var byid = {}
     for (var i = 0; i < entries.length; i++) if (entries[i].id) byid[entries[i].id] = entries[i]
     var cur = leafId
     if (!cur && entries.length) cur = entries[entries.length - 1].id
     var chain = [], seen = {}
     while (cur && byid[cur] && !seen[cur]) { seen[cur] = true; chain.push(byid[cur]); cur = byid[cur].parentId }
+    for (var oi = (olderTasks || []).length - 1; oi >= 0; oi--) if (!seen[olderTasks[oi].id]) chain.push(Object.assign({ _older: true }, olderTasks[oi]))
     // Collect user/assistant messages chronologically, then only format the TAIL —
     // a big transcript (3000+ entries / 7MB) is otherwise multi-second to expand.
     var msgs = [], toolErrs = {}, toolResults = {}
@@ -993,7 +994,7 @@ Item {
       if (e.type === "custom" && e.customType === "cockpit-session-task" && e.data
           && (e.data.action === "switch" || e.data.action === "finish") && typeof e.data.title === "string" && e.data.title.trim()) {
         msgs.push({ role: "sessionTask", action: e.data.action, title: e.data.title.trim(),
-                    outcome: typeof e.data.outcome === "string" ? e.data.outcome : "", timestamp: e.timestamp || "", _mid: e.id })
+                    outcome: typeof e.data.outcome === "string" ? e.data.outcome : "", timestamp: e.timestamp || "", _mid: e.id, _clipped: e._older === true })
         continue
       }
       if (e.type === "custom" && e.customType === "cockpit-user-bash-approval"
@@ -1463,7 +1464,7 @@ Item {
     if (!esid) return
     var am = _entriesAskedAt; delete am[esid]; _entriesAskedAt = am
     _feedSid = esid
-    var rebuilt = _entriesToFeed(m.data.entries, m.data.leafId)
+    var rebuilt = _entriesToFeed(m.data.entries, m.data.leafId, m.data.olderTasks)
     var liveItems = (feeds[esid] || []).filter(function(item) {
       if (!(item.liveText || item.liveThink || item.liveDirective || item.partial === true)) return false
       var rebuiltTool = item.partial === true ? _toolItemInRows(rebuilt, item.id) : null

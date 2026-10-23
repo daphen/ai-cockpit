@@ -47,7 +47,7 @@ ShellRoot {
   }
   function check(value, message) { if (!value) throw new Error(message) }
   function broadcast(message) { state.onLine(JSON.stringify(message), 0) }
-  function history(entries, leaf) { broadcast({type:"response",command:"get_entries",session:"ticket",data:{entries:entries,leafId:leaf}}) }
+  function history(entries, leaf, olderTasks) { broadcast({type:"response",command:"get_entries",session:"ticket",data:{entries:entries,leafId:leaf,olderTasks:olderTasks}}) }
   function entry(id, parent, role, text) {
     return {type:"message",id:id,parentId:parent,message:{role:role,content:[{type:"text",text:text}]}}
   }
@@ -145,10 +145,12 @@ ShellRoot {
         if (!test.ready(rail.taskSegments.length === 6)) return
         test.check(rail.taskSegments.length === 6 && rail.activeTask === "Outside window 5", "out-of-window tasks were dropped")
         test.check(test.find(rail,"sessionTaskTimeline").visible, "retained task timeline is hidden")
-        test.history([test.marker("clipped","missing-parent","switch","Available tail"), test.entry("last","clipped","assistant","Tail result")],"last")
+        test.history([test.marker("clipped","missing-parent","switch","Available tail"), test.entry("last","clipped","assistant","Tail result")],"last",
+                     [test.marker("older1","gone","switch","Older one"), test.marker("older2","gone","switch","Older two"), test.marker("clipped","missing-parent","switch","Available tail")])
       } else if (test.phase === 8) {
         if (!test.ready(rail.activeTask === "Available tail")) return
-        test.check(rail.taskSegments.length === 1 && rail.taskSegments[0].row === 0, "trimmed native branch could not anchor retained task")
+        test.check(rail.taskSegments.map(s => s.title).join("|") === "Older one|Older two|Available tail" && rail.taskSegments.every(s => s.row === 0),
+                   "tasks older than the relayed history were not shown once each, anchored to the first row: " + rail.taskSegments.map(s => s.title).join("|"))
         test.check(rail.activeTask === "Available tail", "trimmed branch active title lost")
         test.history([test.marker("start",null,"switch","Finished task"),test.entry("answer","start","assistant","Finished answer"),test.marker("finish","answer","finish","Finished task","Done")],"finish")
       } else if (test.phase === 9) {

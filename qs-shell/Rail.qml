@@ -203,6 +203,13 @@ Item {
   }
   property string activeRaw: ""
   property var recentSelections: []
+  // The order tabs are sorted by; held while you move through the tabs, so they only
+  // re-sort once the tab list loses focus.
+  property var tabRecency: []
+  readonly property bool tabsFocused: rosterExpanded && focused && !insert && cur < rSize
+  function syncTabRecency() { if (!tabsFocused) tabRecency = recentSelections }
+  onRecentSelectionsChanged: syncTabRecency()
+  onTabsFocusedChanged: syncTabRecency()
   function rememberRecent(name) {
     if (!name) return
     var next = [name]
@@ -744,7 +751,7 @@ Item {
     property string itemKey: ""
     anchors.fill: parent; anchors.margins: -4
     radius: 6; color: "transparent"
-    border.width: 1.5; border.color: Theme.orange
+    border.width: 1.5; border.color: rail.activeRing
     visible: rail.itemMode && rail.itemFocus === itemKey && itemKey !== ""
   }
   readonly property int diffPreviewLines: 40
@@ -1577,14 +1584,19 @@ Item {
   FileView {
     id: selectionFile
     path: rail.selectionStatePath
-    onLoaded: { rail.savedRaw = String(text() || "").trim(); rail._recomputeDefault() }
+    onLoaded: {
+      var names = String(text() || "").split("\n").map(x => x.trim()).filter(x => x.length)
+      rail.savedRaw = names.length ? names[0] : ""
+      rail.recentSelections = rail.recentSelections.concat(names.filter(x => rail.recentSelections.indexOf(x) < 0)).slice(0, 20)
+      rail._recomputeDefault()
+    }
   }
   Process { id: selectionWrite }
   function rememberSelection(name) {
     if (!name) return
     selectionWrite.running = false
     selectionWrite.command = ["sh", "-c", 'mkdir -p "$1"; printf %s "$2" > "$3"',
-                              "sh", Quickshell.env("HOME") + "/.local/state/cockpit", name, selectionStatePath]
+                              "sh", Quickshell.env("HOME") + "/.local/state/cockpit", recentSelections.join("\n"), selectionStatePath]
     selectionWrite.running = true
   }
   function _recomputeDefault() {
@@ -1831,8 +1843,18 @@ Item {
       if (s.parent && all.some(x => x.name === s.parent)) continue
       roots.push(s)
     }
-    // STABLE order: name only, so tabs never reshuffle while something streams.
-    roots.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)
+    // Most recently selected first (a child's selection counts for its root), then by
+    // name; activity never reorders, so tabs hold still while something streams.
+    var rank = {}
+    for (var ri = 0; ri < tabRecency.length; ri++) {
+      var picked = all.find(x => x.name === tabRecency[ri])
+      var root = picked && picked.parent && all.some(x => x.name === picked.parent) ? picked.parent : tabRecency[ri]
+      if (rank[root] === undefined) rank[root] = ri
+    }
+    roots.sort((a, b) => {
+      var ra = rank[a.name] === undefined ? Infinity : rank[a.name], rb = rank[b.name] === undefined ? Infinity : rank[b.name]
+      return ra !== rb ? ra - rb : a.name < b.name ? -1 : a.name > b.name ? 1 : 0
+    })
     var out = []
     for (var r = 0; r < roots.length; r++) {
       var s = roots[r]
@@ -2993,6 +3015,9 @@ Item {
     cur = rSize + row
     feedScroll.cursorMoved(row, false)
   }
+  property var pillTipFor: null
+  property string pillTipText: ""
+  function showPillTip(item, text) { pillTipText = text; pillTipFor = item }
   function prefillTask() {
     if (composerText.length) { feedbackPill.show("Finish the current draft before changing tasks"); return }
     requestFocus()
@@ -3017,6 +3042,51 @@ Item {
     anchors.topMargin: 16
     spacing: 0
 
+    Item {
+      id: taskHeader
+      readonly property string text: rail.activeTask || rail.selectedPlan
+      Layout.fillWidth: true
+      Layout.leftMargin: 20
+      Layout.rightMargin: 20
+      Layout.bottomMargin: visible ? 4 : 0
+      visible: rail.view === "chat" && text.length > 0
+      implicitHeight: 26
+      z: 5
+      Rectangle {
+        anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: -20; rightMargin: -20 }
+        height: parent.height + 16
+        color: rail.railGroundColor
+      }
+      Rectangle {
+        anchors { left: parent.left; right: parent.right; top: parent.bottom; leftMargin: -20; rightMargin: -20 }
+        height: 18
+        gradient: Gradient {
+          GradientStop { position: 0; color: rail.railGroundColor }
+          GradientStop { position: 1; color: Qt.alpha(rail.railGroundColor, 0) }
+        }
+      }
+      Row {
+        anchors { left: parent.left; right: parent.right; verticalCenter: parent.verticalCenter }
+        spacing: 8
+        Icon {
+          anchors.verticalCenter: parent.verticalCenter
+          name: "target"; width: 13; height: 13
+          color: chin.muted
+        }
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          objectName: "activeTaskLabel"
+          width: Math.min(implicitWidth, parent.width - 21)
+          text: taskHeader.text
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: taskHeaderHover.hovered ? chin.fg : chin.muted
+          font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+          HoverHandler { id: taskHeaderHover; enabled: rail.activeTask.length > 0; cursorShape: Qt.PointingHandCursor }
+          TapHandler { enabled: rail.activeTask.length > 0; onTapped: rail.prefillTask() }
+        }
+      }
+    }
 
     Crossfade {
       Layout.fillWidth: true
@@ -3182,8 +3252,8 @@ Item {
           implicitHeight: cardCol.implicitHeight + 2 * turnDel.padY
           radius: 18
           color: "transparent"
-          border.width: (!turnDel.isUser || turnDel.isNote) && (turnDel.cursor || fhov.hovered) ? 1 : 0
-          border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, turnDel.cursor ? 0.65 : 0.36)
+          border.width: (!turnDel.isUser || turnDel.isNote) && turnDel.cursor ? 1.5 : 0
+          border.color: rail.activeRing
           ContrastCard {
             visible: turnDel.isUser && !turnDel.isNote
             anchors.fill: parent
@@ -3194,12 +3264,10 @@ Item {
             faceUpper: faceTop
             faceMid: turnDel.isHandoff ? faceTop : rail.userCardBottom
             faceBottom: faceMid
-            rimTop: turnDel.isHandoff ? outlineColor : (fhov.hovered
-              ? (Theme.mode === "light" ? "#FFFFFF" : "#34313A")
-              : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B"))
+            rimTop: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B")
             rimBottom: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#FFFFFF" : "#222222")
-            outlineColor: fhov.hovered || turnDel.isHandoff
-              ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, fhov.hovered ? 0.42 : 0.22)
+            outlineColor: turnDel.isHandoff
+              ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.22)
               : (Theme.mode === "light" ? "#FFFFFF" : "#282828")
             Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -3207,24 +3275,13 @@ Item {
           Rectangle {
             anchors.fill: parent
             radius: card.radius
-            visible: turnDel.isUser && !turnDel.isNote
-            color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.05)
-            border.width: 1
-            border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.36)
-            opacity: fhov.hovered && !turnDel.cursor ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
-          }
-          Rectangle {
-            anchors.fill: parent
-            radius: card.radius
             color: turnDel.isHandoff ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
             visible: turnDel.isUser && !turnDel.isNote
-            border.width: 2
-            border.color: Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.92)
+            border.width: 1.5
+            border.color: rail.activeRing
             opacity: turnDel.cursor ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
-          HoverHandler { id: fhov }
           TapHandler {
             onTapped: eventPoint => {
               const disclosure = turnDel.isHandoff ? noteDisclosure : fullMessageButton
@@ -3551,7 +3608,7 @@ Item {
     // bottom edge with no arithmetic. (This used to be a hardcoded 108 plus per-panel
     // fudge factors, which is how the new-session card ended up overflowing.)
     clip: false
-    height: chinCol.implicitHeight + 26 + radius   // 14 top pad + 12 visible bottom pad
+    height: chinCol.implicitHeight + 32 + radius   // 15 above the tabs (+2 for their -2 offset) and 15 below the input
 
     ContrastCard {
       anchors.fill: parent
@@ -3569,7 +3626,7 @@ Item {
       // when it expands (the sheet's top edge rises; the input never moves).
       // 12 visible: with the 16px hint row the old 6px left the caps flush with
       // the window edge; 12 recenters the band on the (now 36px) nvim chin.
-      anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20; bottomMargin: 12 + chin.radius }
+      anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20; bottomMargin: 15 + chin.radius }
       spacing: 10
 
 
@@ -4077,86 +4134,8 @@ Item {
         readonly property real rowHeight: 28
         InlineSessions {
           id: inlineSessions
-          anchors { left: locSlot.visible ? locSlot.right : parent.left; leftMargin: locSlot.visible ? 4 : 0
-                    right: cornerControls.left; rightMargin: 10; top: parent.top }
+          anchors { left: parent.left; right: cornerControls.left; rightMargin: 10; top: parent.top }
         }
-          // On the orchestrator, the location icon is the handover switch; hover labels it.
-          Rectangle {
-            id: locSlot
-            visible: isSwitch
-            anchors { left: parent.left; verticalCenter: inlineSessions.verticalCenter }
-            readonly property bool isSwitch: rail.selectedIsOrchestrator
-            readonly property bool onVm: rail.orchScope === "work"
-            readonly property bool remote: onVm
-            readonly property color locationTint: remote ? rail.skyAccent : rail.silverAccent
-            readonly property color tint: onVm ? rail.skyAccent : Theme.orange
-            readonly property bool expanded: locHover.hovered || busy
-            property bool busy: false
-            onOnVmChanged: busy = false
-            height: 22
-            // Same padding as the goal pill: 9px inset either side, 22 at rest.
-            width: expanded ? locRow.implicitWidth + 18 : 33   // 9 + 15 + 9
-            radius: 11
-            color: expanded ? Qt.alpha(locSlot.tint, 0.14) : "transparent"
-            border.width: 1
-            border.color: Qt.alpha(locSlot.tint, expanded ? 0.9 : 0.0)
-            // Always present: the header keeps ONE layout in both roster states, so the
-            // marker never leaves and the title never has to slide to fill its place.
-            // (It used to fade out on collapse, and Row drops invisible children — which
-            // is exactly what made the title lag into position.)
-            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            Behavior on color { ColorAnimation { duration: 140 } }
-            Behavior on border.color { ColorAnimation { duration: 140 } }
-            clip: true
-            Row {
-              id: locRow
-              // Same reason as the goal pill: left-anchored so the glyph is a fixed
-              // pivot and the label is revealed, never shoved.
-              anchors { left: parent.left; leftMargin: 9
-                        verticalCenter: parent.verticalCenter }
-              spacing: 5
-              Spinner {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: locSlot.busy
-                running: locSlot.busy
-                color: locSlot.tint
-              }
-              Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: !locSlot.busy
-                width: 15; height: 15
-                name: locSlot.remote ? "cloud--outline--18" : "laptop--outline--18"
-                color: locSlot.locationTint
-              }
-              Icon {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: locSlot.expanded && !locSlot.busy
-                width: 13; height: 13
-                name: "toggle-3"
-                color: locSlot.tint
-                transform: Scale { origin.x: 6.5; xScale: locSlot.onVm ? -1 : 1 }
-              }
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: locSlot.expanded
-                text: locSlot.busy ? "MOVING" : (locSlot.onVm ? "HERE" : "VM")
-                color: locSlot.tint
-                font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
-              }
-            }
-            HoverHandler { id: locHover; enabled: locSlot.isSwitch }
-            TapHandler {
-              enabled: locSlot.isSwitch && !locSlot.busy
-              onTapped: {
-                locSlot.busy = true
-                Quickshell.execDetached(["sh", "-c",
-                  "notify-send -t 3000 'Orchestrator' 'handover starting…'; " +
-                  "out=$($HOME/.local/bin/cockpit-handover 2>&1 | tail -3); " +
-                  "notify-send -t 8000 'Orchestrator' \"$out\""])
-              }
-            }
-          }
         Row {
           id: cornerControls
           anchors { right: parent.right; top: parent.top; topMargin: Math.max(0, (composerContext.rowHeight - height) / 2) }
@@ -4172,9 +4151,9 @@ Item {
               clip: true
               implicitHeight: 22
               radius: 11
-              color: modelHover.hovered || rail.modelOpen ? Qt.alpha(tint, 0.14) : "transparent"
+              color: modelHover.hovered || rail.modelOpen ? chin.itemHover : "transparent"
               border.width: 1
-              border.color: Qt.alpha(tint, modelHover.hovered || rail.modelOpen ? 0.9 : 0.0)
+              border.color: "transparent"
               Behavior on color { ColorAnimation { duration: 140 } }
               Behavior on border.color { ColorAnimation { duration: 140 } }
               Row {
@@ -4208,9 +4187,9 @@ Item {
               implicitWidth: expanded ? goalRow.implicitWidth + 12 : 30
               implicitHeight: 22
               radius: 11
-              color: expanded ? Qt.alpha(goalPill.tint, 0.14) : "transparent"
+              color: expanded ? chin.itemHover : "transparent"
               border.width: 1
-              border.color: Qt.alpha(goalPill.tint, expanded ? 0.9 : 0.0)
+              border.color: "transparent"
               Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 140 } }
               Behavior on border.color { ColorAnimation { duration: 140 } }
@@ -4246,9 +4225,9 @@ Item {
               implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
               implicitHeight: 22
               radius: 11
-              color: expanded ? Qt.alpha(scopeSwitch.tint, 0.14) : "transparent"
+              color: expanded ? chin.itemHover : "transparent"
               border.width: 1
-              border.color: Qt.alpha(scopeSwitch.tint, expanded ? 0.9 : 0.0)
+              border.color: "transparent"
               Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 140 } }
               Behavior on border.color { ColorAnimation { duration: 140 } }
@@ -4538,11 +4517,12 @@ Item {
       return rail.agentd ? rail.agentd.askFor(sid) !== null : false
     }
     readonly property var colors: rail.fleetActivityColors(sid)
+    readonly property bool orbActive: !hasAsk && colors.length > 0
     width: size; height: size
     ThinkingOrb {
       objectName: "rootActivityOrb"
       anchors.fill: parent
-      visible: !parent.hasAsk && parent.colors.length > 0
+      visible: parent.orbActive
       running: visible
       activityColors: parent.colors
       glow: activityColors.length ? activityColors[0] : rail.actionGlow(parent.sid)
@@ -4584,10 +4564,14 @@ Item {
         function reveal() {
           var item = focusIndex >= 0 ? inlineRepeater.itemAt(focusIndex) : null
           if (!item) return
+          // Laid-out position, not item.x: a reordered tab is still mid-slide.
+          var x0 = 0
+          for (var i = 0; i < focusIndex; i++) x0 += inlineRepeater.itemAt(i).width + inlineRowItems.spacing
           var target = contentX
-          if (item.x < contentX + 24) target = item.x - 24
-          else if (item.x + item.width > contentX + width - 24) target = item.x + item.width - width + 24
+          if (x0 < contentX + 24) target = x0 - 24
+          else if (x0 + item.width > contentX + width - 24) target = x0 + item.width - width + 24
           target = Math.max(0, Math.min(maxX(), target))
+          inlineReveal.stop()
           if (Math.abs(target - contentX) < 0.5) return
           inlineReveal.to = target; inlineReveal.restart()
         }
@@ -4604,6 +4588,7 @@ Item {
         Row {
           id: inlineRowItems
           spacing: 2
+          move: Transition { SpringAnimation { properties: "x"; spring: 8; damping: 0.55; epsilon: 0.25 } }
           Repeater {
           id: inlineRepeater
           model: rosterModel
@@ -4617,7 +4602,7 @@ Item {
           readonly property bool offline: md.offline === true || md.status === "offline"
           readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index
           height: 28; radius: 14
-          width: inlineRow.implicitWidth + 22
+          width: inlineRow.implicitWidth + 2 + 12
           onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
           color: selected ? chin.itemSelected : inlineHover.hovered || cursor ? chin.itemHover : "transparent"
           border.width: cursor ? 1.5 : selected ? 1 : 0
@@ -4625,9 +4610,10 @@ Item {
           Behavior on color { ColorAnimation { duration: 140 } }
           Row {
             id: inlineRow
-            anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
-            spacing: 7
-            SessionDot { anchors.verticalCenter: parent.verticalCenter; sid: pill.sid; status: pill.md.status || pill.md.state || ""; size: 14 }
+            anchors { left: parent.left; leftMargin: 2; verticalCenter: parent.verticalCenter }
+            spacing: pillDot.orbActive ? 7 : 4
+            Behavior on spacing { NumberAnimation { duration: Motion.base; easing.type: Easing.OutCubic } }
+            SessionDot { id: pillDot; anchors.verticalCenter: parent.verticalCenter; sid: pill.sid; status: pill.md.status || pill.md.state || ""; size: pill.height - 4 }
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: pill.md.name
@@ -4649,21 +4635,15 @@ Item {
               color: chin.fg
               font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: 600
             }
-            Text {
-              objectName: pill.sid === rail.selectedRaw ? "activeTaskLabel" : ""
-              anchors.verticalCenter: parent.verticalCenter
-              visible: pill.sid === rail.selectedRaw && text.length > 0
-              width: Math.min(implicitWidth, Math.max(120, inlineList.width * 0.45))
-              elide: Text.ElideRight
-              text: rail.activeTask || rail.selectedPlan
-              textFormat: Text.PlainText
-              color: taskHover.hovered ? chin.fg : chin.muted
-              font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
-              HoverHandler { id: taskHover; enabled: rail.activeTask.length > 0 }
-              TapHandler { enabled: rail.activeTask.length > 0; onTapped: rail.prefillTask() }
+          }
+          readonly property string tip: sid === rail.selectedRaw ? (rail.activeTask || rail.selectedPlan) : String(md.plan || "")
+          HoverHandler {
+            id: inlineHover; cursorShape: Qt.PointingHandCursor
+            onHoveredChanged: {
+              if (hovered && pill.tip.length) rail.showPillTip(pill, pill.tip)
+              else if (rail.pillTipFor === pill) rail.pillTipFor = null
             }
           }
-          HoverHandler { id: inlineHover; cursorShape: Qt.PointingHandCursor }
           TapHandler { onTapped: rail.clickAt(index) }
         }
         }
@@ -5766,6 +5746,40 @@ Item {
         width: 22
         ItemFocus { itemKey: gkey }
       }
+    }
+  }
+
+  Rectangle {
+    id: pillTip
+    objectName: "sessionPillTip"
+    z: 1001
+    readonly property point at: {
+      var f = rail.pillTipFor
+      if (!f) return Qt.point(0, 0)
+      f.x; f.width; inlineSessions.x
+      var p = f.mapToItem(rail, 0, 0)
+      return Qt.point(p.x, p.y)
+    }
+    x: Math.max(8, Math.min(rail.width - width - 8, at.x))
+    y: at.y - height - 8
+    width: Math.min(tipText.implicitWidth + 20, rail.width * 0.6)
+    height: tipText.implicitHeight + 12
+    radius: 8
+    color: chin.baseSurface
+    border.width: 1
+    border.color: chin.hairline
+    opacity: rail.pillTipFor ? 1 : 0
+    visible: opacity > 0
+    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    Text {
+      id: tipText
+      anchors.centerIn: parent
+      width: parent.width - 20
+      text: rail.pillTipText
+      textFormat: Text.PlainText
+      elide: Text.ElideRight
+      color: chin.fg
+      font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1
     }
   }
 

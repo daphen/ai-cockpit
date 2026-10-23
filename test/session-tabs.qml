@@ -87,6 +87,13 @@ ShellRoot {
         test.check(rail.selectedRaw === "worker-8", "Enter on a tab did not switch session")
       } else if (test.phase === 3) {
         test.check(test.inView("worker-8"), "chosen tab left the viewport")
+        var order = () => rail.rosterList.map(r => r.rawName).slice(0, 3).join(",")
+        test.check(order() === "worker-8,worker-9,lovable", "tabs are not ordered by recent selection: " + order())
+        rail.exitInsert(); rail.focusRoster()
+        rail.activeRaw = "worker-3"
+        test.check(order() === "worker-8,worker-9,lovable", "tabs re-sorted while the tab list had focus: " + order())
+        rail.enterInsert()
+        test.check(order() === "worker-3,worker-8,worker-9", "tabs did not re-sort after the tab list lost focus: " + order())
         rail.exitInsert(); rail.focusRoster()
         test.key(Qt.Key_J, Qt.ControlModifier)
         test.check(rail.insert, "C-j from the tabs with an empty feed did not reach the composer")

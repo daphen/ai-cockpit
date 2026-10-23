@@ -63,7 +63,7 @@ ShellRoot {
       } else if (test.phase === 2) test.typing()
       else if (test.phase === 4) {
         test.typing()
-        check(frame().children.some(item => item.border && item.border.width === 2 && Qt.colorEqual(item.border.color, rail.activeRing)), "focused composer lacks its active outline")
+        check(frame().children.some(item => item.border && item.border.width === 1.5 && Qt.colorEqual(item.border.color, rail.activeRing)), "focused composer lacks its active outline")
         input.keyClick(Qt.Key_X, Qt.NoModifier, 0)
         var article = find(rail, item => item.turn && item.turn.kind === "turn")
         var card = find(article, item => item.radius === 18 && item.border)
