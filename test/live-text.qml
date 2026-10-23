@@ -5,6 +5,7 @@ import "."
 ShellRoot {
   id: test
   property int settleTicks: 0
+  property int revealTicks: 0
   property int phase: 0
   property int activeRequests: 0
   property int hiddenRequests: 0
@@ -49,6 +50,7 @@ ShellRoot {
         test.check(rail.probeProse().indexOf("Streamed") >= 0, "rendered Rail did not show text before completion: " + JSON.stringify({ selected: rail.selectedRaw, cur: rail.cur, rows: rail.fSize, prose: rail.probeProse() }))
         test.broadcast({ type: "message_update", session: "ticket-a", assistantMessageEvent: { type: "text_delta", delta: "answer." } })
       } else if (test.phase === 4) {
+        if (rail.probeProse().indexOf("Streamed answer.") < 0 && ++test.revealTicks < 3) return   // streamed text eases in over a few frames
         test.check(rail.probeProse().indexOf("Streamed answer.") >= 0, "rendered Rail did not update partial text")
         test.broadcast({ type: "message_end", session: "ticket-a", message: { role: "assistant", content: [{ type: "text", text: "Streamed answer." }] } })
         test.broadcast({ type: "turn_end", session: "ticket-a" })

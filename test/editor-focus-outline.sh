@@ -19,7 +19,7 @@ text=text[:end]+'''
         var outline = renderStack.children.find(item => item.objectName === "editorFocusOutline")
         if (stage === 0) term.forceActiveFocus()
         else if (stage === 1) {
-          if (!term.activeFocus || !outline.visible || outline.border.width !== 1 || !Qt.colorEqual(outline.border.color, Theme.fg))
+          if (!term.activeFocus || !outline.visible || outline.border.width !== 1 || !Qt.colorEqual(outline.border.color, Qt.alpha(Theme.fg, 0.6)))
             throw new Error("focused editor lacks its ink outline")
           if (outline.x !== 0 || outline.y !== 0 || outline.width !== renderStack.width || outline.height !== renderStack.height)
             throw new Error("editor outline and corner mask have different bounds")

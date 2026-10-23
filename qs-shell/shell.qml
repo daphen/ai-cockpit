@@ -10,6 +10,7 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
+    readonly property color ground: Theme.mode === "dark" ? Qt.tint(Theme.bgDim, Qt.alpha(Theme.fg, 0.03)) : Theme.bgDim
     readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE") || "main"
     readonly property string startupMode: {
       var s = Quickshell.env("COCKPIT_SCOPE") || Quickshell.env("HEIDR_SCOPE") || "personal"
@@ -26,7 +27,8 @@ ShellRoot {
       stdout: SplitParser {
         onRead: data => {
           var socket = data.trim()
-          if (!socket || socket === win.remoteEditorSocket) return
+          if (!socket) return
+          if (socket === win.remoteEditorSocket) remoteFocus.refresh()
           win.remoteEditorSocket = socket
           if (win.scopeMode === "work") Qt.callLater(() => rail.landNvim(rail.selectedRaw))
         }
@@ -183,7 +185,7 @@ ShellRoot {
     }
 
     FocusCache { nvimSocket: term.localNvimSocket }
-    FocusCache { nvimSocket: win.remoteEditorSocket }
+    FocusCache { id: remoteFocus; nvimSocket: win.remoteEditorSocket }
 
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
     function syncPresence() {
@@ -359,7 +361,7 @@ ShellRoot {
       // sub-pixel seam of this root can peek out at the term/rail boundary —
       // in bg (white on light) that read as a stray white line. Every child
       // paints its own ground, so the root only ever shows in seams.
-      color: Theme.bgDim
+      color: win.ground
 
       Item {
         id: paneLayout
@@ -449,7 +451,7 @@ ShellRoot {
               width: paneLayout.terminalCornerRadius
               height: paneLayout.terminalCornerRadius
               z: 2
-              readonly property color maskColor: Theme.bgDim
+              readonly property color maskColor: win.ground
               onMaskColorChanged: requestPaint()
               onPaint: {
                 var ctx = getContext("2d")
@@ -471,7 +473,7 @@ ShellRoot {
               visible: term.activeFocus && !win.dashboardActive
               color: "transparent"
               border.width: 1
-              border.color: Theme.fg
+              border.color: Qt.alpha(Theme.fg, 0.6)
               bottomRightRadius: paneLayout.terminalCornerRadius
             }
           }
@@ -483,7 +485,7 @@ ShellRoot {
             remoteSocket: term.nvimSocket !== term.localNvimSocket ? term.nvimSocket : ""
             width: parent.width
             height: parent.height - renderStack.height
-            color: Theme.bgDim
+            color: win.ground
           }
         }
 
@@ -494,7 +496,7 @@ ShellRoot {
           y: parent.height - chin.height
           width: 1 + 2 / win.termDpr
           height: chin.height
-          color: Theme.bgDim
+          color: win.ground
         }
 
         // Divider stops at the chin's top hairline — the two meet in a clean
@@ -505,11 +507,12 @@ ShellRoot {
           width: 1
           height: parent.height - chin.height
           opacity: win.railReveal
-          color: Theme.bgDim
+          color: win.ground
         }
 
         Rail {
           id: rail
+          railGroundColor: win.ground
           width: parent.width - paneLayout.splitX - 1
           height: parent.height
           x: paneLayout.splitX + 1 + (1 - win.railReveal) * width

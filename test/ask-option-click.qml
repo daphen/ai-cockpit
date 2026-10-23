@@ -123,13 +123,18 @@ ShellRoot {
         test.event({type:"ask_answered",session:"target",cancelled:true})
         rail.enterInsert()
       } else if (phase === 12) {
-        var hint = test.findText(rail, "⏎")
+        var keys = test.findNamed(rail, "keyHints")
+        test.check(keys && !keys.visible, "key hints show before ? is pressed")
         if (test.deck) {
-          test.check(!hint || !hint.visible, "ordinary chin hints still visible on Deck")
-          var chin = test.findNamed(rail, "composerHints")
+          var chin = test.findNamed(rail, "composerContext")
           var model = chin && test.findText(chin, rail.selectedModelLabel)
           test.check(rail.selectedModelLabel.length && model && model.visible, "Deck chin model name disappeared")
-        } else if (!test.narrow) test.check(hint && hint.visible, "desktop chin hints disappeared")
+        }
+        rail.exitInsert()
+        rail.forceActiveFocus()
+        input.keyClick(Qt.Key_Question, Qt.ShiftModifier, 0)
+      } else if (phase === 13) {
+        test.check(test.findNamed(rail, "keyHints").visible, "? did not open the key hints")
         console.log("PASS: click and number answers, narrow touch targets, Deck question/chin hints")
         Qt.quit()
       }

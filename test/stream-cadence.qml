@@ -36,7 +36,7 @@ ShellRoot {
     }
   }
   Timer {
-    id: after; interval: 160
+    id: after; interval: 400
     onTriggered: {
       if (!test.sawDuringBurst) test.fail("text stayed hidden during continuous sub-120ms deltas")
       if (rail.probeProse().indexOf(test.expected) < 0) test.fail("final streamed text is incomplete: " + rail.probeProse())

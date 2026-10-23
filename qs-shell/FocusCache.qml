@@ -14,7 +14,8 @@ Process {
     + 'vim.cmd.colorscheme("custom-theme-"..vim.g.cockpit_theme_mode);return "" end)()') + ")"]
   running: false
   Component.onCompleted: Qt.callLater(() => running = nvimSocket.length > 0)
-  onNvimSocketChanged: { running = false; Qt.callLater(() => running = nvimSocket.length > 0) }
-  onThemeModeChanged: { running = false; Qt.callLater(() => running = nvimSocket.length > 0) }
+  function refresh() { running = false; Qt.callLater(() => running = nvimSocket.length > 0) }
+  onNvimSocketChanged: refresh()
+  onThemeModeChanged: refresh()
   stderr: SplitParser { onRead: data => console.warn("Cockpit IPC binding: " + data) }
 }

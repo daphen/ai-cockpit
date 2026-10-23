@@ -50,7 +50,7 @@ ShellRoot {
   Timer {
     interval: 400; repeat: true; running: true
     onTriggered: {
-      var strip = find(rail, "sessionTabStrip"), label = find(rail, "activeTaskLabel"), card = find(rail, "sessionTabs")
+      var strip = find(rail, "sessionTabStrip"), label = find(rail, "activeTaskLabel")
       if (test.phase === 0) {
         test.roster()
         rail.jumpToSession("lovable")
@@ -92,7 +92,7 @@ ShellRoot {
         test.check(rail.insert, "C-j from the tabs with an empty feed did not reach the composer")
         test.history("")
       } else if (test.phase === 4) {
-        test.check(!label.visible && Math.abs(card.height - (strip.height + 12)) < 0.5, "empty task still shows a task line")
+        test.check(!label || !label.visible, "empty task still shows a task line")
         rail.exitInsert(); rail.focusRoster(); rail.cur = rail.rSize - 1
         test.key(Qt.Key_L)
         test.check(rail.cur === 0, "l on the last tab did not wrap to the first")

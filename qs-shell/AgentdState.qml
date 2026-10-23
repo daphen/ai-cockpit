@@ -734,7 +734,7 @@ Item {
   function _liveText(sid) {
     var items = feeds[sid] || []
     for (var i = items.length - 1; i >= 0; i--) if (items[i].liveText) return items[i]
-    var item = { kind: "text", text: "", liveText: true, mid: "live:" + Date.now() + ":" + items.length }
+    var item = { kind: "text", text: "", liveText: true, arrivedAt: Date.now(), mid: "live:" + Date.now() + ":" + items.length }
     _push(sid, item)
     return item
   }
@@ -745,7 +745,7 @@ Item {
         if (model) items[i].model = String(model)
         return items[i]
       }
-    var item = { kind: "think", text: "thinking", full: "", liveThink: true,
+    var item = { kind: "think", text: "thinking", full: "", liveThink: true, arrivedAt: Date.now(),
                  model: String(model || ""), contentIndex: contentIndex, mid: "think:" + Date.now() + ":" + contentIndex }
     _push(sid, item)
     return item
