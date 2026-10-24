@@ -36,6 +36,7 @@ Item {
   // talking to a socket a newer Cockpit had already unlinked.
   property string nvimSock: ""
   property string localNvimSock: nvimSock
+  property string workspaceTab: "code"
   property string remoteNvimSock: ""
   signal editorRequested(string socket)
   property bool focused: false
@@ -1272,6 +1273,8 @@ Item {
   }
   function landNvim(sid, view, chosenSocket) {
     if (!sid || !agentd) return
+    if (view === undefined && workspaceTab === "vault") { view = "vault"; chosenSocket = localNvimSock }
+    else if (view === undefined && workspaceTab === "dashboard") view = "dashboard"
     var ss = _sessionOf(sid)
     var cwd = ss ? String(ss.cwd || "") : "", plan = ss ? String(ss.plan || "") : ""
     if (!cwd) return
@@ -1285,16 +1288,19 @@ Item {
       return
     }
     _landedFor = sid + "@" + cwd + "#" + plan
+    editorRequested(socket)
+    Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr", "v:lua." + _workspaceCall(sid, view, socket, chosenSocket)])
+  }
+  function _workspaceCall(sid, view, socket, chosenSocket) {
+    var ss = _sessionOf(sid), cwd = String(ss.cwd || ""), plan = String(ss.plan || "")
     var localCwd = chosenSocket === localNvimSock
       ? Quickshell.env("HOME") + "/personal/notes/storage" : cwd
-    var latest = view === "plan" ? "" : String(agentd.lastEditFor(sid) || "")
+    var latest = view === "plan" || view === "vault" || (view === "code" && !agentd.isBusy(sid)) ? "" : String(agentd.lastEditFor(sid) || "")
     if (latest && latest.charAt(0) !== "/") latest = localCwd + "/" + latest
-    editorRequested(socket)
-    Quickshell.execDetached(["nvim", "--server", socket, "--remote-expr",
-      'v:lua.require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) && socket !== remoteNvimSock ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'])
+    return 'require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) && socket !== remoteNvimSock ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'
   }
   function showWorkspace(view) {
-    landNvim(selectedRaw, view)
+    landNvim(selectedRaw, view, view === "vault" ? localNvimSock : "")
     focusNvim()
   }
 
@@ -1310,11 +1316,15 @@ Item {
         p = Quickshell.env("HOME") + "/personal/notes/storage/" + p
       } else p = repoPath
     }
-    var socket = _editorSocket(p)
+    var vault = Quickshell.env("HOME") + "/personal/notes/storage"
+    var inVault = p.indexOf(vault + "/") === 0
+    var socket = inVault ? localNvimSock : _editorSocket(p)
     if (!socket) { feedbackPill.show("VM editor is connecting"); return }
     editorRequested(socket)
+    var land = _sessionOf(selectedRaw) && String(_sessionOf(selectedRaw).cwd || "")
+      ? _workspaceCall(selectedRaw, inVault ? "vault" : "code", socket, inVault ? localNvimSock : "") + '; ' : ''
     var row = Math.max(1, Number(line) || 1), col = Math.max(1, Number(column) || 1)
-    var lua = '(function() local p=' + JSON.stringify(p) + '; local alt=' + JSON.stringify(alternate)
+    var lua = '(function() ' + land + 'local p=' + JSON.stringify(p) + '; local alt=' + JSON.stringify(alternate)
       + '; if vim.fn.filereadable(p)~=1 and alt~="" and vim.fn.filereadable(alt)==1 then p=alt end'
       + '; if vim.fn.filereadable(p)~=1 then vim.notify("file no longer exists: "..p, vim.log.levels.WARN); return "" end'
       + '; vim.cmd.CockpitEdit(p); if vim.api.nvim_buf_get_name(0)~=p then return "" end'
@@ -3570,6 +3580,7 @@ Item {
   // Chin: the bottom SHEET — roster + composer in one container, anchored to the
   // rail bottom. The feed continues behind it; this later sibling paints above the
   // cards, while the feed footer keeps the final row reachable above the pane.
+  readonly property alias palette: chin
   Rectangle {
     id: chin
     readonly property bool lightMode: Theme.mode === "light"
@@ -4519,18 +4530,30 @@ Item {
     readonly property var colors: rail.fleetActivityColors(sid)
     readonly property bool orbActive: !hasAsk && colors.length > 0
     width: size; height: size
+    // Same idle treatment as the dashboard cards: the swirl eases to a stop and greys out.
     ThinkingOrb {
+      id: dotOrb
       objectName: "rootActivityOrb"
       anchors.fill: parent
-      visible: parent.orbActive
-      running: visible
+      visible: !parent.hasAsk
+      running: true
       activityColors: parent.colors
-      glow: activityColors.length ? activityColors[0] : rail.actionGlow(parent.sid)
+      glow: activityColors.length ? activityColors[0] : "#999999"
+      colorDuration: 1600
       seedKey: parent.sid
+      property real motion: parent.orbActive ? 1 : 0
+      idleBlur: 1 - motion
+      property real elapsed: 0
+      clockNow: elapsed
+      Behavior on motion { NumberAnimation { duration: 1800; easing.type: Easing.InOutCubic } }
+      FrameAnimation {
+        running: dotOrb.visible && dotOrb.motion > 0
+        onTriggered: dotOrb.elapsed += frameTime * 1000 * dotOrb.motion
+      }
     }
     Rectangle {
       anchors.centerIn: parent
-      visible: parent.hasAsk || parent.colors.length === 0
+      visible: parent.hasAsk
       width: parent.hasAsk ? 9 : 7; height: width; radius: width / 2
       color: parent.hasAsk ? Theme.orange : rail.dotColor(parent.status)
       opacity: parent.hasAsk ? 0.675 + 0.325 * Math.cos((OrbClock.now % 1200) / 1200 * 2 * Math.PI) : 1
@@ -4587,8 +4610,17 @@ Item {
         }
         Row {
           id: inlineRowItems
-          spacing: 2
-          move: Transition { SpringAnimation { properties: "x"; spring: 8; damping: 0.55; epsilon: 0.25 } }
+          spacing: 8
+          // Spring only for a reorder; a pill growing on hover pushes its neighbours directly,
+          // so they move in step with its width animation.
+          property bool reordering: false
+          Timer { id: reorderSettle; interval: 700; onTriggered: inlineRowItems.reordering = false }
+          Connections {
+            target: rail
+            function onTabRecencyChanged() { inlineRowItems.reordering = true; reorderSettle.restart() }
+          }
+          move: reordering ? reorderSpring : null
+          Transition { id: reorderSpring; SpringAnimation { properties: "x"; spring: 8; damping: 0.55; epsilon: 0.25 } }
           Repeater {
           id: inlineRepeater
           model: rosterModel
@@ -4611,9 +4643,8 @@ Item {
           Row {
             id: inlineRow
             anchors { left: parent.left; leftMargin: 2; verticalCenter: parent.verticalCenter }
-            spacing: pillDot.orbActive ? 7 : 4
-            Behavior on spacing { NumberAnimation { duration: Motion.base; easing.type: Easing.OutCubic } }
             SessionDot { id: pillDot; anchors.verticalCenter: parent.verticalCenter; sid: pill.sid; status: pill.md.status || pill.md.state || ""; size: pill.height - 4 }
+            Item { width: 7; height: 1 }
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: pill.md.name
@@ -4621,15 +4652,26 @@ Item {
               font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
               font.weight: pill.selected ? 600 : 400
             }
-            Icon {
+            // Offline always shows; the remote cloud only while hovered or under the keyboard cursor.
+            Item {
+              readonly property bool shown: pill.offline || (pill.md.remote === true && (inlineHover.hovered || pill.cursor))
               anchors.verticalCenter: parent.verticalCenter
-              visible: pill.offline || pill.md.remote === true
-              width: 12; height: 12
-              name: pill.offline ? "bolt-slash" : "cloud--outline--18"
-              color: pill.offline ? Theme.red : rail.skyAccent
+              visible: width > 0.5
+              width: shown ? 4 + pillDot.size : 0; height: pillDot.size
+              opacity: shown ? 1 : 0
+              clip: true
+              Behavior on width { NumberAnimation { duration: Motion.base; easing.type: Easing.OutCubic } }
+              Behavior on opacity { NumberAnimation { duration: Motion.base; easing.type: Easing.OutCubic } }
+              Icon {
+                anchors.right: parent.right
+                width: pillDot.size; height: pillDot.size
+                name: pill.offline ? "bolt-slash" : "cloud--outline--18"
+                color: pill.offline ? Theme.red : rail.skyAccent
+              }
             }
             Text {
               anchors.verticalCenter: parent.verticalCenter
+              leftPadding: 6
               visible: pill.selected && rail.selectedParent === pill.sid
               text: "› " + rail.shortName(rail.selectedRaw)
               color: chin.fg

@@ -105,6 +105,7 @@ ShellRoot {
           var field = test.find(badge,item => item.colB !== undefined)
           test.check(test.alpha(badge) === 1 && !test.find(badge,item => item.text === "IDLE"), "idle orb was hidden or replaced by a label")
           test.check(Math.abs(field.colB.r-field.colB.g)<0.0001 && Math.abs(field.colB.g-field.colB.b)<0.0001, "idle orb is not gray")
+          test.check(badge.idleBlur === 1 && field.layer.enabled, "idle orb texture is not softened")
         }
         first.grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card.png"))
         test.originalSessions = dash.sessions
@@ -141,6 +142,7 @@ ShellRoot {
         test.lastChroma = Math.max(field.colB.r,field.colB.g,field.colB.b) - Math.min(field.colB.r,field.colB.g,field.colB.b)
         test.check(test.find(test.card("every-3790"),item => item.text === "BASH" && item.opacity === 1), "badge did not settle to Bash")
         test.check(orb.motion === 1, "active motion did not reach normal speed")
+        test.check(orb.idleBlur === 0 && !field.layer.enabled, "active orb retains blur or an unnecessary effect layer")
         test.card("every-3790").grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card-active.png"))
         test.working(false); test.ticks = 0
       } else if (test.phase === 4) {
@@ -150,6 +152,7 @@ ShellRoot {
         if (test.ticks === 25) {
           var chroma = Math.max(field.colB.r,field.colB.g,field.colB.b) - Math.min(field.colB.r,field.colB.g,field.colB.b)
           test.check(orb.motion > 0 && orb.motion < 0.9 && field.ph1 > test.lastPhase && chroma > 0 && chroma < test.lastChroma, "orb did not gradually slow and desaturate")
+          test.check(orb.idleBlur > 0 && orb.idleBlur < 1 && Math.abs(orb.idleBlur + orb.motion - 1) < 0.0001, "blur does not fade in with the spin-down")
         }
         if (test.ticks === 55) {
           test.check(orb.motion === 0 && Math.abs(field.colB.r-field.colB.g)<0.0001 && Math.abs(field.colB.g-field.colB.b)<0.0001, "idle orb did not stop and become gray")
@@ -161,6 +164,7 @@ ShellRoot {
       } else if (test.phase === 5) {
         var orb = test.find(test.card("every-3790"),item => item.objectName === "sessionOrb"), field = test.find(orb,item => item.colB !== undefined)
         test.check(orb.motion > 0 && orb.motion < 1 && Math.abs(field.ph1-test.lastPhase)<0.03, "resuming idle motion jumped the pattern")
+        test.check(orb.idleBlur > 0 && orb.idleBlur < 1 && Math.abs(orb.idleBlur + orb.motion - 1) < 0.0001, "blur does not clear continuously when activity resumes")
         test.working(false)
         test.check(!dash.activeFocus, "rail did not get focus")
         test.check(test.card("every-3790").border.color === test.card("every-3789").border.color, "a card remains highlighted while rail is focused")

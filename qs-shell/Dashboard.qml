@@ -505,6 +505,7 @@ FocusScope {
                   glow: activityColors.length ? activityColors[0] : "#999999"
                   colorDuration: 1600
                   property real motion: sessionCard.activity.length ? 1 : 0
+                  idleBlur: 1 - motion
                   property real elapsed: 0
                   clockNow: elapsed
                   flow: 0.35

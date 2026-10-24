@@ -69,6 +69,9 @@ ShellRoot {
         test.check(status.visible && sp.y >= 0 && sp.x + status.width <= frame.width && sp.x > frame.width / 2, "session status is not inside the input on the right")
         var parentOrb = find(find(strip, "sessionTab", "worker-2"), "rootActivityOrb")
         test.check(parentOrb && parentOrb.running && parentOrb.visible, "subagent activity did not fold into its parent's tab")
+        var idleOrb = find(find(strip, "sessionTab", "worker-9"), "rootActivityOrb")
+        test.check(idleOrb && idleOrb.visible && idleOrb.motion < 1 && idleOrb.activityColors.length === 0, "idle tab does not show a still grey orb")
+        test.check(idleOrb.idleBlur === 1 - idleOrb.motion && idleOrb.idleBlur > 0, "idle tab does not soften with its spin-down")
         rail.jumpToSession("worker-9")
       } else if (test.phase === 2) {
         test.check(test.inView("worker-9"), "switching to an off-screen tab did not scroll it into view")

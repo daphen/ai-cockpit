@@ -131,12 +131,21 @@ ShellRoot {
         probe.result = null; probe.running = true
       } else if (test.phase === 13) {
         if (probe.result === null) return
-        test.check(probe.result.path === test.other && probe.result.row === 2, "history restored the file without its latest changed-line cursor")
-        otherFile.setText("other\nsecond\nedit completed after reload\n")
+        test.check(probe.result.path === "", "history restore took over the dashboard")
+        navigate.command = ["nvim", "--server", rail.nvimSock, "--remote-expr", "luaeval(" + JSON.stringify('(function() require("cockpit").workspace("personal","active",'
+          + JSON.stringify(test.cwd) + ',"","code"); return "" end)()') + ")"]
+        navigate.running = true
       } else if (test.phase === 14) {
+        if (navigate.running) return
+        probe.result = null; probe.running = true
+      } else if (test.phase === 15) {
+        if (probe.result === null) return
+        test.check(probe.result.path === test.other && probe.result.row === 2, "Code tab did not show the restored edit on its changed line")
+        otherFile.setText("other\nsecond\nedit completed after reload\n")
+      } else if (test.phase === 16) {
         test.receive({type:"tool_execution_end",session:"active",toolName:"edit",toolCallId:"missing-start",
           result:{details:{patch:"--- " + test.other + "\n+++ " + test.other + "\n",firstChangedLine:3,diff:"+3 edit completed after reload"}}})
-      } else if (test.phase === 15) {
+      } else if (test.phase === 17) {
         probe.result = null; probe.running = true
       } else {
         if (probe.result === null) return

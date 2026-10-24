@@ -163,6 +163,18 @@ ShellRoot {
       onActivated: rail.showWorkspace("cycle")
     }
     Shortcut {
+      sequence: "Ctrl+Shift+H"
+      context: Qt.ApplicationShortcut
+      enabled: win.pane === "nvim"
+      onActivated: viewTabs.cycle(-1)
+    }
+    Shortcut {
+      sequence: "Ctrl+Shift+L"
+      context: Qt.ApplicationShortcut
+      enabled: win.pane === "nvim"
+      onActivated: viewTabs.cycle(1)
+    }
+    Shortcut {
       sequence: "Ctrl+1"
       context: Qt.ApplicationShortcut
       onActivated: rail.showWorkspace("diff")
@@ -188,6 +200,10 @@ ShellRoot {
     FocusCache { id: remoteFocus; nvimSocket: win.remoteEditorSocket }
 
     readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
+    NotificationFocus {
+      active: win.modeReady && win.windowFocused && !win.railCollapsed
+      session: rail.selectedRaw
+    }
     function syncPresence() {
       personalAgentd.setPresence(modeReady && scopeMode === "personal" && windowFocused ? rail.selectedRaw : "")
       workAgentd.setPresence(modeReady && scopeMode === "work" && windowFocused ? rail.selectedRaw : "")
@@ -367,16 +383,82 @@ ShellRoot {
         id: paneLayout
         anchors.fill: parent
         readonly property real splitX: Math.round(width * 0.6 * win.termDpr) / win.termDpr
-        readonly property real terminalCornerRadius: 10
+        readonly property real terminalCornerRadius: 8
 
         Column {
           id: termCol
           width: win.railLayoutCollapsed ? parent.width : paneLayout.splitX
           height: parent.height
           Item {
+            id: viewTabs
+            objectName: "workspaceViewTabs"
+            width: parent.width
+            height: 46
+            readonly property string current: win.dashboardActive ? "dashboard"
+              : /\/notes\/storage$/.test(String(chin.st.cwd || "")) ? "vault" : "code"
+            readonly property var views: ["code", "dashboard", "vault"]
+            function cycle(step) { rail.showWorkspace(views[(views.indexOf(current) + step + views.length) % views.length]) }
+            Rectangle {
+              id: viewBar
+              readonly property int padding: 4
+              readonly property bool lightMode: Theme.mode === "light"
+              anchors.fill: parent
+              color: win.ground
+            }
+            Row {
+              id: viewRow
+              anchors { fill: parent; margins: 7; rightMargin: 0 }
+              spacing: 6
+              Repeater {
+                model: [{ view: "code", label: "Code", icon: "file-content" }, { view: "dashboard", label: "Dashboard", icon: "gauge-3" }, { view: "vault", label: "Vault", icon: "vault-3" }]
+                delegate: Item {
+                  id: viewTab
+                  required property var modelData
+                  objectName: "workspaceViewTab"
+                  readonly property string view: modelData.view
+                  width: (viewRow.width - 2 * viewRow.spacing) / 3
+                  height: parent.height
+                  readonly property bool active: viewTabs.current === view
+                  readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
+                  Rectangle {
+                    anchors.fill: parent
+                    radius: paneLayout.terminalCornerRadius
+                    color: viewTab.active ? rail.palette.itemSelected
+                         : viewTabHover.hovered ? rail.palette.itemHover
+                         : Qt.alpha(rail.palette.fg, viewBar.lightMode ? 0.035 : 0.035)
+                    border.width: 1
+                    border.color: viewTab.active ? rail.palette.hairline : rail.palette.softHairline
+                    Behavior on color { ColorAnimation { duration: 140 } }
+                  }
+                  Row {
+                    anchors { left: parent.left; leftMargin: 16; right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+                    spacing: 9
+                    Icon {
+                      anchors.verticalCenter: parent.verticalCenter
+                      name: viewTab.modelData.icon; width: 16; height: 16
+                      color: viewTab.ink
+                    }
+                    Text {
+                      id: viewLabel
+                      anchors.verticalCenter: parent.verticalCenter
+                      width: parent.width - 16 - parent.spacing
+                      elide: Text.ElideRight
+                      text: viewTab.modelData.label
+                      color: viewTab.ink
+                      font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+                      font.weight: viewTab.active ? 600 : 400
+                    }
+                  }
+                  HoverHandler { id: viewTabHover; cursorShape: Qt.PointingHandCursor }
+                  TapHandler { onTapped: rail.showWorkspace(viewTab.view) }
+                }
+              }
+            }
+          }
+          Item {
             id: renderStack
             width: parent.width
-            height: Math.round((parent.height - chin.implicitHeight) * win.termDpr) / win.termDpr
+            height: Math.round((parent.height - viewTabs.height - chin.implicitHeight) * win.termDpr) / win.termDpr
 
             Crossfade {
               anchors.fill: parent
@@ -466,6 +548,28 @@ ShellRoot {
                 ctx.fill()
               }
             }
+            Canvas {
+              id: terminalTopCorner
+              anchors.right: parent.right
+              anchors.top: parent.top
+              width: paneLayout.terminalCornerRadius
+              height: paneLayout.terminalCornerRadius
+              z: 2
+              readonly property color maskColor: win.ground
+              onMaskColorChanged: requestPaint()
+              onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.fillStyle = terminalTopCorner.maskColor
+                ctx.beginPath()
+                ctx.moveTo(width, height)
+                ctx.lineTo(width, 0)
+                ctx.lineTo(0, 0)
+                ctx.arc(0, height, width, -Math.PI / 2, 0, false)
+                ctx.closePath()
+                ctx.fill()
+              }
+            }
             Rectangle {
               objectName: "editorFocusOutline"
               anchors.fill: parent
@@ -474,6 +578,7 @@ ShellRoot {
               color: "transparent"
               border.width: 1
               border.color: Qt.alpha(Theme.fg, 0.6)
+              topRightRadius: paneLayout.terminalCornerRadius
               bottomRightRadius: paneLayout.terminalCornerRadius
             }
           }
@@ -484,7 +589,7 @@ ShellRoot {
             id: chin
             remoteSocket: term.nvimSocket !== term.localNvimSocket ? term.nvimSocket : ""
             width: parent.width
-            height: parent.height - renderStack.height
+            height: parent.height - viewTabs.height - renderStack.height
             color: win.ground
           }
         }
@@ -526,6 +631,7 @@ ShellRoot {
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
           nvimSock: term.nvimSocket
           localNvimSock: term.localNvimSocket
+          workspaceTab: viewTabs.current
           remoteNvimSock: win.remoteEditorSocket
           onEditorRequested: socket => win.editorSocket = socket
           focused: win.pane === "rail"

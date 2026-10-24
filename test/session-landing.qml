@@ -57,6 +57,16 @@ ShellRoot {
   Component.onCompleted: {
     receive({ type: "roster", sessions: [{ id: "ticket-a", name: "ticket-a", status: "idle", cwd: "/tmp/ticket-a" }] })
     check(historyRequests.length === 1 && historyRequests[0] === "ticket-a", "first roster hydrates an already-selected empty feed")
+    backend.selectedSession = "ticket-z"
+    backend.interrupt("ticket-z")
+    receive({ type: "response", command: "abort", success: true, session: "ticket-z" })
+    receive({ type: "response", command: "get_entries", session: "ticket-z", data: { leafId: "ab", entries: [
+      { id: "q", type: "message", message: { role: "user", content: "question" } },
+      { id: "ab", parentId: "q", type: "message", message: { role: "assistant", content: [], stopReason: "aborted" } }] } })
+    var interrupted = backend.feedFor("ticket-z").filter(function(item) { return String(item.text).indexOf("interrupted by you") >= 0 }).length
+    check(interrupted === 1, "an interrupt shows one interrupted row once history records it, got " + interrupted)
+    backend.selectedSession = "ticket-a"
+    commands = []
     historyRequests = []
     history("ticket-a", ["src/old.ts", "src/latest.ts", ".plans/TICKET-A.md", ".plans/TICKET-A.progress.json"])
     check(backend.lastEditFor("ticket-a") === "src/latest.ts", "history must skip plan bookkeeping")

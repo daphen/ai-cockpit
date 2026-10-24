@@ -1517,14 +1517,11 @@ Item {
       // keeps a mark from re-appending forever after every later message.
       var caughtUp = false
       for (var fi = 0; fi < feeds[esid].length && !caughtUp; fi++) {
-        var its = feeds[esid][fi].items || []
-        for (var ii = 0; ii < its.length; ii++) {
-          // Any abort-derived row counts: once later messages exist, pi's own
-          // row renders as the mid-chain steer marker, not "⏹ interrupted".
-          var mt = String(its[ii].text || "")
-          if (mt.indexOf("⏹ interrupted") === 0 || mt.indexOf("· redirected mid-turn") === 0
-              || mt.indexOf("⚡ aborted externally") === 0) { caughtUp = true; break }
-        }
+        // Any abort-derived row counts: once later messages exist, pi's own
+        // row renders as the mid-chain steer marker, not "⏹ interrupted".
+        var mt = String(feeds[esid][fi].text || "")
+        caughtUp = mt.indexOf("⏹ interrupted") === 0 || mt.indexOf("· redirected mid-turn") === 0
+                   || mt.indexOf("⚡ aborted externally") === 0
       }
       mks = caughtUp ? [] : mks.filter(mm => (Date.now() - (mm.at || 0)) < 60000)
       var nm = _marks
