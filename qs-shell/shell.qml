@@ -670,6 +670,9 @@ ShellRoot {
               const from = caret(lastOwner), to = caret(owner)
               caretGlide.stop()
               fromLine.height = from.h; toLine.height = to.h
+              const dx = to.x - from.x, dy = to.y - from.y
+              glideTail.width = Math.min(140, Math.hypot(dx, dy) * 0.2)
+              glideTail.rotation = Math.atan2(dy, dx) * 180 / Math.PI
               glideX.from = from.x; glideX.to = to.x
               glideY.from = from.y; glideY.to = to.y
               caretGlide.start()
@@ -681,6 +684,19 @@ ShellRoot {
           Timer { id: focusGap; interval: 100 }
           Rectangle { id: fromLine; x: -1; y: -height / 2; width: 2; radius: 1; color: Theme.cursor; opacity: 0 }
           Rectangle { id: toLine; x: -1; y: -height / 2; width: 2; radius: 1; color: Theme.cursor; opacity: 0 }
+          // Motion streak: a fast 8px dot strobes into separate copies; the tail bridges them.
+          Rectangle {
+            id: glideTail
+            x: -width; y: -height / 2
+            height: glideCaret.dot; radius: height / 2
+            transformOrigin: Item.Right
+            opacity: 0
+            gradient: Gradient {
+              orientation: Gradient.Horizontal
+              GradientStop { position: 0; color: Qt.alpha(Theme.cursor, 0) }
+              GradientStop { position: 1; color: Theme.cursor }
+            }
+          }
           Rectangle {
             id: glideDot
             x: -width / 2; y: -height / 2
@@ -705,6 +721,11 @@ ShellRoot {
                 OpacityAnimator { target: glideDot; from: 1; to: 0; duration: 90; easing.type: Easing.InQuad }
                 ScaleAnimator { target: glideDot; from: 1; to: 0.25; duration: 90; easing.type: Easing.InOutCubic }
               }
+            }
+            SequentialAnimation {
+              OpacityAnimator { target: glideTail; from: 0; to: 0; duration: 40 }
+              OpacityAnimator { target: glideTail; from: 0; to: 0.8; duration: 70; easing.type: Easing.OutQuad }
+              OpacityAnimator { target: glideTail; from: 0.8; to: 0; duration: 110; easing.type: Easing.InQuad }
             }
             SequentialAnimation {
               OpacityAnimator { target: toLine; from: 0; to: 0; duration: 170 }
