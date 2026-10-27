@@ -3303,7 +3303,7 @@ Item {
         Rectangle {
           id: cursorDot
           z: 2
-          x: card.x + (turnDel.isUser ? 24 : 36) / 2 - width / 2
+          x: card.x + 10 - width / 2
           y: card.y + turnDel.padY + Math.round(rail.fsBody * 0.7) - height / 2
           width: 8; height: 8; radius: 4
           color: Theme.cursor
