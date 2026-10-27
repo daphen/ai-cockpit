@@ -41,13 +41,15 @@ text=text[:end]+'''
           if (!term.active || term.cursorRect.height <= 0) throw new Error("focused terminal shows no published cursor")
           expect = [c.target("nvim")]
           win.pane = "rail"; rail.composerField.forceActiveFocus()
+          if (!rail.caretHeld) throw new Error("composer caret showed before the glide started")
         } else if (stage === 2) {
           check("nvim to composer", expect[0], c.target("composer"), true, "caret")
           if (rail.caretHeld) throw new Error("composer caret still held")
           expect = [c.target("composer")]
           win.pane = "nvim"; term.forceActiveFocus()
+          if (term.active) throw new Error("terminal cursor showed before the glide started")
         } else if (stage === 3) {
-          check("composer to nvim", expect[0], c.target("nvim"), false, "caret")
+          check("composer to nvim", expect[0], c.target("nvim"), true, "caret")
           if (!term.active) throw new Error("terminal cursor did not return after the glide")
           rail.workspaceTab = "dashboard"; chin.st = ({ dashboard: { active: true, model: {} } })
         } else if (stage === 4) {

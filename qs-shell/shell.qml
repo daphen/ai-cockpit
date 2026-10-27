@@ -481,7 +481,7 @@ ShellRoot {
                 id: term
                 nvimSocket: win.editorSocket
                 anchors.fill: parent
-                active: activeFocus && !caretGlide.running
+                active: activeFocus && !glideCaret.holding
                 enabled: !win.dashboardActive
                 Component.onCompleted: forceActiveFocus()
                 onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
@@ -645,7 +645,7 @@ ShellRoot {
           onRequestFocus: win.pane = "rail"
           onRequestScopeMode: mode => win.setScopeMode(mode)
           onActiveFocusChanged: if (activeFocus) win.pane = "rail"
-          caretHeld: caretGlide.running
+          caretHeld: glideCaret.holding
         }
 
         // Focus moving between Neovim and the composer flies one caret across; the
@@ -660,6 +660,8 @@ ShellRoot {
           property string settled: ""
           property string settledKey: ""
           property bool wasEmpty: false
+          property bool pending: false   // hides arriving cursors between the move and the glide's first frame
+          readonly property bool holding: caretGlide.running || pending
           property string landing: "caret"   // caret: stretch into a line · rest: stay a dot · fade
           readonly property int dot: 8
           function leftSide(who) { return who === "nvim" || who === "dashboard" }
@@ -683,12 +685,17 @@ ShellRoot {
           }
           onOwnerChanged: {
             if (!owner) { wasEmpty = true; focusGap.restart(); return }
+            if (settled && !(leftSide(owner) && leftSide(settled))) pending = true
             Qt.callLater(settle)
           }
-          Connections { target: rail; function onCursorKeyChanged() { if (glideCaret.owner === "rail") Qt.callLater(glideCaret.settle) } }
+          Connections { target: rail; function onCursorKeyChanged() {
+              if (glideCaret.owner !== "rail") return
+              glideCaret.pending = true
+              Qt.callLater(glideCaret.settle)
+            } }
           // Deferred a tick: entering the rail may hop straight on into the composer.
           function settle() {
-            if (!owner) return
+            if (!owner) { pending = false; return }
             const key = owner === "rail" ? rail.cursorKey : ""
             const moved = owner !== settled ? !(leftSide(owner) && leftSide(settled)) : key !== settledKey
             const flying = moved && caretGlide.running
@@ -709,6 +716,7 @@ ShellRoot {
             }
             focusGap.stop()
             wasEmpty = false
+            pending = false
             settled = owner; settledKey = key
           }
           Timer { id: focusGap; interval: 100 }
