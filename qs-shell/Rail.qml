@@ -57,8 +57,9 @@ Item {
   signal editorRequested(string socket)
   property bool focused: false
   readonly property Item composerField: composerInput
-  function cursorPoint() {
-    const it = cur >= rSize && view === "chat" ? feedView.itemAtIndex(cur - rSize) : null
+  function cursorPoint(key) {
+    const i = view === "chat" && key.startsWith("f:") ? _feedIndexOf(key.slice(2)) : -1
+    const it = i >= 0 ? feedView.itemAtIndex(i) : null
     return it ? it.restDot.mapToItem(rail, it.restDot.width / 2, it.restDot.height / 2) : null
   }
 

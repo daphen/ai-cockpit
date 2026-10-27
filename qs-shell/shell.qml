@@ -663,7 +663,7 @@ ShellRoot {
           property string landing: "caret"   // caret: stretch into a line · rest: stay a dot · fade
           readonly property int dot: 8
           function leftSide(who) { return who === "nvim" || who === "dashboard" }
-          function target(who) {
+          function target(who, key) {
             if (who === "nvim" || who === "composer") {
               const r = who === "nvim" ? term.cursorRect : rail.composerField.cursorRectangle
               const item = who === "nvim" ? term : rail.composerField
@@ -671,7 +671,7 @@ ShellRoot {
               return { x: p.x, y: p.y, h: Math.max(dot, r.height), landing: "caret" }
             }
             if (who === "rail") {
-              const q = rail.cursorPoint()
+              const q = rail.cursorPoint(key || rail.cursorKey)
               if (!q) return null
               const p = rail.mapToItem(paneLayout, q.x, q.y)
               return { x: p.x, y: p.y, h: dot, landing: "rest" }
@@ -693,7 +693,7 @@ ShellRoot {
             const moved = owner !== settled ? !(leftSide(owner) && leftSide(settled)) : key !== settledKey
             const flying = moved && caretGlide.running
             if (flying) caretGlide.stop()   // animators write their current value back on stop
-            const from = settled && moved ? (flying ? { x: x, y: y, h: dot, landing: "rest" } : target(settled)) : null
+            const from = settled && moved ? (flying ? { x: x, y: y, h: dot, landing: "rest" } : target(settled, settledKey)) : null
             const to = from ? target(owner) : null
             if (from && to && (!wasEmpty || focusGap.running)) {
               fromLine.height = from.h; toLine.height = to.h
