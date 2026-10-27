@@ -57,6 +57,11 @@ Item {
   signal editorRequested(string socket)
   property bool focused: false
   readonly property Item composerField: composerInput
+  function cursorPoint() {
+    const it = cur >= rSize && view === "chat" ? feedView.itemAtIndex(cur - rSize) : null
+    return it ? it.restDot.mapToItem(rail, it.restDot.width / 2, it.restDot.height / 2) : null
+  }
+
   property bool caretHeld: false   // a focus glide is still flying to this caret
   signal focusNvim()
   signal requestFocus()   // a click in the rail should pull focus here
@@ -3293,6 +3298,16 @@ Item {
         // Housekeeping (compaction) is the SYSTEM speaking, not the agent.
         readonly property bool isSys: turnDel.turn.sys === true
         readonly property bool cursor: rail.focused && !rail.insert && rail.cur === rail.rSize + rowIndex
+        readonly property Item restDot: cursorDot
+        Rectangle {
+          id: cursorDot
+          z: 2
+          x: card.x + (turnDel.isUser ? 24 : 36) / 2 - width / 2
+          y: card.y + turnDel.padY + Math.round(rail.fsBody * 0.7) - height / 2
+          width: 8; height: 8; radius: 4
+          color: Theme.cursor
+          visible: turnDel.cursor && !rail.caretHeld
+        }
         readonly property color cardContentColor: Theme.mode === "light" ? "#23272B" : "#FAFAFA"
         readonly property color cardBodyColor: Theme.mode === "light" ? "#343A3F" : "#EDEDED"
         readonly property color cardMutedColor: Theme.mode === "light" ? "#747D84" : "#909090"

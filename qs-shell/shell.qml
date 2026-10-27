@@ -414,6 +414,7 @@ ShellRoot {
               anchors { fill: parent; margins: 7; rightMargin: 0 }
               spacing: 6
               Repeater {
+                id: viewTabRepeater
                 model: viewTabs.tabs
                 delegate: Item {
                   id: viewTab
@@ -654,22 +655,51 @@ ShellRoot {
           objectName: "focusGlideCaret"
           z: 100
           visible: caretGlide.running
-          readonly property string owner: term.activeFocus ? "nvim" : rail.composerField.activeFocus ? "composer" : ""
-          property string lastOwner: ""
+          readonly property string owner: term.activeFocus ? "nvim" : dashboard.activeFocus ? "dashboard"
+            : rail.composerField.activeFocus ? "composer" : rail.activeFocus ? "rail" : ""
+          property string settled: ""
+          property string settledKey: ""
           property bool wasEmpty: false
+          property string landing: "caret"   // caret: stretch into a line · rest: stay a dot · fade
           readonly property int dot: 8
-          function caret(who) {
-            const r = who === "nvim" ? term.cursorRect : rail.composerField.cursorRectangle
-            const item = who === "nvim" ? term : rail.composerField
-            const p = item.mapToItem(paneLayout, r.x, r.y)
-            return { x: p.x + r.width / 2, y: p.y + r.height / 2, h: Math.max(dot, r.height) }
+          function leftSide(who) { return who === "nvim" || who === "dashboard" }
+          function target(who) {
+            if (who === "nvim" || who === "composer") {
+              const r = who === "nvim" ? term.cursorRect : rail.composerField.cursorRectangle
+              const item = who === "nvim" ? term : rail.composerField
+              const p = item.mapToItem(paneLayout, r.x + r.width / 2, r.y + r.height / 2)
+              return { x: p.x, y: p.y, h: Math.max(dot, r.height), landing: "caret" }
+            }
+            if (who === "rail") {
+              const q = rail.cursorPoint()
+              if (!q) return null
+              const p = rail.mapToItem(paneLayout, q.x, q.y)
+              return { x: p.x, y: p.y, h: dot, landing: "rest" }
+            }
+            const tab = viewTabRepeater.itemAt(viewTabs.views.indexOf(viewTabs.current))
+            if (!tab) return null
+            const p = tab.mapToItem(paneLayout, 24, tab.height / 2)
+            return { x: p.x, y: p.y, h: dot, landing: "fade" }
           }
           onOwnerChanged: {
             if (!owner) { wasEmpty = true; focusGap.restart(); return }
-            if (lastOwner && lastOwner !== owner && (!wasEmpty || focusGap.running)) {
-              const from = caret(lastOwner), to = caret(owner)
-              caretGlide.stop()
+            Qt.callLater(settle)
+          }
+          Connections { target: rail; function onCursorKeyChanged() { if (glideCaret.owner === "rail") Qt.callLater(glideCaret.settle) } }
+          // Deferred a tick: entering the rail may hop straight on into the composer.
+          function settle() {
+            if (!owner) return
+            const key = owner === "rail" ? rail.cursorKey : ""
+            const moved = owner !== settled ? !(leftSide(owner) && leftSide(settled)) : key !== settledKey
+            const flying = moved && caretGlide.running
+            if (flying) caretGlide.stop()   // animators write their current value back on stop
+            const from = settled && moved ? (flying ? { x: x, y: y, h: dot, landing: "rest" } : target(settled)) : null
+            const to = from ? target(owner) : null
+            if (from && to && (!wasEmpty || focusGap.running)) {
               fromLine.height = from.h; toLine.height = to.h
+              fromFade.from = from.landing === "caret" ? 1 : 0
+              dotIn.from = dotInScale.from = from.landing === "rest" ? 1 : 0.25
+              landing = to.landing
               const dx = to.x - from.x, dy = to.y - from.y
               glideTail.width = Math.min(140, Math.hypot(dx, dy) * 0.2)
               glideTail.rotation = Math.atan2(dy, dx) * 180 / Math.PI
@@ -679,7 +709,7 @@ ShellRoot {
             }
             focusGap.stop()
             wasEmpty = false
-            lastOwner = owner
+            settled = owner; settledKey = key
           }
           Timer { id: focusGap; interval: 100 }
           Rectangle { id: fromLine; x: -1; y: -height / 2; width: 2; radius: 1; color: Theme.cursor; opacity: 0 }
@@ -707,31 +737,31 @@ ShellRoot {
           // animators (a same-value animator stands in for a pause) so nothing else can stall it.
           ParallelAnimation {
             id: caretGlide
-            XAnimator { id: glideX; target: glideCaret; duration: 260; easing.type: Easing.InOutSine }
-            YAnimator { id: glideY; target: glideCaret; duration: 260; easing.type: Easing.InOutSine }
-            OpacityAnimator { target: fromLine; from: 1; to: 0; duration: 70; easing.type: Easing.InQuad }
-            ScaleAnimator { target: fromLine; from: 1; to: glideCaret.dot / fromLine.height; duration: 70; easing.type: Easing.InCubic }
+            XAnimator { id: glideX; target: glideCaret; duration: 180; easing.type: Easing.InOutSine }
+            YAnimator { id: glideY; target: glideCaret; duration: 180; easing.type: Easing.InOutSine }
+            OpacityAnimator { id: fromFade; target: fromLine; from: 1; to: 0; duration: 50; easing.type: Easing.InQuad }
+            ScaleAnimator { target: fromLine; from: 1; to: glideCaret.dot / fromLine.height; duration: 50; easing.type: Easing.InCubic }
             SequentialAnimation {
               ParallelAnimation {
-                OpacityAnimator { target: glideDot; from: 0; to: 1; duration: 60; easing.type: Easing.OutQuad }
-                ScaleAnimator { target: glideDot; from: 0.25; to: 1; duration: 70; easing.type: Easing.OutCubic }
+                OpacityAnimator { id: dotIn; target: glideDot; from: 0; to: 1; duration: 45; easing.type: Easing.OutQuad }
+                ScaleAnimator { id: dotInScale; target: glideDot; from: 0.25; to: 1; duration: 50; easing.type: Easing.OutCubic }
               }
-              OpacityAnimator { target: glideDot; from: 1; to: 1; duration: 100 }
+              OpacityAnimator { target: glideDot; from: 1; to: 1; duration: 50 }
               ParallelAnimation {
-                OpacityAnimator { target: glideDot; from: 1; to: 0; duration: 90; easing.type: Easing.InQuad }
-                ScaleAnimator { target: glideDot; from: 1; to: 0.25; duration: 90; easing.type: Easing.InOutCubic }
+                OpacityAnimator { target: glideDot; from: 1; to: glideCaret.landing === "rest" ? 1 : 0; duration: 80; easing.type: Easing.InQuad }
+                ScaleAnimator { target: glideDot; from: 1; to: glideCaret.landing === "rest" ? 1 : 0.25; duration: 80; easing.type: Easing.InOutCubic }
               }
             }
             SequentialAnimation {
-              OpacityAnimator { target: glideTail; from: 0; to: 0; duration: 40 }
-              OpacityAnimator { target: glideTail; from: 0; to: 0.8; duration: 70; easing.type: Easing.OutQuad }
-              OpacityAnimator { target: glideTail; from: 0.8; to: 0; duration: 110; easing.type: Easing.InQuad }
+              OpacityAnimator { target: glideTail; from: 0; to: 0; duration: 25 }
+              OpacityAnimator { target: glideTail; from: 0; to: 0.8; duration: 50; easing.type: Easing.OutQuad }
+              OpacityAnimator { target: glideTail; from: 0.8; to: 0; duration: 80; easing.type: Easing.InQuad }
             }
             SequentialAnimation {
-              OpacityAnimator { target: toLine; from: 0; to: 0; duration: 170 }
+              OpacityAnimator { target: toLine; from: 0; to: 0; duration: 110 }
               ParallelAnimation {
-                OpacityAnimator { target: toLine; from: 0; to: 1; duration: 70; easing.type: Easing.OutQuad }
-                ScaleAnimator { target: toLine; from: glideCaret.dot / toLine.height; to: 1; duration: 90; easing.type: Easing.OutCubic }
+                OpacityAnimator { target: toLine; from: 0; to: glideCaret.landing === "caret" ? 1 : 0; duration: 60; easing.type: Easing.OutQuad }
+                ScaleAnimator { target: toLine; from: glideCaret.dot / toLine.height; to: 1; duration: 70; easing.type: Easing.OutCubic }
               }
             }
           }
