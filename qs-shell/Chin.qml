@@ -26,8 +26,18 @@ Rectangle {
   readonly property color sky: Theme.mode === "light" ? "#287FA6" : "#7DD3FC"
   property var st: ({})
   property string remoteSocket: ""
+  // A session switch blocks the GUI thread while the feed rebuilds; per-field animations
+  // stutter there, so the contents fade on the render thread and values swap unseen.
+  property bool switching: false
+  onSwitchingChanged: {
+    contentFade.stop()
+    contentFade.to = switching ? 0 : 1
+    contentFade.duration = switching ? Motion.base : Motion.slow
+    contentFade.start()
+  }
+  OpacityAnimator { id: contentFade; target: content; easing.type: Easing.OutCubic }
   onRemoteSocketChanged: {
-    st = remoteSocket ? { path: "VM editor connecting" } : ({})
+    st = remoteSocket ? chin._placeholder("VM editor connecting") : ({})
     remoteState.running = false
     if (remoteSocket) remoteState.running = true
     else localState.reload()
@@ -38,12 +48,14 @@ Rectangle {
     stdout: SplitParser {
       onRead: data => { try { chin.st = JSON.parse(data) } catch (e) {} }
     }
-    onExited: if (chin.remoteSocket) chin.st = { path: "VM editor disconnected" }
+    onExited: if (chin.remoteSocket) chin.st = chin._placeholder("VM editor disconnected")
   }
   Timer {
     interval: 1000; repeat: true; running: chin.remoteSocket.length > 0
     onTriggered: if (!remoteState.running) remoteState.running = true
   }
+  // The workspace tabs read cwd/dashboard from st; a bare placeholder read as the Code tab.
+  function _placeholder(text) { return { path: text, cwd: st.cwd, dashboard: st.dashboard, view: st.view } }
   readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE")
       || Quickshell.env("HEIDR_INSTANCE") || "main"
   function _n(v) { return typeof v === "number" ? v : 0 }
@@ -69,7 +81,7 @@ Rectangle {
     readonly property Item _active: _front ? ta : tb
     TextMetrics { id: valueMetrics; text: sw.value; font: sw._active.font }
     width: value.length ? Math.min(maxWidth, valueMetrics.width + gap) : 0
-    Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    Behavior on width { enabled: !chin.switching; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
     property bool _front: true
     onValueChanged: {
       var inc = _front ? tb : ta
@@ -80,6 +92,8 @@ Rectangle {
       anchors.fill: parent
       showSecond: !sw._front
       inactiveScale: sw.pop ? 1.25 : 1
+      enterDuration: chin.switching ? 0 : 150
+      exitDuration: chin.switching ? 0 : 150
       first: Text {
         id: ta
         width: Math.max(0, sw.width - sw.gap); elide: sw.elideMode
@@ -129,6 +143,9 @@ Rectangle {
     }
   }
 
+  Item {
+  id: content
+  anchors.fill: parent
   Row {
     id: left
     anchors { left: parent.left; leftMargin: 16; verticalCenter: parent.verticalCenter }
@@ -222,8 +239,9 @@ Rectangle {
           * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
         property real animatedY: targetY
         y: Math.round(animatedY)
-        Behavior on animatedY { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        Behavior on animatedY { enabled: !chin.switching; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
       }
     }
+  }
   }
 }

@@ -1132,6 +1132,15 @@ Item {
     }
     const sid = m.session
     if (!sid) return
+    // pi died: its queue and any message it had not yet written are gone with it.
+    if (t === "reconnecting") {
+      _setFeedValue(sid, "pi-queue", null)
+      _clearPending(sid)
+      delete _steerPending[sid]
+      for (const echo of (_localEcho[sid] || []))
+        if (!echo.settled && echo.delivery !== "failed") _echoDelivery(sid, echo.id, "failed")
+      return
+    }
     if (sid === selectedSession) {
       if (t === "message_start" && m.message && m.message.role === "assistant") {
         _finishLiveText(sid)

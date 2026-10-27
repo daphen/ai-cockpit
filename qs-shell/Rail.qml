@@ -36,7 +36,23 @@ Item {
   // talking to a socket a newer Cockpit had already unlinked.
   property string nvimSock: ""
   property string localNvimSock: nvimSock
+  // The editor reports its view a few hundred ms after a request, so the tab the user
+  // picked leads; stale reports are ignored until the editor confirms it.
+  property string reportedTab: "code"
   property string workspaceTab: "code"
+  property bool _tabAwaiting: false
+  onReportedTabChanged: {
+    if (reportedTab === workspaceTab) { _tabAwaiting = false; tabConfirm.stop() }
+    else if (!_tabAwaiting) workspaceTab = reportedTab
+  }
+  Timer { id: tabConfirm; interval: 3000; onTriggered: { rail._tabAwaiting = false; rail.workspaceTab = rail.reportedTab } }
+  function _requestTab(view) {
+    var tab = view === "diff" ? "code" : view
+    if (["code", "dashboard", "vault", "plan"].indexOf(tab) < 0) return
+    workspaceTab = tab
+    _tabAwaiting = tab !== reportedTab
+    if (_tabAwaiting) tabConfirm.restart(); else tabConfirm.stop()
+  }
   property string remoteNvimSock: ""
   signal editorRequested(string socket)
   property bool focused: false
@@ -99,8 +115,6 @@ Item {
   function _reconcileKeyed(model, arr, keyOf, sigOf) {
     var want = {}
     for (var a = 0; a < arr.length; a++) want[keyOf(arr[a])] = true
-    for (var r = model.count - 1; r >= 0; r--)
-      if (!want[model.get(r).k]) model.remove(r)
     for (var i = 0; i < arr.length; i++) {
       var k = keyOf(arr[i]), sig = sigOf(arr[i])
       if (i < model.count && model.get(i).k === k) {
@@ -110,17 +124,19 @@ Item {
         }
         continue
       }
-      // not at i: either it exists later (a row above it vanished — already handled
-      // by the removal pass) or it is new. Find it; move is rare (stable orders).
       var found = -1
       for (var j = i + 1; j < model.count; j++) if (model.get(j).k === k) { found = j; break }
       if (found >= 0) model.move(found, i, 1)
+      // A vanished key in this slot is the same row renamed (a streamed row's
+      // temporary id replaced by its transcript id): re-key it, don't recreate it.
+      else if (i < model.count && !want[model.get(i).k]) model.setProperty(i, "k", k)
       else model.insert(i, { d: JSON.parse(JSON.stringify(arr[i])), sig: sig, k: k })
       if (model.get(i).sig !== sig || found >= 0) {
         model.setProperty(i, "d", JSON.parse(JSON.stringify(arr[i])))
         model.setProperty(i, "sig", sig)
       }
     }
+    if (model.count > arr.length) model.remove(arr.length, model.count - arr.length)
   }
   function _rosterSig(x) {
     if (!x) return ""
@@ -1277,9 +1293,11 @@ Item {
     else if (view === undefined && workspaceTab === "dashboard") view = "dashboard"
     var ss = _sessionOf(sid)
     var cwd = ss ? String(ss.cwd || "") : "", plan = ss ? String(ss.plan || "") : ""
+    if (view === undefined && workspaceTab === "plan") view = plan ? "plan" : "code"
     if (!cwd) return
     var socket = chosenSocket || _editorSocket(cwd)
     if (!socket) { feedbackPill.show("VM editor is connecting"); return }
+    _requestTab(view)
     if (!chosenSocket && socket === remoteNvimSock && view === "plan" && plan) {
       if (planLookup.running) return
       planLookup.sid = sid; planLookup.plan = plan; planLookup.cwd = cwd; planLookup.mode = scopeMode
@@ -1321,6 +1339,7 @@ Item {
     var socket = inVault ? localNvimSock : _editorSocket(p)
     if (!socket) { feedbackPill.show("VM editor is connecting"); return }
     editorRequested(socket)
+    _requestTab(inVault ? "vault" : "code")
     var land = _sessionOf(selectedRaw) && String(_sessionOf(selectedRaw).cwd || "")
       ? _workspaceCall(selectedRaw, inVault ? "vault" : "code", socket, inVault ? localNvimSock : "") + '; ' : ''
     var row = Math.max(1, Number(line) || 1), col = Math.max(1, Number(column) || 1)
@@ -1940,26 +1959,31 @@ Item {
   // Both paths share the same scan, rows, filter, and keyboard handling.
   property var newSpawnPending: null
   property var newPlans: []
+  property var newProjects: []
   Process {
     id: planScan
     running: false
     stdout: SplitParser { onRead: data => {
       var f = String(data).trim()
       if (!f.length) return
-      var arr = rail.newPlans.slice()
-      arr.push(f.split("/").pop().replace(/\.md$/, ""))
-      rail.newPlans = arr
+      var parts = f.split("/"), slug = parts.pop().replace(/\.md$/, "")
+      if (parts.pop() === "projects") rail.newProjects = rail.newProjects.concat([slug])
+      else rail.newPlans = rail.newPlans.concat([slug])
     } }
   }
   function scanPlans() {
     newPlans = []
+    newProjects = []
     planScan.command = ["sh", "-c",
-      "ls -t \"$HOME/personal/notes/storage/plans\"/*.md 2>/dev/null"]
+      "ls -t \"$HOME/personal/notes/storage/plans\"/*.md \"$HOME/personal/notes/storage/projects\"/*.md 2>/dev/null"]
     planScan.running = true
   }
   readonly property var newPlanRows: {
     var f = newFilter.toLowerCase()
     var rows = []
+    if (newSpawnPending && !newSpawnPending.rebind)
+      for (var p = 0; p < newProjects.length; p++)
+        if (!f.length || newProjects[p].toLowerCase().indexOf(f) >= 0) rows.push({ project: newProjects[p] })
     for (var i = 0; i < newPlans.length; i++)
       if (!f.length || newPlans[i].toLowerCase().indexOf(f) >= 0) rows.push({ slug: newPlans[i] })
     rows.push({ newPlan: true }, { none: true })
@@ -1979,6 +2003,13 @@ Item {
       _planRebindSid = newSpawnPending.session
       _planRebindSlug = row.none ? "" : row.slug
       agentd.send({ type: "set_plan", session: _planRebindSid, plan: _planRebindSlug })
+      closeNew()
+      return
+    }
+    if (row.project) {
+      var coordinator = newSpawnMsg(newSessionName(row.project))
+      coordinator.project = row.project
+      agentd.send(coordinator)
       closeNew()
       return
     }
@@ -2785,6 +2816,7 @@ Item {
   // switch fetches nothing until the roster collapse ends, then builds newest-first and fades in.
   property int _feedShown: -1
   readonly property int _feedOffset: _feedShown >= 0 ? Math.max(0, groupedFeed.length - _feedShown) : 0
+  readonly property bool switching: switchSettle.running || feedFill.running
   readonly property int feedFillStep: 4
   readonly property int feedFillFirst: 8
   // An Animator runs on the render thread, so the feed build and nvim repaint on a switch
@@ -3510,7 +3542,7 @@ Item {
             Repeater {
               id: proseRep
               readonly property var items: turnDel.isUser ? [] : rail.turnProse(turnDel.turn.items)
-              model: items.length
+              model: CountModel { size: proseRep.items.length }
               Loader {
                 x: -12; width: cardCol.width + 24
                 property var entry: proseRep.items[index] || ({})
@@ -4075,9 +4107,11 @@ Item {
                   anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
                   spacing: 8
                   Text {
-                    text: modelData.newPlan ? "new plan…"
+                    text: modelData.project ? "project · " + modelData.project
+                        : modelData.newPlan ? "new plan…"
                         : modelData.none ? "no plan" : modelData.slug
                     color: modelData.none ? chin.muted
+                         : modelData.project ? rail.skyAccent
                          : modelData.newPlan ? rail.lavenderAccent : chin.fg
                     font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
                   }
@@ -4579,6 +4613,8 @@ Item {
         contentWidth: inlineRowItems.width
         contentHeight: height
         flickableDirection: Flickable.HorizontalFlick
+        // Flickable's own touchpad handling drags ~2px per event and starves ScrollFeel.
+        interactive: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
         readonly property int focusIndex: rail.rosterExpanded && rail.cur < rail.rSize ? rail.cur : rail._rosterIndexOf(rail.selectedRaw)
@@ -4601,13 +4637,7 @@ Item {
         onFocusIndexChanged: Qt.callLater(reveal)
         onWidthChanged: Qt.callLater(reveal)
         NumberAnimation { id: inlineReveal; target: inlineList; property: "contentX"; duration: Motion.base; easing.type: Easing.OutCubic }
-        WheelHandler {
-          onWheel: (ev) => {
-            var d = ev.angleDelta.x !== 0 ? ev.angleDelta.x : ev.angleDelta.y
-            inlineReveal.stop()
-            inlineList.contentX = Math.max(0, Math.min(inlineList.maxX(), inlineList.contentX - d * 0.6))
-          }
-        }
+        ScrollFeel { flick: inlineList; onScrolled: inlineReveal.stop() }
         Row {
           id: inlineRowItems
           spacing: 8
@@ -4955,7 +4985,7 @@ Item {
       Repeater {
         id: thinkRep
         readonly property var thoughts: expanded ? rail.turnThinks(items).filter(thought => rail.expandedGroups[ekey] === true || rail.claudeThought(thought)) : []
-        model: thoughts.length
+        model: CountModel { size: thinkRep.thoughts.length }
         Loader {
           x: 12; width: actCol.width - 24
           sourceComponent: thinkRow
@@ -4996,13 +5026,13 @@ Item {
       }
       }
       Repeater {
-        model: actCol.shownTools.length
+        model: CountModel { size: actCol.shownTools.length }
         Loader {
           id: toolLoader
           x: 24; width: actCol.width - 24
           Component.onCompleted: rail.probeActCreates++
           readonly property StreamReveal appear: StreamReveal { fade: toolLoader; live: rail.featuredStreaming }
-          readonly property var activity: actCol.shownTools[index]
+          readonly property var activity: actCol.shownTools[index] || ({})
           property var entry: activity.kind === "edits" && activity.files.length === 1 ? activity.files[0] : activity
           property bool grouped: false
           property string gkey: activity.kind === "edits" && activity.files.length === 1
@@ -5108,7 +5138,7 @@ Item {
                        (Theme.canvas.g + rail.userCardBottom.g) / 2,
                        (Theme.canvas.b + rail.userCardBottom.b) / 2, 1)
         border.width: 1; border.color: Theme.hairline
-        readonly property var files: writeCardBox.parent.entry.files
+        readonly property var files: writeCardBox.parent.entry.files || []
         Column {
           id: writeCardCol
           width: parent.width
@@ -5457,7 +5487,7 @@ Item {
         id: codeWord
         anchors.verticalCenter: parent.verticalCenter
         text: token.label
-        color: rail.goldAccent
+        color: Theme.mode === "light" ? rail.goldAccent : Theme.green
         font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta; font.weight: rail.messageBodyWeight
       }
     }
@@ -5532,7 +5562,7 @@ Item {
       spacing: rail.bodyLeading
       readonly property var blocks: rail.markdownBlocks(sourceText, sourceEntry, sourceOffset).filter(block => block.kind !== "fence" || block.runnable)
       Repeater {
-        model: markdownRoot.blocks.length
+        model: CountModel { size: markdownRoot.blocks.length }
         Loader {
           width: markdownRoot.width
           property var block: markdownRoot.blocks[index] || ({})
@@ -5632,7 +5662,7 @@ Item {
       readonly property StreamReveal reveal: StreamReveal { full: String(entry.text || ""); live: entry.liveText === true; arrivedAt: Number(entry.arrivedAt || 0) }
       readonly property var parts: rail.proseParts(reveal.text)
       Repeater {
-        model: proseCol.parts.length
+        model: CountModel { size: proseCol.parts.length }
         Loader {
           id: partLoader
           width: proseCol.width

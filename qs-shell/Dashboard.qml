@@ -24,15 +24,31 @@ FocusScope {
   property string expandedSession: ""
   property string focusedQuestion: ""
   property int cursor: 0
-  readonly property bool sessionHome: model.kind === "home" && model.scope === "lovable"
-  readonly property bool showSessions: sessionHome && homeTab === "sessions"
-  readonly property var workers: sessions.filter(s => s.scope === "work" && !s.offline && s.profile === "lovable-worker" && !s.parent)
-    .sort((a, b) => b.name.localeCompare(a.name))
+  property string focusedSession: ""
+  readonly property string project: {
+    var focused = sessions.find(s => s.name === focusedSession)
+    return focused && focused.project && !focused.parent ? focused.project : ""
+  }
+  readonly property bool sessionHome: !project && model.kind === "home" && model.scope === "lovable"
+  readonly property bool showSessions: !!project || (sessionHome && homeTab === "sessions")
+  readonly property var groupNames: ["NEEDS YOU", "WORKING", "READY"]
+  function groupOf(s) {
+    if (!project) return -1
+    if (askFor(s.name)) return 0
+    return s.status === "streaming" || !(s.costUsd > 0) ? 1 : 2
+  }
+  readonly property var workers: project
+    ? sessions.filter(s => s.project === project && s.name !== focusedSession && !s.offline)
+        .sort((a, b) => groupOf(a) - groupOf(b) || a.name.localeCompare(b.name))
+    : sessions.filter(s => s.scope === "work" && !s.offline && s.profile === "lovable-worker" && !s.parent)
+        .sort((a, b) => b.name.localeCompare(a.name))
   readonly property string workerNames: workers.map(s => s.name).join("\n")
-  readonly property var tabs: sessionHome ? ["sessions", "tickets"] : (model.tabs || [])
+  readonly property var workerGroups: workers.map(s => groupOf(s))
+  readonly property var tabs: sessionHome ? ["sessions", "tickets"] : project ? [] : (model.tabs || [])
   readonly property string activeTab: sessionHome ? homeTab : (model.activeTab || "")
   readonly property var visibleActions: showSessions
-    ? [{ key: "Enter", label: "expand / collapse", id: "expand-card" }, { key: "Ctrl+Enter", label: "open session", id: currentAction }, { key: "Tab", label: "tickets", id: "tab:tickets" }]
+    ? [{ key: "Enter", label: "expand / collapse", id: "expand-card" }, { key: "Ctrl+Enter", label: "open session", id: currentAction }]
+        .concat(sessionHome ? [{ key: "Tab", label: "tickets", id: "tab:tickets" }] : [])
     : (model.actions || [])
   signal sessionRequested(string sid)
   signal prRequested(string url)
@@ -323,10 +339,25 @@ FocusScope {
         }
         visible: root.showSessions
         readonly property real spacing: 20
+        readonly property real headerHeight: 30
         readonly property int columns: Math.max(1, Math.min(3, Math.floor((width + spacing) / 300)))
         Connections {
           target: root
           function onCurrentActionChanged() { root.revealCard() }
+        }
+        Repeater {
+          model: root.project ? [0, 1, 2] : []
+          delegate: Text {
+            required property int modelData
+            readonly property int start: root.workerGroups.indexOf(modelData)
+            readonly property Item first: sessionRows.count && start >= 0 ? sessionRows.itemAt(start) : null
+            objectName: "groupHeader:" + root.groupNames[modelData]
+            visible: !!first
+            y: first ? first.y - sessionCards.headerHeight : 0
+            text: root.groupNames[modelData] + " \u00b7 " + root.workerGroups.filter(g => g === modelData).length
+            color: root.muted
+            font { family: Theme.fontFamily; pixelSize: 13; weight: 600; letterSpacing: 1 }
+          }
         }
         Repeater {
           id: sessionRows
@@ -336,11 +367,22 @@ FocusScope {
             required property string modelData
             required property int index
             objectName: "sessionCard:" + modelData
-            x: (index % sessionCards.columns) * (width + sessionCards.spacing)
+            readonly property int group: root.workerGroups[index] === undefined ? -1 : root.workerGroups[index]
+            readonly property int groupStart: root.workerGroups.indexOf(group)
+            readonly property int slot: index - groupStart
+            x: (slot % sessionCards.columns) * (width + sessionCards.spacing)
             y: {
               sessionRows.count
-              var above = index >= sessionCards.columns ? sessionRows.itemAt(index - sessionCards.columns) : null
-              return above ? above.y + above.height + sessionCards.spacing : 0
+              if (slot >= sessionCards.columns) {
+                var above = sessionRows.itemAt(index - sessionCards.columns)
+                return above ? above.y + above.height + sessionCards.spacing : 0
+              }
+              var top = 0
+              for (var i = 0; i < groupStart; i++) {
+                var earlier = sessionRows.itemAt(i)
+                if (earlier) top = Math.max(top, earlier.y + earlier.height + sessionCards.spacing)
+              }
+              return top + (group >= 0 ? sessionCards.headerHeight : 0)
             }
             readonly property var activity: root.activityFor(modelData)
             readonly property bool expanded: root.expandedSession === modelData

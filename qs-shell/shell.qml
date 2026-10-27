@@ -323,7 +323,7 @@ ShellRoot {
                                 termMounted: !!term, dashboardMounted: !!dashboard,
                                 termEnabled: term.enabled, dashboardEnabled: dashboard.enabled,
                                 termOpacity: term.opacity, dashboardOpacity: dashboard.opacity,
-                                pane: win.pane })
+                                pane: win.pane, tab: viewTabs.current, tabs: viewTabs.views })
       }
       // Last N feed rows of the selected session, raw (test probe).
       function railTail(): string {
@@ -394,9 +394,13 @@ ShellRoot {
             objectName: "workspaceViewTabs"
             width: parent.width
             height: 46
-            readonly property string current: win.dashboardActive ? "dashboard"
+            readonly property string reported: win.dashboardActive ? "dashboard"
+              : chin.st.view === "plan" && rail.selectedPlan ? "plan"
               : /\/notes\/storage$/.test(String(chin.st.cwd || "")) ? "vault" : "code"
-            readonly property var views: ["code", "dashboard", "vault"]
+            readonly property string current: rail.workspaceTab === "plan" && !rail.selectedPlan ? "code" : rail.workspaceTab
+            readonly property var tabs: [{ view: "code", label: "Code", icon: "file-content" }, { view: "dashboard", label: "Dashboard", icon: "gauge-3" }, { view: "vault", label: "Vault", icon: "vault-3" }]
+              .concat(rail.selectedPlan ? [{ view: "plan", label: "Plan", icon: "clipboard-check" }] : [])
+            readonly property var views: tabs.map(function(tab) { return tab.view })
             function cycle(step) { rail.showWorkspace(views[(views.indexOf(current) + step + views.length) % views.length]) }
             Rectangle {
               id: viewBar
@@ -410,13 +414,13 @@ ShellRoot {
               anchors { fill: parent; margins: 7; rightMargin: 0 }
               spacing: 6
               Repeater {
-                model: [{ view: "code", label: "Code", icon: "file-content" }, { view: "dashboard", label: "Dashboard", icon: "gauge-3" }, { view: "vault", label: "Vault", icon: "vault-3" }]
+                model: viewTabs.tabs
                 delegate: Item {
                   id: viewTab
                   required property var modelData
                   objectName: "workspaceViewTab"
                   readonly property string view: modelData.view
-                  width: (viewRow.width - 2 * viewRow.spacing) / 3
+                  width: (viewRow.width - (viewTabs.tabs.length - 1) * viewRow.spacing) / viewTabs.tabs.length
                   height: parent.height
                   readonly property bool active: viewTabs.current === view
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
@@ -490,6 +494,7 @@ ShellRoot {
                 anchors.fill: parent
                 model: (chin.st.dashboard && chin.st.dashboard.model) || ({})
                 sessions: win.agentd.sessions
+                focusedSession: rail.selectedRaw
                 tickets: ticketCache.adapter.tickets.concat(ticketCache.adapter.session_tickets)
                 ticketStates: ticketStatuses.states
                 askFor: sid => { win.agentd.askGen; return win.agentd.askFor(sid) }
@@ -588,6 +593,7 @@ ShellRoot {
           Chin {
             id: chin
             remoteSocket: term.nvimSocket !== term.localNvimSocket ? term.nvimSocket : ""
+            switching: rail.switching
             width: parent.width
             height: parent.height - viewTabs.height - renderStack.height
             color: win.ground
@@ -631,7 +637,7 @@ ShellRoot {
           // One path per Cockpit instance, straight from the terminal that spawned nvim.
           nvimSock: term.nvimSocket
           localNvimSock: term.localNvimSocket
-          workspaceTab: viewTabs.current
+          reportedTab: viewTabs.reported
           remoteNvimSock: win.remoteEditorSocket
           onEditorRequested: socket => win.editorSocket = socket
           focused: win.pane === "rail"
