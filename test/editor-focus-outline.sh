@@ -16,13 +16,13 @@ text=text[:end]+'''
       property int stage: 0
       interval: 180; repeat: true; running: true
       onTriggered: {
-        var outline = renderStack.children.find(item => item.objectName === "editorFocusOutline")
+        var outline = paneLayout.children.find(item => item.objectName === "editorFocusOutline")
         if (stage === 0) term.forceActiveFocus()
         else if (stage === 1) {
           if (!term.activeFocus || !outline.visible || outline.border.width !== 1 || !Qt.colorEqual(outline.border.color, Qt.alpha(Theme.fg, 0.6)))
             throw new Error("focused editor lacks its ink outline")
-          if (outline.x !== 0 || outline.y !== 0 || outline.width !== renderStack.width || outline.height !== renderStack.height)
-            throw new Error("editor outline and corner mask have different bounds")
+          if (outline.x !== termCol.x || outline.y !== termCol.y || outline.width !== termCol.width || outline.height !== termCol.height)
+            throw new Error("outline does not wrap the whole editor pane")
           win.pane = "rail"
           rail.enterInsert()
         } else if (stage === 2) {
@@ -35,7 +35,12 @@ text=text[:end]+'''
           term.forceActiveFocus()
         } else if (stage === 4) {
           if (!outline.visible) throw new Error("returning to editor does not restore outline")
-          console.log("PASS: real embedded terminal outline follows editor, composer and chat focus")
+          rail.workspaceTab = "dashboard"; chin.st = ({ dashboard: { active: true, model: {} } })
+        } else if (stage === 5) {
+          dashboard.forceActiveFocus()
+        } else if (stage === 6) {
+          if (!dashboard.activeFocus || !outline.visible) throw new Error("focused dashboard lacks the pane outline")
+          console.log("PASS: real embedded terminal outline follows editor, dashboard, composer and chat focus")
           Qt.quit()
         }
         stage++
@@ -48,6 +53,6 @@ env -u WAYLAND_DISPLAY -u DISPLAY HOME="$tmp/home" XDG_RUNTIME_DIR="$tmp/runtime
   QT_QPA_PLATFORM=offscreen COCKPIT_INSTANCE="editor-outline-$$" COCKPIT_COCKPIT_CMD=cat \
   COCKPIT_AGENTD_SOCKS="$tmp/absent.sock" COCKPIT_SCOPE=personal \
   COCKPIT_ASSET_DIR="$PWD/assets" QML_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml" \
-  timeout 12 qs -p "$tmp/ui" > "$tmp/log" 2>&1
+  timeout 12 qs -p "$tmp/ui" > "$tmp/log" 2>&1 || { grep -aE "Error|PASS" "$tmp/log" | head -5; exit 1; }
 if grep -E 'ERROR|Error:' "$tmp/log"; then exit 1; fi
 grep 'PASS:' "$tmp/log"

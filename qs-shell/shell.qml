@@ -581,17 +581,6 @@ ShellRoot {
                 ctx.fill()
               }
             }
-            Rectangle {
-              objectName: "editorFocusOutline"
-              anchors.fill: parent
-              z: 3
-              visible: term.activeFocus && !win.dashboardActive
-              color: "transparent"
-              border.width: 1
-              border.color: Qt.alpha(Theme.fg, 0.6)
-              topRightRadius: paneLayout.terminalCornerRadius
-              bottomRightRadius: paneLayout.terminalCornerRadius
-            }
           }
           // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the
           // window's true bottom edge, so the terminal grid's row slack hides at this
@@ -604,6 +593,18 @@ ShellRoot {
             height: parent.height - viewTabs.height - renderStack.height
             color: win.ground
           }
+        }
+
+        Rectangle {
+          objectName: "editorFocusOutline"
+          x: termCol.x; y: termCol.y; width: termCol.width; height: termCol.height
+          z: 3
+          visible: term.activeFocus || dashboard.activeFocus
+          color: "transparent"
+          border.width: 1
+          border.color: Qt.alpha(Theme.fg, 0.6)
+          topRightRadius: paneLayout.terminalCornerRadius
+          bottomRightRadius: paneLayout.terminalCornerRadius
         }
 
         // Fill only the divider lane below the chin corner. Keeping this separate
