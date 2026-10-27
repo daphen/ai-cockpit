@@ -1569,6 +1569,7 @@ Item {
   // frame recoloring with every tool change was too much motion. Light rides
   // ink (not electric); dark keeps the pale azure "thinking" tint.
   readonly property color activeRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.6)
+  readonly property color cardRing: Qt.alpha(Theme.mode === "light" ? "#242424" : "#FAFAFA", 0.18)
   // One colour vocabulary for BOTH roster states: the collapsed dots and the expanded
   // rows now read identically, so "what is this session doing" is the same glance either
   // way. Working is the orb, never a dot.
@@ -3326,8 +3327,8 @@ Item {
           implicitHeight: cardCol.implicitHeight + 2 * turnDel.padY
           radius: 18
           color: "transparent"
-          border.width: (!turnDel.isUser || turnDel.isNote) && turnDel.cursor ? 1.5 : 0
-          border.color: rail.activeRing
+          border.width: (!turnDel.isUser || turnDel.isNote) && turnDel.cursor ? 1 : 0
+          border.color: rail.cardRing
           ContrastCard {
             visible: turnDel.isUser && !turnDel.isNote
             anchors.fill: parent
@@ -3351,8 +3352,8 @@ Item {
             radius: card.radius
             color: turnDel.isHandoff ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
             visible: turnDel.isUser && !turnDel.isNote
-            border.width: 1.5
-            border.color: rail.activeRing
+            border.width: 1
+            border.color: rail.cardRing
             opacity: turnDel.cursor ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
