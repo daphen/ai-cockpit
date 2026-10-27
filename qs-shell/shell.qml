@@ -649,32 +649,29 @@ ShellRoot {
 
         // Focus moving between Neovim and the composer flies one caret across; the
         // arriving real cursor stays hidden until it lands.
-        Rectangle {
+        Item {
           id: glideCaret
           objectName: "focusGlideCaret"
           z: 100
-          width: 2; radius: 1
-          color: Theme.cursor
           visible: caretGlide.running
-          transformOrigin: Item.TopLeft
           readonly property string owner: term.activeFocus ? "nvim" : rail.composerField.activeFocus ? "composer" : ""
           property string lastOwner: ""
           property bool wasEmpty: false
+          readonly property int dot: 8
           function caret(who) {
             const r = who === "nvim" ? term.cursorRect : rail.composerField.cursorRectangle
             const item = who === "nvim" ? term : rail.composerField
             const p = item.mapToItem(paneLayout, r.x, r.y)
-            return { x: p.x, y: p.y, h: Math.max(1, r.height) }
+            return { x: p.x + r.width / 2, y: p.y + r.height / 2, h: Math.max(dot, r.height) }
           }
           onOwnerChanged: {
             if (!owner) { wasEmpty = true; focusGap.restart(); return }
             if (lastOwner && lastOwner !== owner && (!wasEmpty || focusGap.running)) {
               const from = caret(lastOwner), to = caret(owner)
               caretGlide.stop()
-              height = from.h
+              fromLine.height = from.h; toLine.height = to.h
               glideX.from = from.x; glideX.to = to.x
               glideY.from = from.y; glideY.to = to.y
-              glideScale.from = 1; glideScale.to = to.h / from.h
               caretGlide.start()
             }
             focusGap.stop()
@@ -682,11 +679,40 @@ ShellRoot {
             lastOwner = owner
           }
           Timer { id: focusGap; interval: 100 }
+          Rectangle { id: fromLine; x: -1; y: -height / 2; width: 2; radius: 1; color: Theme.cursor; opacity: 0 }
+          Rectangle { id: toLine; x: -1; y: -height / 2; width: 2; radius: 1; color: Theme.cursor; opacity: 0 }
+          Rectangle {
+            id: glideDot
+            x: -width / 2; y: -height / 2
+            width: glideCaret.dot; height: width; radius: width / 2
+            color: Theme.cursor; opacity: 0
+          }
+          // Line pinches into a dot, flies, then stretches back into a line: all render-thread
+          // animators (a same-value animator stands in for a pause) so nothing else can stall it.
           ParallelAnimation {
             id: caretGlide
-            XAnimator { id: glideX; target: glideCaret; duration: 150; easing.type: Easing.OutCubic }
-            YAnimator { id: glideY; target: glideCaret; duration: 150; easing.type: Easing.OutCubic }
-            ScaleAnimator { id: glideScale; target: glideCaret; duration: 150; easing.type: Easing.OutCubic }
+            XAnimator { id: glideX; target: glideCaret; duration: 260; easing.type: Easing.InOutSine }
+            YAnimator { id: glideY; target: glideCaret; duration: 260; easing.type: Easing.InOutSine }
+            OpacityAnimator { target: fromLine; from: 1; to: 0; duration: 70; easing.type: Easing.InQuad }
+            ScaleAnimator { target: fromLine; from: 1; to: glideCaret.dot / fromLine.height; duration: 70; easing.type: Easing.InCubic }
+            SequentialAnimation {
+              ParallelAnimation {
+                OpacityAnimator { target: glideDot; from: 0; to: 1; duration: 60; easing.type: Easing.OutQuad }
+                ScaleAnimator { target: glideDot; from: 0.25; to: 1; duration: 70; easing.type: Easing.OutCubic }
+              }
+              OpacityAnimator { target: glideDot; from: 1; to: 1; duration: 100 }
+              ParallelAnimation {
+                OpacityAnimator { target: glideDot; from: 1; to: 0; duration: 90; easing.type: Easing.InQuad }
+                ScaleAnimator { target: glideDot; from: 1; to: 0.25; duration: 90; easing.type: Easing.InOutCubic }
+              }
+            }
+            SequentialAnimation {
+              OpacityAnimator { target: toLine; from: 0; to: 0; duration: 170 }
+              ParallelAnimation {
+                OpacityAnimator { target: toLine; from: 0; to: 1; duration: 70; easing.type: Easing.OutQuad }
+                ScaleAnimator { target: toLine; from: glideCaret.dot / toLine.height; to: 1; duration: 90; easing.type: Easing.OutCubic }
+              }
+            }
           }
         }
       }

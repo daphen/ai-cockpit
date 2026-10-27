@@ -14,7 +14,7 @@ assert end >= 0
 text=text[:end]+'''
     Timer {
       property int stage: 0
-      interval: 250; repeat: true; running: true
+      interval: 400; repeat: true; running: true
       onTriggered: {
         const caret = glideCaret
         const near = (a, b) => Math.abs(a - b) < 0.5
@@ -40,7 +40,7 @@ text=text[:end]+'''
         } else if (stage === 4) {
           dashboard.forceActiveFocus()
           if (caretGlide.running || term.active) throw new Error("dashboard focus glided or left the terminal cursor on")
-          console.log("PASS: focus glides between Neovim and composer carets, one cursor at a time")
+          console.log("PASS: focus glides a dot between Neovim and composer carets, one cursor at a time")
           Qt.quit()
         }
         stage++
