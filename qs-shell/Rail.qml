@@ -2424,7 +2424,7 @@ Item {
   }
   function moveUp() {
     if (cur < rSize) { if (!rosterExpanded) cur = Math.max(cur - 1, 0); return }
-    cur = Math.max(cur - 1, rSize)   // Ctrl+k returns to the roster
+    cur = Math.max(cur - 1, rSize)   // the roster opens only via Ctrl+T/Super+T
   }
 
   // Blink probes (debug): delegate/dot creations — streaming must not grow these.
@@ -2578,14 +2578,14 @@ Item {
       toggleCurBash()
       return true
     }
-    // Panels stack tabs → feed → composer; Ctrl+j/Ctrl+k step down/up between them.
+    // Ctrl+j/Ctrl+k step between feed and composer; the roster opens only via Ctrl+T/Super+T.
     var onTabs = rosterExpanded && cur < rSize
     if (ctrl && e.key === Qt.Key_J) {
       if (onTabs && navTotal > rSize) { rosterOverride = false; cur = navTotal - 1 }
       else enterInsert()
       return true
     }
-    if (ctrl && e.key === Qt.Key_K) { if (!onTabs) focusRoster(); return true }
+    if (ctrl && e.key === Qt.Key_K) return true
     if (onTabs && !ctrl && (e.key === Qt.Key_H || e.key === Qt.Key_L)) {
       cur = (cur + (e.key === Qt.Key_L ? 1 : -1) + rSize) % rSize
       return true
