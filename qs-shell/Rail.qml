@@ -2804,7 +2804,21 @@ Item {
     if (!t) return ""
     if (t.kind === "user") return "user|" + String(t.text || "").length + "|" + String(t.deliveryId || "") + "|" + String(t.delivery || "")
     if (t.kind !== "turn") return t.kind + "|" + String(t.text || t.command || "").length
-    return "turn|" + JSON.stringify(t.items || [])
+    return "turn|" + _fingerprint(t.items || [])
+  }
+  // JSON.stringify of whole tool outputs on every sync stalled the GUI thread (and every
+  // animation on it) for 100+ ms; long strings are compared by length and samples instead.
+  function _fingerprint(v) {
+    if (v === null || v === undefined) return "~"
+    if (typeof v === "string") {
+      var n = v.length
+      return n <= 96 ? JSON.stringify(v) : "s" + n + ":" + JSON.stringify(v.slice(0, 24) + v.charAt(n >> 2) + v.charAt(n >> 1) + v.charAt(3 * n >> 2) + v.slice(-24))
+    }
+    if (typeof v !== "object") return String(v)
+    var out = Array.isArray(v) ? "[" : "{"
+    if (Array.isArray(v)) for (var i = 0; i < v.length; i++) out += _fingerprint(v[i]) + ","
+    else for (var k in v) out += k + ":" + _fingerprint(v[k]) + ","
+    return out + "]"
   }
   // Row identity: turns carry a stable key; keyless rows (live pushes, echoes)
   // fall back to kind+text, which never mutates for those kinds.
@@ -2817,8 +2831,8 @@ Item {
   property int _feedShown: -1
   readonly property int _feedOffset: _feedShown >= 0 ? Math.max(0, groupedFeed.length - _feedShown) : 0
   readonly property bool switching: switchSettle.running || feedFill.running
-  readonly property int feedFillStep: 4
-  readonly property int feedFillFirst: 8
+  readonly property int feedFillStep: 1
+  readonly property int feedFillFirst: 2
   // An Animator runs on the render thread, so the feed build and nvim repaint on a switch
   // cannot stall it. It only writes feedView.opacity back when it stops or finishes.
   OpacityAnimator { id: feedFade; target: feedView; duration: Motion.base; easing.type: Easing.OutCubic }
