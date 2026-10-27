@@ -466,7 +466,8 @@ ShellRoot {
 
             Crossfade {
               anchors.fill: parent
-              showSecond: win.dashboardActive
+              // Follow the picked tab, not the editor's report, so its text never shows first.
+              showSecond: rail.workspaceTab === "dashboard"
               enterDuration: 100
               exitDuration: 100
               shift: 0
@@ -492,7 +493,12 @@ ShellRoot {
               second: Dashboard {
                 id: dashboard
                 anchors.fill: parent
-                model: (chin.st.dashboard && chin.st.dashboard.model) || ({})
+                // Leaving for another editor resets chin.st; keep the cards through the fade-out.
+                Binding on model {
+                  when: win.dashboardActive
+                  value: (chin.st.dashboard && chin.st.dashboard.model) || ({})
+                  restoreMode: Binding.RestoreNone
+                }
                 sessions: win.agentd.sessions
                 focusedSession: rail.selectedRaw
                 tickets: ticketCache.adapter.tickets.concat(ticketCache.adapter.session_tickets)
