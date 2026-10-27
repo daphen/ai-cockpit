@@ -423,6 +423,7 @@ ShellRoot {
                   width: (viewRow.width - (viewTabs.tabs.length - 1) * viewRow.spacing) / viewTabs.tabs.length
                   height: parent.height
                   readonly property bool active: viewTabs.current === view
+                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
                   Rectangle {
                     anchors.fill: parent
@@ -431,8 +432,10 @@ ShellRoot {
                          : viewTabHover.hovered ? rail.palette.itemHover
                          : Qt.alpha(rail.palette.fg, viewBar.lightMode ? 0.035 : 0.035)
                     border.width: 1
-                    border.color: viewTab.active ? rail.palette.hairline : rail.palette.softHairline
+                    border.color: viewTab.focusMark ? Qt.alpha(Theme.orange, 0.55)
+                                : viewTab.active ? rail.palette.hairline : rail.palette.softHairline
                     Behavior on color { ColorAnimation { duration: 140 } }
+                    Behavior on border.color { ColorAnimation { duration: 140 } }
                   }
                   Row {
                     anchors { left: parent.left; leftMargin: 16; right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
@@ -440,7 +443,8 @@ ShellRoot {
                     Icon {
                       anchors.verticalCenter: parent.verticalCenter
                       name: viewTab.modelData.icon; width: 16; height: 16
-                      color: viewTab.ink
+                      color: viewTab.focusMark ? Theme.orange : viewTab.ink
+                      Behavior on color { ColorAnimation { duration: 140 } }
                     }
                     Text {
                       id: viewLabel
@@ -593,18 +597,6 @@ ShellRoot {
             height: parent.height - viewTabs.height - renderStack.height
             color: win.ground
           }
-        }
-
-        Rectangle {
-          objectName: "editorFocusOutline"
-          x: termCol.x; y: termCol.y; width: termCol.width; height: termCol.height
-          z: 3
-          visible: term.activeFocus || dashboard.activeFocus
-          color: "transparent"
-          border.width: 1
-          border.color: Qt.alpha(Theme.fg, 0.6)
-          topRightRadius: paneLayout.terminalCornerRadius
-          bottomRightRadius: paneLayout.terminalCornerRadius
         }
 
         // Fill only the divider lane below the chin corner. Keeping this separate

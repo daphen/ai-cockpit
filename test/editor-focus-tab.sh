@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-tmp=$(mktemp -d /tmp/cockpit-editor-outline.XXXXXX)
+tmp=$(mktemp -d /tmp/cockpit-editor-focus-tab.XXXXXX)
 trap 'rm -rf "$tmp"' EXIT
 cp -r qs-shell "$tmp/ui"
 mkdir -m 700 "$tmp/runtime" "$tmp/home"
@@ -16,31 +16,28 @@ text=text[:end]+'''
       property int stage: 0
       interval: 180; repeat: true; running: true
       onTriggered: {
-        var outline = paneLayout.children.find(item => item.objectName === "editorFocusOutline")
+        var marked = viewRow.children.filter(item => item.focusMark === true).length
         if (stage === 0) term.forceActiveFocus()
         else if (stage === 1) {
-          if (!term.activeFocus || !outline.visible || outline.border.width !== 1 || !Qt.colorEqual(outline.border.color, Qt.alpha(Theme.fg, 0.6)))
-            throw new Error("focused editor lacks its ink outline")
-          if (outline.x !== termCol.x || outline.y !== termCol.y || outline.width !== termCol.width || outline.height !== termCol.height)
-            throw new Error("outline does not wrap the whole editor pane")
+          if (!term.activeFocus || marked !== 1) throw new Error("focused editor does not mark exactly its active tab")
           win.pane = "rail"
           rail.enterInsert()
         } else if (stage === 2) {
-          if (outline.visible || term.activeFocus || !rail.insert)
-            throw new Error("composer focus leaves editor outline visible")
+          if (marked || term.activeFocus || !rail.insert)
+            throw new Error("composer focus leaves the tab marked")
           rail.exitInsert()
         } else if (stage === 3) {
-          if (outline.visible) throw new Error("chat focus leaves editor outline visible")
+          if (marked) throw new Error("chat focus leaves the tab marked")
           win.pane = "nvim"
           term.forceActiveFocus()
         } else if (stage === 4) {
-          if (!outline.visible) throw new Error("returning to editor does not restore outline")
+          if (marked !== 1) throw new Error("returning to editor does not restore the tab mark")
           rail.workspaceTab = "dashboard"; chin.st = ({ dashboard: { active: true, model: {} } })
         } else if (stage === 5) {
           dashboard.forceActiveFocus()
         } else if (stage === 6) {
-          if (!dashboard.activeFocus || !outline.visible) throw new Error("focused dashboard lacks the pane outline")
-          console.log("PASS: real embedded terminal outline follows editor, dashboard, composer and chat focus")
+          if (!dashboard.activeFocus || marked !== 1) throw new Error("focused dashboard does not mark its tab")
+          console.log("PASS: active view tab marks focus for editor, dashboard, composer and chat focus")
           Qt.quit()
         }
         stage++
@@ -50,7 +47,7 @@ text=text[:end]+'''
 p.write_text(text)
 PY
 env -u WAYLAND_DISPLAY -u DISPLAY HOME="$tmp/home" XDG_RUNTIME_DIR="$tmp/runtime" \
-  QT_QPA_PLATFORM=offscreen COCKPIT_INSTANCE="editor-outline-$$" COCKPIT_COCKPIT_CMD=cat \
+  QT_QPA_PLATFORM=offscreen COCKPIT_INSTANCE="editor-focus-tab-$$" COCKPIT_COCKPIT_CMD=cat \
   COCKPIT_AGENTD_SOCKS="$tmp/absent.sock" COCKPIT_SCOPE=personal \
   COCKPIT_ASSET_DIR="$PWD/assets" QML_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml" \
   timeout 12 qs -p "$tmp/ui" > "$tmp/log" 2>&1 || { grep -aE "Error|PASS" "$tmp/log" | head -5; exit 1; }
