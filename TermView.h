@@ -2,6 +2,7 @@
 #include <QQuickPaintedItem>
 #include <QFont>
 #include <QImage>
+#include <QRectF>
 #include <QtQmlIntegration>
 #include <thread>
 #include <mutex>
@@ -49,12 +50,17 @@ public:
   void setNvimSocket(const QString &socket);
   Q_INVOKABLE QString clipboardText(const QString &kind) const;
 
-  // false when focus is in the rail → hide the terminal cursor.
+  // Where the cursor cell sits in item coordinates, published even while hidden.
+  Q_PROPERTY(QRectF cursorRect READ cursorRect NOTIFY cursorRectChanged)
+  QRectF cursorRect() const { return cursorRect_; }
+
+  // false when Neovim lacks keyboard focus → hide the terminal cursor.
   Q_PROPERTY(bool active READ active WRITE setActive NOTIFY activeChanged)
   bool active() const { return active_.load(); }
   void setActive(bool a);
 
 signals:
+  void cursorRectChanged();
   void activeChanged();
   void nvimSocketChanged();
   void dprChanged();
@@ -146,6 +152,8 @@ private:
   // itself (palette 16-255 is the fixed xterm cube inside librio).
   rio_colors_s colors_{};
   std::atomic<bool> active_{true};   // rail-focus state; hides the cursor when false
+  QRectF cursorRect_;                // GUI-thread copy
+  QRectF drawnCursor_;               // worker-thread: last rect published
   int wheelAccum_ = 0;               // GUI-thread: sub-notch wheel remainder
 
   // --- worker thread + GUI/worker handoff ---

@@ -946,6 +946,15 @@ QImage TermView::renderFrame() {
 
   // Cursor: honor the app's requested shape (nvim swaps block/beam by mode); librio
   // reports HIDDEN for DECTCEM and while the view is scrolled into history.
+  if (curShape != RIO_CURSOR_HIDDEN && cur.column < cols && cur.line < lines) {
+    const QRectF rect((padLD_ + cur.column * cellWD_) / ratio, (padTD_ + cur.line * cellHD_) / ratio,
+                      cellWD_ / ratio, cellHD_ / ratio);
+    if (rect != drawnCursor_) {
+      drawnCursor_ = rect;
+      QMetaObject::invokeMethod(this, [this, rect] { cursorRect_ = rect; emit cursorRectChanged(); },
+                                Qt::QueuedConnection);
+    }
+  }
   if (active_.load() && curShape != RIO_CURSOR_HIDDEN &&
       cur.column < cols && cur.line < lines) {   // hidden when the rail has focus
     const qreal x = padLD_ + cur.column * cellWD_, y = padTD_ + cur.line * cellHD_;

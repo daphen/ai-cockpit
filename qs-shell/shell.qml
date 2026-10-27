@@ -480,7 +480,7 @@ ShellRoot {
                 id: term
                 nvimSocket: win.editorSocket
                 anchors.fill: parent
-                active: !win.dashboardActive
+                active: activeFocus && !caretGlide.running
                 enabled: !win.dashboardActive
                 Component.onCompleted: forceActiveFocus()
                 onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
@@ -644,6 +644,50 @@ ShellRoot {
           onRequestFocus: win.pane = "rail"
           onRequestScopeMode: mode => win.setScopeMode(mode)
           onActiveFocusChanged: if (activeFocus) win.pane = "rail"
+          caretHeld: caretGlide.running
+        }
+
+        // Focus moving between Neovim and the composer flies one caret across; the
+        // arriving real cursor stays hidden until it lands.
+        Rectangle {
+          id: glideCaret
+          objectName: "focusGlideCaret"
+          z: 100
+          width: 2; radius: 1
+          color: Theme.cursor
+          visible: caretGlide.running
+          transformOrigin: Item.TopLeft
+          readonly property string owner: term.activeFocus ? "nvim" : rail.composerField.activeFocus ? "composer" : ""
+          property string lastOwner: ""
+          property bool wasEmpty: false
+          function caret(who) {
+            const r = who === "nvim" ? term.cursorRect : rail.composerField.cursorRectangle
+            const item = who === "nvim" ? term : rail.composerField
+            const p = item.mapToItem(paneLayout, r.x, r.y)
+            return { x: p.x, y: p.y, h: Math.max(1, r.height) }
+          }
+          onOwnerChanged: {
+            if (!owner) { wasEmpty = true; focusGap.restart(); return }
+            if (lastOwner && lastOwner !== owner && (!wasEmpty || focusGap.running)) {
+              const from = caret(lastOwner), to = caret(owner)
+              caretGlide.stop()
+              height = from.h
+              glideX.from = from.x; glideX.to = to.x
+              glideY.from = from.y; glideY.to = to.y
+              glideScale.from = 1; glideScale.to = to.h / from.h
+              caretGlide.start()
+            }
+            focusGap.stop()
+            wasEmpty = false
+            lastOwner = owner
+          }
+          Timer { id: focusGap; interval: 100 }
+          ParallelAnimation {
+            id: caretGlide
+            XAnimator { id: glideX; target: glideCaret; duration: 150; easing.type: Easing.OutCubic }
+            YAnimator { id: glideY; target: glideCaret; duration: 150; easing.type: Easing.OutCubic }
+            ScaleAnimator { id: glideScale; target: glideCaret; duration: 150; easing.type: Easing.OutCubic }
+          }
         }
       }
     }

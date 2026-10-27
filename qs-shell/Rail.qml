@@ -56,6 +56,8 @@ Item {
   property string remoteNvimSock: ""
   signal editorRequested(string socket)
   property bool focused: false
+  readonly property Item composerField: composerInput
+  property bool caretHeld: false   // a focus glide is still flying to this caret
   signal focusNvim()
   signal requestFocus()   // a click in the rail should pull focus here
 
@@ -4387,7 +4389,7 @@ Item {
             onCursorRectangleChanged: composerFlick.ensureVisible(cursorRectangle)
             onTextChanged: if (!text.length) feedDebounce.restart()
             // Orange blinking caret, matching the sibling apps (Theme.cursor).
-            cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible ? 1 : 0 }
+            cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible && !rail.caretHeld ? 1 : 0 }
             // TextArea has no onAccepted — plain Enter routes here from Keys below.
             // Shift+Enter falls through to the default handler = a newline.
             function sendNow() {

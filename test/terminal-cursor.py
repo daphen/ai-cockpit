@@ -22,9 +22,9 @@ with tempfile.TemporaryDirectory(prefix="cockpit-cursor-test-") as directory:
           if (!term.activeFocus || !term.active) throw new Error("focused terminal cursor disabled")
           win.pane = "rail"; rail.forceActiveFocus()
         } else {
-          if (term.activeFocus || !rail.activeFocus || !term.active)
-            throw new Error("rail focus hid the terminal cursor")
-          console.log("PASS: production shell keeps terminal cursor active while keyboard focus is in the rail")
+          if (term.activeFocus || !rail.activeFocus || term.active)
+            throw new Error("rail focus left the terminal cursor showing")
+          console.log("PASS: production shell hides the terminal cursor while keyboard focus is in the rail")
           Qt.quit()
         }
         phase++
