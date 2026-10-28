@@ -306,20 +306,35 @@ FocusScope {
         Repeater {
           model: root.tabs
           delegate: Rectangle {
+            id: dashTab
             required property string modelData
+            readonly property bool active: modelData === root.activeTab
             width: tabText.implicitWidth + 24
             height: 30
             radius: 9
-            color: modelData === root.activeTab ? Theme.fg : "transparent"
-            border.width: modelData === root.activeTab ? 0 : 1
-            border.color: Theme.hairline
+            color: !active && dashTabHover.hovered ? Theme.itemHover : Qt.alpha(Theme.itemHover, 0)
+            Behavior on color { ColorAnimation { duration: 140 } }
+            GradientFrame {
+              anchors.fill: parent
+              visible: dashTab.active && Theme.mode !== "light"
+              radius: dashTab.radius
+              fill: Qt.tint(Theme.bg, Theme.itemSelected)
+              edge: Theme.fg
+            }
+            LightKey {
+              anchors.fill: parent
+              visible: dashTab.active && Theme.mode === "light"
+              radius: dashTab.radius
+              outline: Qt.alpha(Theme.fg, 0.16)
+            }
             Text {
               id: tabText
               anchors.centerIn: parent
               text: modelData.toUpperCase()
-              color: modelData === root.activeTab ? Theme.bg : root.muted
+              color: dashTab.active || dashTabHover.hovered ? Theme.fg : root.muted
               font { family: Theme.fontFamily; pixelSize: 15; weight: 600 }
             }
+            HoverHandler { id: dashTabHover; cursorShape: Qt.PointingHandCursor }
             TapHandler { onTapped: root.dispatch("tab:" + modelData) }
           }
         }
