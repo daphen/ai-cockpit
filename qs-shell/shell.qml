@@ -427,6 +427,7 @@ ShellRoot {
                   readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
                   Rectangle {
+                    id: viewPill
                     anchors.fill: parent
                     radius: paneLayout.terminalCornerRadius
                     color: viewTab.active ? rail.palette.itemSelected
@@ -439,23 +440,46 @@ ShellRoot {
                     Behavior on border.color { ColorAnimation { duration: 140 } }
                   }
                   Row {
-                    anchors { left: parent.left; leftMargin: 16; right: parent.right; rightMargin: 16; verticalCenter: parent.verticalCenter }
+                    anchors { left: parent.left; leftMargin: 5; right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
                     spacing: 9
-                    Icon {
+                    Rectangle {
+                      id: viewBadge
                       anchors.verticalCenter: parent.verticalCenter
-                      name: viewTab.modelData.icon; width: 16; height: 16
-                      color: viewTab.focusMark ? Theme.orange : viewTab.ink
-                      Behavior on color { ColorAnimation { duration: 140 } }
+                      width: 22; height: 22; radius: paneLayout.terminalCornerRadius - 3
+                      color: Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04)
+                      border.width: 1
+                      border.color: viewTab.focusMark ? Qt.alpha(Theme.orange, 0.55) : rail.palette.hairline
+                      Behavior on border.color { ColorAnimation { duration: 140 } }
+                      Icon {
+                        anchors.centerIn: parent
+                        name: viewTab.modelData.icon; width: 13; height: 13
+                        color: viewTab.focusMark ? Theme.orange : viewTab.ink
+                        Behavior on color { ColorAnimation { duration: 140 } }
+                      }
                     }
-                    Text {
-                      id: viewLabel
+                    Item {
                       anchors.verticalCenter: parent.verticalCenter
-                      width: parent.width - 16 - parent.spacing
-                      elide: Text.ElideRight
-                      text: viewTab.modelData.label
-                      color: viewTab.ink
-                      font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
-                      font.weight: viewTab.active ? 600 : 400
+                      width: parent.width - viewBadge.width - parent.spacing
+                      height: viewLabel.implicitHeight
+                      clip: true
+                      Text {
+                        id: viewLabel
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: viewTab.modelData.label
+                        color: viewTab.ink
+                        font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+                        font.weight: viewTab.active ? 600 : 400
+                      }
+                      Rectangle {
+                        visible: viewLabel.implicitWidth > parent.width
+                        anchors { right: parent.right; top: parent.top; bottom: parent.bottom }
+                        width: Math.min(28, parent.width)
+                        gradient: Gradient {
+                          orientation: Gradient.Horizontal
+                          GradientStop { position: 0; color: Qt.alpha(Qt.tint(win.ground, viewPill.color), 0) }
+                          GradientStop { position: 1; color: Qt.tint(win.ground, viewPill.color) }
+                        }
+                      }
                     }
                   }
                   HoverHandler { id: viewTabHover; cursorShape: Qt.PointingHandCursor }
