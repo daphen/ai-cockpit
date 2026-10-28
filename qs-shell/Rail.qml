@@ -4714,9 +4714,18 @@ Item {
             radius: pill.radius
             color: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.16)
             Rectangle {
+              id: pillBevel
               anchors { fill: parent; margins: pill.cursor ? 1.5 : 1 }
               radius: pill.radius - anchors.margins
               color: "#FFFFFF"
+              Rectangle {
+                anchors { fill: parent; topMargin: 1 }
+                radius: pillBevel.radius
+                gradient: Gradient {
+                  GradientStop { position: 0; color: "#FDFDFD" }
+                  GradientStop { position: 1; color: "#F3F3F4" }
+                }
+              }
             }
           }
           Row {
