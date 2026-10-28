@@ -71,7 +71,7 @@ ShellRoot {
         test.check(note.border.width === 0, "mouse hover outlined a handoff")
         input.mouseMove(rail, 1, rail.height - 1, 0, Qt.NoButton, Qt.NoModifier)
         rail.forceActiveFocus(); input.keyClick(Qt.Key_J,Qt.NoModifier,0)
-        test.check(rail.cur === rail.rSize && note.border.width === 1.5 && Qt.colorEqual(note.border.color, rail.activeRing), "keyboard navigation to handoff lacks its neutral outline")
+        test.check(rail.cur === rail.rSize && note.border.width === 1 && Qt.colorEqual(note.border.color, rail.cardRing), "keyboard navigation to handoff lacks its neutral outline")
         test.check(!test.label("You"), "handoff attributed to human")
         var preview = test.find(rail, item => item.text && item.text.indexOf("Finding: candidate CSS") === 0)
         test.check(preview && preview.maximumLineCount === 2 && preview.truncated, "missing bounded report preview")
@@ -89,7 +89,7 @@ ShellRoot {
         test.check(test.label("Collapse"), "message disclosure did not open")
         var expandedNote = test.label("From css-map").parent.parent.parent.parent
         var expandedContent = expandedNote.children.find(item => item.spacing === 16)
-        test.check(expandedNote.border.width === 1.5 && expandedContent && expandedContent.y === 16
+        test.check(expandedNote.border.width === 1 && expandedContent && expandedContent.y === 16
                    && Math.abs(expandedNote.height - expandedContent.height - 32) < 1, "expanded handoff lacks its outline and reading padding")
         test.check(test.find(rail, item => item.text && item.text.indexOf("END OF REPORT") >= 0 && item.maximumLineCount !== 2), "full report unavailable")
         test.click(test.label("Collapse"))
@@ -112,7 +112,7 @@ ShellRoot {
         test.check(test.find(rail, item => typeof item.text === "string" && item.text.indexOf("long-file-name-") >= 0), "edited file hidden behind disclosure")
         test.check(!test.label("python3 - <<'PY'\nprint('fixture')\nPY"), "full command expanded by default")
         var selected = test.find(rail, item => item.cursor === true && item.turn && item.turn.kind === "turn")
-        var selectedCard = selected && test.find(selected, item => item.radius === 18 && item.border && item.border.width === 1.5)
+        var selectedCard = selected && test.find(selected, item => item.radius === 18 && item.border && item.border.width === 1)
         var selectedContent = selectedCard && selectedCard.children.find(item => item.spacing === 16)
         test.check(selectedCard && selectedCard.border.color.a > 0 && selectedContent && selectedContent.y === 8
                    && selectedContent.anchors.leftMargin === 36 && selectedContent.anchors.rightMargin === 36
@@ -170,7 +170,7 @@ ShellRoot {
         test.check(!test.label("read package.json"), "Ctrl+Enter failed to collapse work details")
         var selection = test.find(rail, item => String(item.objectName || "").indexOf("work-details:") === 0)
         while (selection && !(selection.radius === 18 && selection.color !== undefined)) selection = selection.parent
-        test.check(selection && selection.color.a === 0 && selection.border.width === 1.5 && Qt.colorEqual(selection.border.color, rail.activeRing),
+        test.check(selection && selection.color.a === 0 && selection.border.width === 1 && Qt.colorEqual(selection.border.color, rail.cardRing),
                    "agent selection needs a neutral outline without a background fill")
         rail.cur = rail.rSize
         input.mouseMove(selection, 5, 5, 0, Qt.NoButton, Qt.NoModifier)

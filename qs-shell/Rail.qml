@@ -5593,7 +5593,7 @@ Item {
       id: markdownRoot
       width: parent ? parent.width : 400
       spacing: rail.bodyLeading
-      readonly property var blocks: rail.markdownBlocks(sourceText, sourceEntry, sourceOffset).filter(block => block.kind !== "fence" || block.runnable)
+      readonly property var blocks: rail.markdownBlocks(sourceText, sourceEntry, sourceOffset)
       Repeater {
         model: CountModel { size: markdownRoot.blocks.length }
         Loader {
@@ -5680,6 +5680,15 @@ Item {
             text: fence.activeHint ? fence.activeHint.label : ""
             TapHandler { onTapped: if (fence.activeHint) rail.hintKey(fence.activeHint.label) }
           }
+        }
+        TextEdit {
+          width: parent.width
+          text: String(block.code || "").replace(/\n$/, "")
+          readOnly: true; selectByMouse: true
+          wrapMode: TextEdit.WrapAnywhere
+          textFormat: TextEdit.PlainText
+          color: bodyColor
+          font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta
         }
       }
       HoverHandler { id: fenceHover; enabled: fence.requestsApproval }
