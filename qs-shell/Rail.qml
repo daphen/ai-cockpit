@@ -4723,13 +4723,21 @@ Item {
           width: Math.round(inlineRow.implicitWidth) + 2 + 12
           onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
           readonly property bool lightKey: selected && Theme.mode === "light"
+          readonly property bool darkKey: selected && !cursor && Theme.mode !== "light"
           // Pills slide under a still pointer while re-sorting; hover would flash each one.
           readonly property bool hovered: inlineHover.hovered && !inlineRowItems.reordering
           // Rest at a clear copy of the hover colour: fading from transparent black dips through grey.
-          color: lightKey ? Qt.alpha(chin.itemHover, 0) : selected ? chin.itemSelected : hovered || cursor ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
-          border.width: lightKey ? 0 : cursor ? 1.5 : selected ? 1 : 0
+          color: lightKey || darkKey ? Qt.alpha(chin.itemHover, 0) : selected ? chin.itemSelected : hovered || cursor ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
+          border.width: lightKey || darkKey ? 0 : cursor ? 1.5 : selected ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
+          GradientFrame {
+            anchors.fill: parent
+            visible: pill.darkKey
+            radius: pill.radius
+            fill: Qt.tint(rail.userCardTop, chin.itemSelected)
+            edge: chin.fg
+          }
           LightKey {
             anchors.fill: parent
             visible: pill.lightKey
