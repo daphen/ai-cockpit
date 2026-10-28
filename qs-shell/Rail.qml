@@ -3345,6 +3345,7 @@ Item {
             outlineColor: turnDel.isHandoff
               ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.22)
               : (lightKey ? Qt.alpha(Theme.fg, 0.11) : "#282828")
+            shadowColor: lightKey ? Qt.rgba(0.12, 0.15, 0.18, 0.07) : "#101010"
             Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
