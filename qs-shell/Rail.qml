@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Controls
-import QtQuick.Controls.Material.impl as MaterialImpl
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -4705,10 +4704,11 @@ Item {
           border.width: cursor ? 1.5 : selected && !lightKey ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
-          MaterialImpl.BoxShadow {
+          Rectangle {
             visible: pill.lightKey
-            source: pillKey; offsetX: 0; offsetY: 1; blurRadius: 3; spreadRadius: 0
-            strength: 1; color: Qt.rgba(0, 0, 0, 0.10)
+            anchors.fill: parent; anchors.topMargin: 1; anchors.bottomMargin: -1
+            radius: pill.radius
+            color: Qt.rgba(0, 0, 0, 0.07)
           }
           Rectangle {
             id: pillKey
