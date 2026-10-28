@@ -4700,16 +4700,12 @@ Item {
           width: inlineRow.implicitWidth + 2 + 12
           onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
           readonly property bool lightKey: selected && Theme.mode === "light"
-          color: lightKey ? "transparent" : selected ? chin.itemSelected : inlineHover.hovered || cursor ? chin.itemHover : "transparent"
+          // Pills slide under a still pointer while re-sorting; hover would flash each one.
+          readonly property bool hovered: inlineHover.hovered && !inlineRowItems.reordering
+          color: lightKey ? "transparent" : selected ? chin.itemSelected : hovered || cursor ? chin.itemHover : "transparent"
           border.width: cursor ? 1.5 : selected && !lightKey ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
-          Rectangle {
-            visible: pill.lightKey
-            anchors.fill: parent; anchors.topMargin: 1; anchors.bottomMargin: -1
-            radius: pill.radius
-            color: Qt.rgba(0, 0, 0, 0.07)
-          }
           Rectangle {
             id: pillKey
             anchors.fill: parent
@@ -4734,7 +4730,7 @@ Item {
             Text {
               anchors.verticalCenter: parent.verticalCenter
               text: pill.md.name
-              color: pill.selected || pill.cursor || inlineHover.hovered ? chin.fg : chin.muted
+              color: pill.selected || pill.cursor || pill.hovered ? chin.fg : chin.muted
               font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
               font.weight: pill.selected ? 600 : 400
             }
