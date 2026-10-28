@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import QtQuick.Controls.Material.impl as MaterialImpl
 import QsLib
 import Heidr
 
@@ -10,7 +11,7 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
-    readonly property color ground: Theme.mode === "dark" ? Qt.tint(Theme.bgDim, Qt.alpha(Theme.fg, 0.03)) : Theme.bgDim
+    readonly property color ground: Theme.mode === "dark" ? Qt.tint(Theme.bgDim, Qt.alpha(Theme.fg, 0.03)) : Qt.darker(Theme.bgDim, 1.04)
     readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE") || "main"
     readonly property string startupMode: {
       var s = Quickshell.env("COCKPIT_SCOPE") || Quickshell.env("HEIDR_SCOPE") || "personal"
@@ -427,28 +428,37 @@ ShellRoot {
                   readonly property bool active: viewTabs.current === view
                   readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
-                  ContrastCard {
-                    anchors.fill: parent
+                  MaterialImpl.BoxShadow {
                     visible: viewBar.lightMode && viewTab.active
-                    cardRadius: paneLayout.terminalCornerRadius
-                    faceTop: rail.userCardTop; faceUpper: faceTop
-                    faceMid: rail.userCardBottom; faceBottom: faceMid
-                    outlineColor: rail.palette.softHairline
-                    shadowColor: Qt.rgba(0.12, 0.15, 0.18, 0.07)
+                    source: lightKey; offsetX: 0; offsetY: 1; blurRadius: 3; spreadRadius: 0
+                    strength: 1; color: Qt.rgba(0, 0, 0, 0.10)
+                  }
+                  Rectangle {
+                    id: lightKey
+                    anchors.fill: parent
+                    visible: viewBar.lightMode
+                    radius: paneLayout.terminalCornerRadius
+                    border.width: 1
+                    border.color: Qt.alpha(rail.palette.fg, viewTab.active ? 0.14 : 0.10)
+                    gradient: Gradient {
+                      GradientStop { position: 0; color: viewTab.active ? "#FFFFFF" : viewTabHover.hovered ? "#FDFDFD" : "#FBFBFB" }
+                      GradientStop { position: 1; color: viewTab.active ? "#F7F7F7" : viewTabHover.hovered ? "#F5F5F6" : "#F1F1F2" }
+                    }
+                    Rectangle {
+                      anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 6; rightMargin: 6; topMargin: 1 }
+                      height: 1; color: "#FFFFFF"
+                    }
                   }
                   GradientFrame {
                     id: viewPill
                     anchors.fill: parent
+                    visible: !viewBar.lightMode
                     radius: paneLayout.terminalCornerRadius
-                    fill: viewBar.lightMode
-                      ? (viewTab.active ? rail.userCardTop : Qt.tint(win.ground, Qt.rgba(1, 1, 1, viewTabHover.hovered ? 0.75 : 0.5)))
-                      : Qt.tint(win.ground, viewTab.active ? rail.palette.itemSelected
+                    fill: Qt.tint(win.ground, viewTab.active ? rail.palette.itemSelected
                          : viewTabHover.hovered ? rail.palette.itemHover
                          : Qt.alpha(rail.palette.fg, 0.06))
                     edge: rail.palette.fg
-                    litFromTop: !viewBar.lightMode
-                    strength: viewBar.lightMode ? (viewTab.active || viewTabHover.hovered ? 0.8 : 0.7)
-                      : viewTab.active || viewTabHover.hovered ? 1 : 0.85
+                    strength: viewTab.active || viewTabHover.hovered ? 1 : 0.85
                     Behavior on fill { ColorAnimation { duration: 140 } }
                   }
                   Row {
@@ -458,10 +468,10 @@ ShellRoot {
                       id: viewBadge
                       anchors.verticalCenter: parent.verticalCenter
                       width: 22; height: 22; radius: paneLayout.terminalCornerRadius - 3
-                      fill: Qt.tint(viewPill.fill, Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04))
+                      fill: viewBar.lightMode ? Qt.tint("#FAFAFA", Qt.alpha(rail.palette.fg, viewTab.active ? 0.04 : 0.03))
+                        : Qt.tint(viewPill.fill, Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04))
                       edge: viewPill.edge
-                      litFromTop: viewPill.litFromTop
-                      strength: viewPill.strength * (viewBar.lightMode ? 0.8 : 1.2)
+                      strength: viewPill.strength * (viewBar.lightMode ? 0.6 : 1.2)
                       Icon {
                         anchors.centerIn: parent
                         name: viewTab.modelData.icon; width: 13; height: 13
