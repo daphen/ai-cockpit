@@ -4704,7 +4704,7 @@ Item {
           readonly property bool hovered: inlineHover.hovered && !inlineRowItems.reordering
           // Rest at a clear copy of the hover colour: fading from transparent black dips through grey.
           color: lightKey ? Qt.alpha(chin.itemHover, 0) : selected ? chin.itemSelected : hovered || cursor ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
-          border.width: cursor ? 1.5 : selected && !lightKey ? 1 : 0
+          border.width: lightKey ? 0 : cursor ? 1.5 : selected ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
           Rectangle {
@@ -4712,11 +4712,14 @@ Item {
             anchors.fill: parent
             visible: pill.lightKey
             radius: pill.radius
-            border.width: 1
-            border.color: Qt.alpha(chin.fg, 0.14)
-            gradient: Gradient {
-              GradientStop { position: 0; color: "#FFFFFF" }
-              GradientStop { position: 1; color: "#F5F5F5" }
+            color: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.14)
+            Rectangle {
+              anchors { fill: parent; margins: pill.cursor ? 1.5 : 1 }
+              radius: pill.radius - anchors.margins
+              gradient: Gradient {
+                GradientStop { position: 0; color: "#FFFFFF" }
+                GradientStop { position: 1; color: "#F5F5F5" }
+              }
             }
             Rectangle {
               anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 10; rightMargin: 10; topMargin: 1 }
