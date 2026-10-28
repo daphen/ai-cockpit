@@ -1,7 +1,6 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import QtQuick.Controls.Material.impl as MaterialImpl
 import QsLib
 import Heidr
 
@@ -428,25 +427,25 @@ ShellRoot {
                   readonly property bool active: viewTabs.current === view
                   readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
-                  MaterialImpl.BoxShadow {
-                    visible: viewBar.lightMode && viewTab.active
-                    source: lightKey; offsetX: 0; offsetY: 1; blurRadius: 3; spreadRadius: 0
-                    strength: 1; color: Qt.rgba(0, 0, 0, 0.10)
-                  }
                   Rectangle {
                     id: lightKey
                     anchors.fill: parent
                     visible: viewBar.lightMode
                     radius: paneLayout.terminalCornerRadius
-                    border.width: 1
-                    border.color: Qt.alpha(rail.palette.fg, viewTab.active ? 0.14 : 0.10)
-                    gradient: Gradient {
-                      GradientStop { position: 0; color: viewTab.active ? "#FFFFFF" : viewTabHover.hovered ? "#FDFDFD" : "#FBFBFB" }
-                      GradientStop { position: 1; color: viewTab.active ? "#F7F7F7" : viewTabHover.hovered ? "#F5F5F6" : "#F1F1F2" }
-                    }
+                    color: Qt.alpha(rail.palette.fg, viewTab.active ? 0.16 : 0.11)
                     Rectangle {
-                      anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 6; rightMargin: 6; topMargin: 1 }
-                      height: 1; color: "#FFFFFF"
+                      id: lightBevel
+                      anchors { fill: parent; margins: 1 }
+                      radius: parent.radius - 1
+                      color: "#FFFFFF"
+                      Rectangle {
+                        anchors { fill: parent; topMargin: 1 }
+                        radius: lightBevel.radius
+                        gradient: Gradient {
+                          GradientStop { position: 0; color: viewTab.active ? "#FDFDFD" : viewTabHover.hovered ? "#FBFBFB" : "#F9F9F9" }
+                          GradientStop { position: 1; color: viewTab.active ? "#F5F5F6" : viewTabHover.hovered ? "#F3F3F4" : "#EFEFF0" }
+                        }
+                      }
                     }
                   }
                   GradientFrame {
