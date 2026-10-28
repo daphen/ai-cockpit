@@ -476,10 +476,42 @@ FocusScope {
             width: (sessionCards.width - sessionCards.spacing * (sessionCards.columns - 1)) / sessionCards.columns
             height: Math.max(width * 1.35, 350) + Math.max(0, ticketBadges.height - 54)
             radius: 18
-            color: Theme.bgDim
-            border.width: 1
-            border.color: root.activeFocus && "session:" + modelData === root.currentAction
-              ? root.muted : (cardHover.hovered ? Qt.rgba(Theme.fg.r, Theme.fg.g, Theme.fg.b, 0.3) : Theme.hairline)
+            readonly property bool lightFace: Theme.mode === "light"
+            readonly property color faceMid: lightFace ? "#F8F8F9" : Qt.lighter(Theme.surface0, 1.2)
+            color: "transparent"
+            ContrastCard {
+              z: -1
+              anchors.fill: parent
+              cardRadius: sessionCard.radius
+              elevated: true
+              bevelWidth: sessionCard.lightFace ? 1 : 2
+              faceTop: sessionCard.lightFace ? "#FDFDFD" : Qt.lighter(Theme.surface0, 1.25)
+              faceUpper: sessionCard.lightFace ? "#FCFCFC" : faceTop
+              faceMid: sessionCard.faceMid
+              faceBottom: sessionCard.lightFace ? "#F3F3F4" : faceMid
+              rimTop: sessionCard.lightFace ? "#FFFFFF" : "#2B2B2B"
+              rimBottom: sessionCard.lightFace ? "#F3F3F4" : "#222222"
+              outlineColor: sessionCard.lightFace ? Qt.alpha(Theme.fg, 0.11) : "#282828"
+              shadowColor: sessionCard.lightFace ? Qt.rgba(0.12, 0.15, 0.18, 0.07) : "#101010"
+            }
+            LightKey {
+              z: -1
+              anchors.fill: parent
+              visible: sessionCard.lightFace
+              radius: sessionCard.radius
+              outline: Qt.alpha(Theme.fg, 0.16)
+            }
+            Rectangle {
+              objectName: "sessionRing"
+              z: 2
+              anchors.fill: parent
+              radius: sessionCard.radius
+              color: "transparent"
+              border.width: 1
+              border.color: root.activeFocus && "session:" + modelData === root.currentAction ? root.muted : Qt.alpha(Theme.fg, 0.3)
+              opacity: (root.activeFocus && "session:" + modelData === root.currentAction) || cardHover.hovered ? 1 : 0
+              Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            }
             Item {
               id: sessionInset
               objectName: "sessionInset"
@@ -688,9 +720,9 @@ FocusScope {
             }
             Rectangle {
               objectName: "veilScrim"
-              anchors { fill: parent; margins: sessionCard.border.width }
-              radius: sessionCard.radius - sessionCard.border.width
-              color: Theme.bgDim
+              anchors { fill: parent; margins: 1 }
+              radius: sessionCard.radius - 1
+              color: sessionCard.faceMid
               opacity: 0.9 * sessionCard.veil
               visible: opacity > 0
             }
@@ -1008,8 +1040,6 @@ FocusScope {
           required property var modelData
           width: content.width
           height: cardBody.implicitHeight + 42
-          border.width: 1
-          border.color: Theme.hairline
 
           Column {
             id: cardBody

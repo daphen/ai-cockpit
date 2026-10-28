@@ -90,8 +90,8 @@ ShellRoot {
           var firstTitle = test.find(first,item => item.text === "every-3790"), firstSummary = test.find(first,item => item.wrapMode === Text.WordWrap)
           test.check(title.y === firstTitle.y && title.height === firstTitle.height && summary.parent.parent.height === firstSummary.parent.parent.height && Math.abs(summary.parent.parent.y - firstSummary.parent.parent.y) < 0.01 && summary.verticalAlignment === Text.AlignTop, "text containers differ or titles are misaligned: " + JSON.stringify([name,title.y,firstTitle.y,title.height,firstTitle.height,summary.parent.parent.height,firstSummary.parent.parent.height,summary.parent.parent.y,firstSummary.parent.parent.y]))
           var inset = test.find(c,item => item.objectName === "sessionInset")
-          test.check(c.color === Theme.bgDim && Math.abs(inset.width - c.width + 32) < 0.01 && c.radius === 18 && inset.radius === 10 && title.y + title.height < inset.y, "frame does not match rail canvas or concentric inset/title geometry")
-          test.check(!test.find(c,item => item.bevelWidth !== undefined) && title.font.pixelSize === 16, "inner card remains or header is not smaller")
+          test.check(test.find(c,item => item.cardRadius === 18) && Math.abs(inset.width - c.width + 32) < 0.01 && c.radius === 18 && inset.radius === 10 && title.y + title.height < inset.y, "card lacks the raised message-card face or concentric inset/title geometry")
+          test.check(!test.find(c,item => item.bevelWidth !== undefined && item.cardRadius !== 18) && title.font.pixelSize === 16, "inner card remains or header is not smaller")
           var status = test.find(c,item => item.objectName === "sessionStatus")
           test.check(Math.abs(status.width - inset.width) < 0.01 && Math.abs(status.y - inset.y) < 0.01 && Math.abs(status.y + status.height + 16 - summary.parent.parent.y) < 0.01, "mesh does not fill the inset above the description")
           test.check(Math.abs(title.x-status.x)<0.01 && Math.abs(summary.parent.parent.x-status.x)<0.01, "header, mesh and description do not share padding")
@@ -167,7 +167,7 @@ ShellRoot {
         test.check(orb.idleBlur > 0 && orb.idleBlur < 1 && Math.abs(orb.idleBlur + orb.motion - 1) < 0.0001, "blur does not clear continuously when activity resumes")
         test.working(false)
         test.check(!dash.activeFocus, "rail did not get focus")
-        test.check(test.card("every-3790").border.color === test.card("every-3789").border.color, "a card remains highlighted while rail is focused")
+        test.check(test.find(test.card("every-3790"),item => item.objectName === "sessionRing").border.color === test.find(test.card("every-3789"),item => item.objectName === "sessionRing").border.color, "a card remains highlighted while rail is focused")
         dash.forceActiveFocus(); input.keyClick(Qt.Key_Tab,Qt.NoModifier,0)
       } else if (test.phase === 6) {
         test.check(test.alpha(test.card("every-3790")) === 0 || !test.card("every-3790").visible, "Sessions remained visible under Tickets")
@@ -205,7 +205,8 @@ ShellRoot {
         input.mouseMove(c,20,20,0,Qt.NoButton,Qt.NoModifier)
       } else if (test.phase === 13) {
         var c = test.card("every-3789")
-        test.check(Math.abs(c.border.color.a - 0.3) < 0.01, "mouse hover did not change the card surface")
+        var ring = test.find(c,item => item.objectName === "sessionRing")
+        test.check(ring && ring.opacity > 0 && Math.abs(ring.border.color.a - 0.3) < 0.01, "mouse hover did not ring the card")
         input.mouseMove(window,1,1,0,Qt.NoButton,Qt.NoModifier)
         input.keyClick(Qt.Key_J,Qt.NoModifier,0)
         var c = test.card("every-3710"), summary = test.find(c,item => item.wrapMode === Text.WordWrap)
@@ -222,10 +223,10 @@ ShellRoot {
         function contrast(a,b) { var x = lum(a), y = lum(b); return (Math.max(x,y) + 0.05) / (Math.min(x,y) + 0.05) }
         Theme.mode = "light"
         var button = test.find(test.find(c,item => item.objectName === "expandSession"),item => item.text === "Collapse")
-        test.check(button && contrast(button.color, Theme.bgDim) >= 4.5, "light-mode button label is unreadable: " + (button && contrast(button.color, Theme.bgDim)))
+        test.check(button && contrast(button.color, c.faceMid) >= 4.5, "light-mode button label is unreadable: " + (button && contrast(button.color, c.faceMid)))
         Theme.mode = "dark"
         var scrim = test.find(c,item => item.objectName === "veilScrim"), kids = c.children
-        test.check(scrim.visible && scrim.color === Theme.bgDim && kids.indexOf(test.find(c,item => item.objectName === "collapsedLayer")) < kids.indexOf(scrim) && kids.indexOf(scrim) < kids.indexOf(layer), "expanded text does not sit on an opaque canvas scrim")
+        test.check(scrim.visible && scrim.color === c.faceMid && kids.indexOf(test.find(c,item => item.objectName === "collapsedLayer")) < kids.indexOf(scrim) && kids.indexOf(scrim) < kids.indexOf(layer), "expanded text does not sit on an opaque canvas scrim")
         test.check((layer.contentHeight > layer.height) === test.find(c,item => item.objectName === "expandedScrollbar").visible, "scrollbar does not track overflow")
         test.check(test.find(c,item => item.objectName === "expandSession").visible, "expanded card lost its Collapse control")
         test.check(layer.contentHeight > layer.height + 60, "fixture does not overflow the expanded card")
