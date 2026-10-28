@@ -4748,7 +4748,9 @@ Item {
           Row {
             id: inlineRow
             anchors { left: parent.left; leftMargin: 2; verticalCenter: parent.verticalCenter }
-            SessionDot { id: pillDot; anchors.verticalCenter: parent.verticalCenter; sid: pill.sid; status: pill.md.status || pill.md.state || ""; size: pill.height - 4 }
+            SessionDot { id: pillDot; anchors.verticalCenter: parent.verticalCenter; sid: pill.sid; status: pill.md.status || pill.md.state || ""; size: pill.height - 4
+              scale: pill.selected || pill.hovered || pill.cursor || orbActive || hasAsk ? 1 : 0.67
+              Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } } }
             Item { width: 7; height: 1 }
             Text {
               anchors.verticalCenter: parent.verticalCenter
