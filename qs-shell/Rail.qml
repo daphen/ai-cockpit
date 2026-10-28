@@ -4229,7 +4229,7 @@ Item {
               clip: true
               implicitHeight: 22
               radius: 11
-              color: modelHover.hovered || rail.modelOpen ? chin.itemHover : "transparent"
+              color: modelHover.hovered || rail.modelOpen ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
               border.width: 1
               border.color: "transparent"
               Behavior on color { ColorAnimation { duration: 140 } }
@@ -4265,7 +4265,7 @@ Item {
               implicitWidth: expanded ? goalRow.implicitWidth + 12 : 30
               implicitHeight: 22
               radius: 11
-              color: expanded ? chin.itemHover : "transparent"
+              color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
               border.width: 1
               border.color: "transparent"
               Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -4303,7 +4303,7 @@ Item {
               implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
               implicitHeight: 22
               radius: 11
-              color: expanded ? chin.itemHover : "transparent"
+              color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
               border.width: 1
               border.color: "transparent"
               Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -4697,12 +4697,13 @@ Item {
           readonly property bool offline: md.offline === true || md.status === "offline"
           readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index
           height: 28; radius: 14
-          width: inlineRow.implicitWidth + 2 + 12
+          width: Math.round(inlineRow.implicitWidth) + 2 + 12
           onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
           readonly property bool lightKey: selected && Theme.mode === "light"
           // Pills slide under a still pointer while re-sorting; hover would flash each one.
           readonly property bool hovered: inlineHover.hovered && !inlineRowItems.reordering
-          color: lightKey ? "transparent" : selected ? chin.itemSelected : hovered || cursor ? chin.itemHover : "transparent"
+          // Rest at a clear copy of the hover colour: fading from transparent black dips through grey.
+          color: lightKey ? Qt.alpha(chin.itemHover, 0) : selected ? chin.itemSelected : hovered || cursor ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
           border.width: cursor ? 1.5 : selected && !lightKey ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
