@@ -4712,18 +4712,11 @@ Item {
             anchors.fill: parent
             visible: pill.lightKey
             radius: pill.radius
-            color: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.14)
+            color: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.16)
             Rectangle {
               anchors { fill: parent; margins: pill.cursor ? 1.5 : 1 }
               radius: pill.radius - anchors.margins
-              gradient: Gradient {
-                GradientStop { position: 0; color: "#FFFFFF" }
-                GradientStop { position: 1; color: "#F5F5F5" }
-              }
-            }
-            Rectangle {
-              anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 10; rightMargin: 10; topMargin: 1 }
-              height: 1; color: "#FFFFFF"
+              color: "#FFFFFF"
             }
           }
           Row {
