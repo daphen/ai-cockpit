@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Effects
 import QtQuick.Controls
+import QtQuick.Controls.Material.impl as MaterialImpl
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -4699,10 +4700,32 @@ Item {
           height: 28; radius: 14
           width: inlineRow.implicitWidth + 2 + 12
           onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
-          color: selected ? chin.itemSelected : inlineHover.hovered || cursor ? chin.itemHover : "transparent"
-          border.width: cursor ? 1.5 : selected ? 1 : 0
+          readonly property bool lightKey: selected && Theme.mode === "light"
+          color: lightKey ? "transparent" : selected ? chin.itemSelected : inlineHover.hovered || cursor ? chin.itemHover : "transparent"
+          border.width: cursor ? 1.5 : selected && !lightKey ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
+          MaterialImpl.BoxShadow {
+            visible: pill.lightKey
+            source: pillKey; offsetX: 0; offsetY: 1; blurRadius: 3; spreadRadius: 0
+            strength: 1; color: Qt.rgba(0, 0, 0, 0.10)
+          }
+          Rectangle {
+            id: pillKey
+            anchors.fill: parent
+            visible: pill.lightKey
+            radius: pill.radius
+            border.width: 1
+            border.color: Qt.alpha(chin.fg, 0.14)
+            gradient: Gradient {
+              GradientStop { position: 0; color: "#FFFFFF" }
+              GradientStop { position: 1; color: "#F5F5F5" }
+            }
+            Rectangle {
+              anchors { left: parent.left; right: parent.right; top: parent.top; leftMargin: 10; rightMargin: 10; topMargin: 1 }
+              height: 1; color: "#FFFFFF"
+            }
+          }
           Row {
             id: inlineRow
             anchors { left: parent.left; leftMargin: 2; verticalCenter: parent.verticalCenter }
