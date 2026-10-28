@@ -3350,6 +3350,27 @@ Item {
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
           Rectangle {
+            id: userFrame
+            anchors.fill: parent
+            visible: turnDel.isUser && !turnDel.isNote && !turnDel.isHandoff && Theme.mode === "light"
+            radius: card.radius
+            color: Qt.alpha(Theme.fg, 0.16)
+            Rectangle {
+              id: userBevel
+              anchors { fill: parent; margins: 1 }
+              radius: userFrame.radius - 1
+              color: "#FFFFFF"
+              Rectangle {
+                anchors { fill: parent; topMargin: 1 }
+                radius: userBevel.radius
+                gradient: Gradient {
+                  GradientStop { position: 0; color: "#FDFDFD" }
+                  GradientStop { position: 1; color: "#F3F3F4" }
+                }
+              }
+            }
+          }
+          Rectangle {
             anchors.fill: parent
             radius: card.radius
             color: turnDel.isHandoff ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.08) : "transparent"
