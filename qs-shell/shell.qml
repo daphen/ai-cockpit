@@ -433,8 +433,8 @@ ShellRoot {
                     fill: Qt.tint(win.ground, viewTab.active ? rail.palette.itemSelected
                          : viewTabHover.hovered ? rail.palette.itemHover
                          : Qt.alpha(rail.palette.fg, 0.06))
-                    edge: viewTab.focusMark ? Theme.orange : rail.palette.fg
-                    strength: viewTab.focusMark ? 2 : viewTab.active ? 1 : viewTabHover.hovered ? 1 : 0.85
+                    edge: rail.palette.fg
+                    strength: viewTab.active || viewTabHover.hovered ? 1 : 0.85
                     Behavior on fill { ColorAnimation { duration: 140 } }
                   }
                   Row {
