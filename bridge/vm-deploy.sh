@@ -81,25 +81,29 @@ fi
 mkdir -p "$bridge_runtime" "$state"
 ln -sfn "$work_socket" "$bridge_runtime/agentd-work.sock"
 
-if [[ -s "$state/bridge.pid" ]]; then
-  old_pid=$(cat "$state/bridge.pid")
-  if kill -0 "$old_pid" 2>/dev/null; then
-    kill "$old_pid"
-    for _ in {1..20}; do
-      kill -0 "$old_pid" 2>/dev/null || break
-      sleep 0.1
-    done
-  fi
-fi
-nohup "$HOME/.local/bin/cockpit-bridge" \
-  -addr 127.0.0.1:8787 \
-  -runtime-dir "$bridge_runtime" \
-  -static-dir "$HOME/.local/share/cockpit-mobile/web" \
-  -token-file "$token_file" \
-  >"$state/bridge.log" 2>&1 </dev/null &
-echo $! >"$state/bridge.pid"
+unit_dir="$HOME/.config/systemd/user"
+mkdir -p "$unit_dir"
+cat >"$unit_dir/cockpit-bridge.service" <<UNIT
+[Unit]
+Description=cockpit-bridge — phone PWA + agentd-work WS gateway
+
+[Service]
+ExecStart=$HOME/.local/bin/cockpit-bridge -addr 127.0.0.1:8787 -runtime-dir $bridge_runtime -static-dir $HOME/.local/share/cockpit-mobile/web -token-file $token_file
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=default.target
+UNIT
+# A hand-started bridge did not survive the VM reboot; linger starts the user unit at boot.
+[[ -s "$state/bridge.pid" ]] && kill "$(cat "$state/bridge.pid")" 2>/dev/null || true
+rm -f "$state/bridge.pid"
+loginctl show-user "$(id -un)" -p Linger | grep -q '=yes' || sudo -n loginctl enable-linger "$(id -un)"
+systemctl --user daemon-reload
+systemctl --user enable cockpit-bridge.service
+systemctl --user restart cockpit-bridge.service
 sleep 0.3
-kill -0 "$(cat "$state/bridge.pid")"
+systemctl --user is-active --quiet cockpit-bridge.service
 "$tailscale_bin" --socket="$tailscale_socket" serve --bg --https=443 http://127.0.0.1:8787 >/dev/null
 
 dns_name=$(
