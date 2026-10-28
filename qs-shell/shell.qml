@@ -445,6 +445,8 @@ ShellRoot {
                          : Qt.alpha(rail.palette.fg, 0.06))
                     edge: rail.palette.fg
                     strength: viewTab.active || viewTabHover.hovered ? 1 : 0.85
+                    lowEdge: viewTab.active ? 0.2 : 0.05
+                    fillTop: viewTab.active ? fill : Qt.tint(fill, Qt.alpha(rail.palette.fg, 0.035))
                     Behavior on fill { ColorAnimation { duration: 140 } }
                   }
                   Row {
@@ -458,6 +460,8 @@ ShellRoot {
                         : Qt.tint(viewPill.fill, Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04))
                       edge: viewPill.edge
                       strength: viewPill.strength * (viewBar.lightMode ? 0.6 : 1.2)
+                      lowEdge: viewTab.active || viewBar.lightMode ? 0.2 : 0.05
+                      fillTop: viewTab.active || viewBar.lightMode ? fill : Qt.tint(fill, Qt.alpha(rail.palette.fg, 0.04))
                       Icon {
                         anchors.centerIn: parent
                         name: viewTab.modelData.icon; width: 13; height: 13
