@@ -426,30 +426,27 @@ ShellRoot {
                   readonly property bool active: viewTabs.current === view
                   readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
-                  Rectangle {
+                  GradientFrame {
                     id: viewPill
                     anchors.fill: parent
                     radius: paneLayout.terminalCornerRadius
-                    color: viewTab.active ? rail.palette.itemSelected
+                    fill: Qt.tint(win.ground, viewTab.active ? rail.palette.itemSelected
                          : viewTabHover.hovered ? rail.palette.itemHover
-                         : Qt.alpha(rail.palette.fg, viewBar.lightMode ? 0.035 : 0.035)
-                    border.width: 1
-                    border.color: viewTab.focusMark ? Qt.alpha(Theme.orange, 0.55)
-                                : viewTab.active ? rail.palette.hairline : rail.palette.softHairline
-                    Behavior on color { ColorAnimation { duration: 140 } }
-                    Behavior on border.color { ColorAnimation { duration: 140 } }
+                         : Qt.alpha(rail.palette.fg, 0.06))
+                    edge: viewTab.focusMark ? Theme.orange : rail.palette.fg
+                    strength: viewTab.focusMark ? 2 : viewTab.active ? 1 : viewTabHover.hovered ? 1 : 0.85
+                    Behavior on fill { ColorAnimation { duration: 140 } }
                   }
                   Row {
                     anchors { left: parent.left; leftMargin: 5; right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
                     spacing: 9
-                    Rectangle {
+                    GradientFrame {
                       id: viewBadge
                       anchors.verticalCenter: parent.verticalCenter
                       width: 22; height: 22; radius: paneLayout.terminalCornerRadius - 3
-                      color: Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04)
-                      border.width: 1
-                      border.color: viewTab.focusMark ? Qt.alpha(Theme.orange, 0.55) : rail.palette.hairline
-                      Behavior on border.color { ColorAnimation { duration: 140 } }
+                      fill: Qt.tint(viewPill.fill, Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04))
+                      edge: viewPill.edge
+                      strength: viewPill.strength * 1.2
                       Icon {
                         anchors.centerIn: parent
                         name: viewTab.modelData.icon; width: 13; height: 13
@@ -476,8 +473,8 @@ ShellRoot {
                         width: Math.min(28, parent.width)
                         gradient: Gradient {
                           orientation: Gradient.Horizontal
-                          GradientStop { position: 0; color: Qt.alpha(Qt.tint(win.ground, viewPill.color), 0) }
-                          GradientStop { position: 1; color: Qt.tint(win.ground, viewPill.color) }
+                          GradientStop { position: 0; color: Qt.alpha(viewPill.fill, 0) }
+                          GradientStop { position: 1; color: viewPill.fill }
                         }
                       }
                     }
