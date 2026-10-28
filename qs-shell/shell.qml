@@ -427,26 +427,13 @@ ShellRoot {
                   readonly property bool active: viewTabs.current === view
                   readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
-                  Rectangle {
-                    id: lightKey
+                  LightKey {
                     anchors.fill: parent
                     visible: viewBar.lightMode
                     radius: paneLayout.terminalCornerRadius
-                    color: Qt.alpha(rail.palette.fg, viewTab.active ? 0.16 : 0.11)
-                    Rectangle {
-                      id: lightBevel
-                      anchors { fill: parent; margins: 1 }
-                      radius: parent.radius - 1
-                      color: "#FFFFFF"
-                      Rectangle {
-                        anchors { fill: parent; topMargin: 1 }
-                        radius: lightBevel.radius
-                        gradient: Gradient {
-                          GradientStop { position: 0; color: viewTab.active ? "#FDFDFD" : viewTabHover.hovered ? "#FBFBFB" : "#F9F9F9" }
-                          GradientStop { position: 1; color: viewTab.active ? "#F5F5F6" : viewTabHover.hovered ? "#F3F3F4" : "#EFEFF0" }
-                        }
-                      }
-                    }
+                    outline: Qt.alpha(rail.palette.fg, viewTab.active ? 0.16 : 0.11)
+                    faceTop: viewTab.active ? "#FDFDFD" : viewTabHover.hovered ? "#FBFBFB" : "#F9F9F9"
+                    faceBottom: viewTab.active ? "#F5F5F6" : viewTabHover.hovered ? "#F3F3F4" : "#EFEFF0"
                   }
                   GradientFrame {
                     id: viewPill

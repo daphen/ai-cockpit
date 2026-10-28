@@ -3349,26 +3349,11 @@ Item {
             Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
-          Rectangle {
-            id: userFrame
+          LightKey {
             anchors.fill: parent
             visible: turnDel.isUser && !turnDel.isNote && !turnDel.isHandoff && Theme.mode === "light"
             radius: card.radius
-            color: Qt.alpha(Theme.fg, 0.16)
-            Rectangle {
-              id: userBevel
-              anchors { fill: parent; margins: 1 }
-              radius: userFrame.radius - 1
-              color: "#FFFFFF"
-              Rectangle {
-                anchors { fill: parent; topMargin: 1 }
-                radius: userBevel.radius
-                gradient: Gradient {
-                  GradientStop { position: 0; color: "#FDFDFD" }
-                  GradientStop { position: 1; color: "#F3F3F4" }
-                }
-              }
-            }
+            outline: Qt.alpha(Theme.fg, 0.16)
           }
           Rectangle {
             anchors.fill: parent
@@ -3716,6 +3701,12 @@ Item {
       faceUpper: faceTop
       faceMid: rail.userCardBottom
       faceBottom: faceMid
+    }
+    LightKey {
+      anchors.fill: parent
+      visible: Theme.mode === "light"
+      radius: chin.radius
+      outline: Qt.alpha(Theme.fg, 0.16)
     }
 
     ColumnLayout {
@@ -4385,11 +4376,20 @@ Item {
         }
         Rectangle {
           anchors.fill: parent
+          visible: Theme.mode !== "light"
           radius: parent.radius
           color: "transparent"
           border.color: rail.insert ? rail.activeRing : Theme.hairline
           border.width: rail.insert ? 1.5 : 1
           Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
+        }
+        LightKey {
+          anchors.fill: parent
+          visible: Theme.mode === "light"
+          radius: parent.radius
+          ring: rail.insert ? 1.5 : 1
+          outline: rail.insert ? rail.activeRing : Qt.alpha(Theme.fg, 0.16)
+          fade: 650
         }
         RowLayout {
           anchors { fill: parent; leftMargin: 12; rightMargin: 52 }
@@ -4660,7 +4660,7 @@ Item {
   component InlineSessions: Item {
       implicitHeight: 28
       height: 28
-      readonly property color inlineFace: Theme.mode === "light" ? rail.userCardBottom : rail.userCardTop
+      readonly property color inlineFace: Theme.mode === "light" ? "#FCFCFC" : rail.userCardTop
       Flickable {
         id: inlineList
         objectName: "sessionTabStrip"
@@ -4730,26 +4730,12 @@ Item {
           border.width: lightKey ? 0 : cursor ? 1.5 : selected ? 1 : 0
           border.color: cursor ? rail.activeRing : chin.hairline
           Behavior on color { ColorAnimation { duration: 140 } }
-          Rectangle {
-            id: pillKey
+          LightKey {
             anchors.fill: parent
             visible: pill.lightKey
             radius: pill.radius
-            color: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.16)
-            Rectangle {
-              id: pillBevel
-              anchors { fill: parent; margins: pill.cursor ? 1.5 : 1 }
-              radius: pill.radius - anchors.margins
-              color: "#FFFFFF"
-              Rectangle {
-                anchors { fill: parent; topMargin: 1 }
-                radius: pillBevel.radius
-                gradient: Gradient {
-                  GradientStop { position: 0; color: "#FDFDFD" }
-                  GradientStop { position: 1; color: "#F3F3F4" }
-                }
-              }
-            }
+            ring: pill.cursor ? 1.5 : 1
+            outline: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.16)
           }
           Row {
             id: inlineRow
