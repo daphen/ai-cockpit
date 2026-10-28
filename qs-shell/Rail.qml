@@ -4820,6 +4820,15 @@ Item {
           GradientStop { position: 1; color: inlineFace }
         }
       }
+      DragHandler {
+        objectName: "sessionTabTouchDrag"
+        target: null
+        acceptedDevices: PointerDevice.TouchScreen
+        yAxis.enabled: false
+        property real startX: 0
+        onActiveChanged: if (active) { inlineReveal.stop(); startX = inlineList.contentX }
+        onTranslationChanged: if (active) inlineList.contentX = Math.max(0, Math.min(inlineList.maxX(), startX - translation.x))
+      }
       NewSessionButton { id: inlineNew; anchors { right: parent.right; verticalCenter: inlineList.verticalCenter } }
   }
 
