@@ -392,6 +392,7 @@ ShellRoot {
           Item {
             id: viewTabs
             objectName: "workspaceViewTabs"
+            z: 1
             width: parent.width
             height: 46
             readonly property string reported: win.dashboardActive ? "dashboard"
@@ -426,15 +427,28 @@ ShellRoot {
                   readonly property bool active: viewTabs.current === view
                   readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
+                  ContrastCard {
+                    anchors.fill: parent
+                    visible: viewBar.lightMode && viewTab.active
+                    cardRadius: paneLayout.terminalCornerRadius
+                    faceTop: rail.userCardTop; faceUpper: faceTop
+                    faceMid: rail.userCardBottom; faceBottom: faceMid
+                    outlineColor: rail.palette.softHairline
+                  }
                   GradientFrame {
                     id: viewPill
                     anchors.fill: parent
+                    visible: !(viewBar.lightMode && viewTab.active)
                     radius: paneLayout.terminalCornerRadius
-                    fill: Qt.tint(win.ground, viewTab.active ? rail.palette.itemSelected
+                    fill: viewBar.lightMode
+                      ? (viewTab.active ? rail.userCardTop : Qt.tint(win.ground, viewTabHover.hovered ? rail.palette.itemHover : "transparent"))
+                      : Qt.tint(win.ground, viewTab.active ? rail.palette.itemSelected
                          : viewTabHover.hovered ? rail.palette.itemHover
                          : Qt.alpha(rail.palette.fg, 0.06))
                     edge: rail.palette.fg
-                    strength: viewTab.active || viewTabHover.hovered ? 1 : 0.85
+                    litFromTop: !viewBar.lightMode
+                    strength: viewBar.lightMode ? (viewTabHover.hovered ? 0.55 : 0.4)
+                      : viewTab.active || viewTabHover.hovered ? 1 : 0.85
                     Behavior on fill { ColorAnimation { duration: 140 } }
                   }
                   Row {
@@ -446,7 +460,8 @@ ShellRoot {
                       width: 22; height: 22; radius: paneLayout.terminalCornerRadius - 3
                       fill: Qt.tint(viewPill.fill, Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04))
                       edge: viewPill.edge
-                      strength: viewPill.strength * 1.2
+                      litFromTop: viewPill.litFromTop
+                      strength: viewBar.lightMode ? 0.4 : viewPill.strength * 1.2
                       Icon {
                         anchors.centerIn: parent
                         name: viewTab.modelData.icon; width: 13; height: 13
