@@ -3334,16 +3334,17 @@ Item {
             anchors.fill: parent
             cardRadius: card.radius
             elevated: !turnDel.isHandoff
-            bevelWidth: turnDel.isHandoff ? 1 : 2
-            faceTop: turnDel.isHandoff ? Theme.surface0 : rail.userCardTop
-            faceUpper: faceTop
-            faceMid: turnDel.isHandoff ? faceTop : rail.userCardBottom
-            faceBottom: faceMid
+            readonly property bool lightKey: Theme.mode === "light" && !turnDel.isHandoff
+            bevelWidth: turnDel.isHandoff || lightKey ? 1 : 2
+            faceTop: turnDel.isHandoff ? Theme.surface0 : lightKey ? "#FDFDFD" : rail.userCardTop
+            faceUpper: lightKey ? "#FCFCFC" : faceTop
+            faceMid: turnDel.isHandoff ? faceTop : lightKey ? "#F8F8F9" : rail.userCardBottom
+            faceBottom: lightKey ? "#F3F3F4" : faceMid
             rimTop: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#FFFFFF" : "#2B2B2B")
-            rimBottom: turnDel.isHandoff ? outlineColor : (Theme.mode === "light" ? "#FFFFFF" : "#222222")
+            rimBottom: turnDel.isHandoff ? outlineColor : lightKey ? "#F3F3F4" : "#222222"
             outlineColor: turnDel.isHandoff
               ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.22)
-              : (Theme.mode === "light" ? "#FFFFFF" : "#282828")
+              : (lightKey ? Qt.alpha(Theme.fg, 0.11) : "#282828")
             Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
             Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
           }
