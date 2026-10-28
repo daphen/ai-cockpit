@@ -7,7 +7,7 @@ Rectangle {
   Behavior on edge { ColorAnimation { duration: 140 } }
   Behavior on strength { NumberAnimation { duration: 140 } }
   gradient: Gradient {
-    GradientStop { position: 0; color: Qt.alpha(frame.edge, 0.46 * frame.strength) }
+    GradientStop { position: 0; color: Qt.alpha(frame.edge, 0.38 * frame.strength) }
     GradientStop { position: 0.5; color: Qt.alpha(frame.edge, 0.15 * frame.strength) }
     GradientStop { position: 1; color: Qt.alpha(frame.edge, 0.2 * frame.strength) }
   }
