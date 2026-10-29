@@ -4684,7 +4684,7 @@ Item {
             Rectangle {
               anchors.centerIn: parent
               width: 24; height: 24; radius: 12
-              color: Qt.rgba(1, 1, 1, 0.12)
+              color: Qt.rgba(1, 1, 1, 0.3)
               border { width: 1.5; color: Qt.rgba(1, 1, 1, 0.75) }
               opacity: sendButton.working ? 1 : 0
               scale: sendButton.working ? 1 : 0.5
