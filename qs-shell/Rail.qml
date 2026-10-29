@@ -4643,11 +4643,11 @@ Item {
             objectName: "contextMeter"
             readonly property var usage: rail.agentd ? rail.agentd.contextUsage(rail.selectedRaw) : null
             readonly property real percent: usage ? Math.max(0, Math.min(100, usage.contextPercent)) : 0
-            readonly property int ribs: 30
+            readonly property int ribs: 24
             readonly property int filled: Math.round(percent / 100 * ribs)
             readonly property color ink: percent >= 90 ? Theme.red : Theme.orange
             visible: usage !== null
-            anchors { right: parent.right; rightMargin: 6; verticalCenter: cornerControls.verticalCenter }
+            anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: contextRow.implicitWidth; height: 22
             Row {
               id: contextRow
@@ -4663,7 +4663,7 @@ Item {
               }
               Row {
                 anchors.verticalCenter: parent.verticalCenter
-                spacing: 2
+                spacing: 3
                 Repeater {
                   model: contextMeter.ribs
                   Rectangle {

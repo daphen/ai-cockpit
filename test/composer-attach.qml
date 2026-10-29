@@ -45,7 +45,7 @@ ShellRoot {
         var meter = test.find(rail, "contextMeter")
         if (!meter || meter.visible) { test.fail("context meter shown before any usage arrived"); return }
         state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:80000,contextWindow:200000,percent:40}}}),0)
-        if (!meter.visible || meter.filled !== 12) { test.fail("context meter does not show 40% as 12 of 30 ribs: " + meter.filled); return }
+        if (!meter.visible || meter.filled !== 10) { test.fail("context meter does not show 40% as 10 of 24 ribs: " + meter.filled); return }
         var mb = meter.mapToItem(rail, 0, 0), fb = test.find(rail, "composerFrame").mapToItem(rail, 0, 0), ab = test.find(rail, "attachPill").mapToItem(rail, 0, 0)
         if (mb.x < fb.x + test.find(rail, "composerFrame").width / 2 || Math.abs(mb.y + meter.height / 2 - (ab.y + test.find(rail, "attachPill").height / 2)) > 1) { test.fail("context meter is not in the toolbar's bottom-right"); return }
         var send = test.find(rail, "composerStatus")
