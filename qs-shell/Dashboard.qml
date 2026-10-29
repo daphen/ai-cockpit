@@ -300,7 +300,7 @@ FocusScope {
 
   Rectangle {
     anchors.fill: parent
-    color: Theme.bg
+    color: Theme.mode === "light" ? Theme.bgDim : Theme.bg
   }
 
   function assetUrl(name) {
