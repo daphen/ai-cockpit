@@ -4688,7 +4688,7 @@ Item {
               color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
               layer.enabled: sendButton.working
-              layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "#000000"; shadowOpacity: 0.55; shadowBlur: 0.5; shadowVerticalOffset: 1; shadowHorizontalOffset: 0 }
+              layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "#000000"; shadowOpacity: 0.9; shadowBlur: 0.25; shadowVerticalOffset: 0.5; shadowHorizontalOffset: 0 }
             }
             Rectangle {
               anchors { right: parent.right; top: parent.top }
