@@ -4743,6 +4743,7 @@ Item {
             visible: pill.lightKey
             radius: pill.radius
             ring: pill.cursor ? 1.5 : 1
+            convex: true
             outline: pill.cursor ? rail.activeRing : Qt.alpha(chin.fg, 0.16)
           }
           Row {

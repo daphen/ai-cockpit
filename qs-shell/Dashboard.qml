@@ -324,6 +324,7 @@ FocusScope {
             LightKey {
               anchors.fill: parent
               visible: dashTab.active && Theme.mode === "light"
+              convex: true
               radius: dashTab.radius
               outline: Qt.alpha(Theme.fg, 0.16)
             }
