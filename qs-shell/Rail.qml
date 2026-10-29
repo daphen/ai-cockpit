@@ -1223,6 +1223,48 @@ Item {
       + "scp " + ssh.substring(4) + " " + JSON.stringify(local) + " "
       + vmuser + "@" + host + ":" + JSON.stringify(rdir) + "/"])
   }
+  readonly property string vmAttachDir: "/home/" + (cockpitEnv("VM_USER") || "david_karlsson_lovable_dev") + "/.cache/cockpit-attach"
+  Process {
+    id: attachProc
+    property bool remote: false
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var files = String(this.text || "").split("\n").filter(f => f.length > 0)
+        if (!files.length) return
+        var refs = files.map(function (f) {
+          var path = attachProc.remote ? rail.vmAttachDir + "/" + f.split("/").pop() : f
+          return "@" + (/\s/.test(path) ? JSON.stringify(path) : path)
+        })
+        composerInput.insert(composerInput.cursorPosition, refs.join(" ") + " ")
+        if (!rail.focused) rail.requestFocus()
+        rail.enterInsert()
+        if (attachProc.remote) rail._pushAttachRemote(files)
+      }
+    }
+  }
+  function attachFiles() {
+    if (attachProc.running) return
+    var chooser = Quickshell.env("HOME") + "/.config/niri/scripts/yazi-file-chooser"
+    var cwd = _sessionCwdOf(selectedRaw)
+    attachProc.remote = pasteViaSsh
+    attachProc.command = ["sh", "-c",
+      '[ -x "$1" ] || { echo "no file chooser at $1" >&2; exit 1; }; o=$(mktemp) || exit 1; ' +
+      '"$1" 1 0 0 "$2" "$o" >/dev/null 2>&1; cat "$o"; rm -f "$o"',
+      "sh", chooser, pasteViaSsh || !cwd ? Quickshell.env("HOME") : cwd + "/"]
+    attachProc.running = true
+  }
+  function _pushAttachRemote(files) {
+    var vmuser = cockpitEnv("VM_USER") || "david_karlsson_lovable_dev"
+    var host = cockpitEnv("VM_HOST")
+             || ((cockpitEnv("VM") || "dev-heidr-2a39") + ".workstation.lovable.net")
+    var ssh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            + " -o ControlMaster=auto -o ControlPath=" + Quickshell.env("XDG_RUNTIME_DIR") + "/heidr-vm-cm"
+            + " -o ControlPersist=600 -o ConnectTimeout=15"
+    Quickshell.execDetached(["sh", "-c",
+      ssh + " " + vmuser + "@" + host + " 'mkdir -p " + JSON.stringify(vmAttachDir) + "' && "
+      + "scp " + ssh.substring(4) + ' "$@" ' + vmuser + "@" + host + ":" + JSON.stringify(vmAttachDir) + "/",
+      "sh"].concat(files))
+  }
   function pasteImage() {
     // One shell pass: detect an image flavour, write it, print the path (or NOIMAGE).
     pasteProc.running = false
@@ -4226,127 +4268,7 @@ Item {
         readonly property real rowHeight: 28
         InlineSessions {
           id: inlineSessions
-          anchors { left: parent.left; right: cornerControls.left; rightMargin: 10; top: parent.top }
-        }
-        Row {
-          id: cornerControls
-          anchors { right: parent.right; top: parent.top; topMargin: Math.max(0, (composerContext.rowHeight - height) / 2) }
-          spacing: 2
-            Rectangle {
-              id: modelPill
-              anchors.verticalCenter: parent.verticalCenter
-              visible: rail.selectedModelLabel.length > 0
-              readonly property color tint: chin.muted
-              readonly property bool expanded: rail.onSteamDeck || modelHover.hovered || rail.modelOpen
-              implicitWidth: expanded ? modelRow.implicitWidth + 12 : 30
-              Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              clip: true
-              implicitHeight: 22
-              radius: 11
-              color: modelHover.hovered || rail.modelOpen ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
-              border.width: 1
-              border.color: "transparent"
-              Behavior on color { ColorAnimation { duration: 140 } }
-              Behavior on border.color { ColorAnimation { duration: 140 } }
-              Row {
-                id: modelRow
-                anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
-                spacing: 5
-                Icon {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: 16; height: 16
-                  name: "bolt-lightning"
-                  color: modelPill.tint
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: rail.selectedModelLabel
-                  visible: modelPill.expanded
-                  color: modelPill.tint
-                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
-                }
-              }
-              HoverHandler { id: modelHover }
-              TapHandler { onTapped: rail.toggleModelPicker() }
-            }
-            Rectangle {
-              id: goalPill
-              anchors.verticalCenter: parent.verticalCenter
-              visible: !rail.onSteamDeck && (rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator)
-              readonly property bool armed: rail.selectedGoal.length > 0
-              readonly property color tint: armed ? Theme.green : Theme.orange
-              readonly property bool expanded: goalHover.hovered
-              implicitWidth: expanded ? goalRow.implicitWidth + 12 : 30
-              implicitHeight: 22
-              radius: 11
-              color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
-              border.width: 1
-              border.color: "transparent"
-              Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              Behavior on color { ColorAnimation { duration: 140 } }
-              Behavior on border.color { ColorAnimation { duration: 140 } }
-              clip: true
-              Row {
-                id: goalRow
-                anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
-                spacing: 5
-                Icon {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: 18; height: 18
-                  name: "target"
-                  color: goalPill.tint
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: goalPill.expanded
-                  text: goalPill.armed ? "RE-ARM" : "SET GOAL"
-                  color: goalPill.tint
-                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
-                }
-              }
-              HoverHandler { id: goalHover }
-              TapHandler {
-                onTapped: rail.prefillComposer(goalPill.armed ? "/goal " + rail.selectedGoal : "/goal ")
-              }
-            }
-            Rectangle {
-              id: scopeSwitch
-              anchors.verticalCenter: parent.verticalCenter
-              readonly property color tint: rail.scopeMode === "work" ? rail.skyAccent : Theme.orange
-              readonly property bool expanded: scopeHover.hovered
-              implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
-              implicitHeight: 22
-              radius: 11
-              color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
-              border.width: 1
-              border.color: "transparent"
-              Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-              Behavior on color { ColorAnimation { duration: 140 } }
-              Behavior on border.color { ColorAnimation { duration: 140 } }
-              clip: true
-              Row {
-                id: scopeRow
-                anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
-                spacing: 5
-                Icon {
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: 18; height: 18
-                  name: "toggle-3"
-                  color: scopeSwitch.tint
-                }
-                Text {
-                  anchors.verticalCenter: parent.verticalCenter
-                  visible: scopeSwitch.expanded
-                  text: "SWITCH TO " + (rail.scopeMode === "work" ? "PERSONAL" : "WORK")
-                  color: scopeSwitch.tint
-                  font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
-                }
-              }
-              HoverHandler { id: scopeHover }
-              TapHandler {
-                onTapped: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
-              }
-            }
+          anchors { left: parent.left; right: parent.right; top: parent.top }
         }
       }
 
@@ -4361,8 +4283,9 @@ Item {
         visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
         // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
         // Flickable scrolls the caret into view.
-        implicitHeight: Math.max(52, Math.min(composerInput.implicitHeight + 30, 94))
-        radius: Math.min(height / 2, 26)   // pill at one line, rounded card when grown
+        readonly property real toolbarHeight: 40
+        implicitHeight: Math.min(composerInput.implicitHeight, 66) + 20 + toolbarHeight
+        radius: 20
         color: "transparent"
         border.width: 0
         ContrastCard {
@@ -4392,24 +4315,12 @@ Item {
           fade: 650
         }
         RowLayout {
-          anchors { fill: parent; leftMargin: 12; rightMargin: 52 }
+          anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 16; rightMargin: 16; bottomMargin: parent.toolbarHeight }
           spacing: 8
-          Icon {
-            name: "chevron-right"; width: 14; height: 14
-            // Rides the outline exactly (same hue, same glide) so prompt + frame
-            // read as one piece of chrome.
-            color: rail.insert ? rail.activeRing : chin.hairline
-            Behavior on color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
-            // Centered on the FIRST text line, derived from the real line height
-            // (cursorRectangle) instead of a hand-tuned constant — the guess drifted
-            // off-center the moment the TextArea's metrics differed from TextInput's.
-            Layout.alignment: Qt.AlignTop
-            Layout.topMargin: composerFlick.Layout.topMargin + Math.max(0, (composerInput.cursorRectangle.height - height) / 2)
-          }
           Flickable {
             id: composerFlick
             Layout.fillWidth: true; Layout.fillHeight: true
-            Layout.topMargin: 15; Layout.bottomMargin: 15
+            Layout.topMargin: 14; Layout.bottomMargin: 6
             contentHeight: composerInput.implicitHeight; clip: true
             boundsBehavior: Flickable.StopAtBounds
             // keep the caret in view once the text grows past the 3-line cap
@@ -4582,26 +4493,209 @@ Item {
           }
           }
         }
-        // Concentric with the pill's one-line end cap: 7px clear of the frame on all sides.
         Item {
-          objectName: "composerStatus"
-          anchors { right: parent.right; rightMargin: 7; top: parent.top; topMargin: 7 }
-          width: 38; height: 38
-          readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
-          readonly property bool asking: !!rail.pendingAsk
-          ThinkingOrb {
-            anchors.fill: parent
-            visible: !parent.asking && parent.colors.length > 0
-            running: visible
-            activityColors: parent.colors
-            glow: activityColors.length ? activityColors[0] : rail.actionGlow(rail.featured.rawName)
-            seedKey: rail.featured.rawName
+          objectName: "composerToolbar"
+          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 6; rightMargin: 6; bottomMargin: 4 }
+          height: parent.toolbarHeight - 4
+          Row {
+            id: cornerControls
+            anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+            spacing: 2
+              Rectangle {
+                id: attachPill
+                objectName: "attachPill"
+                anchors.verticalCenter: parent.verticalCenter
+                readonly property color tint: chin.muted
+                readonly property bool expanded: attachHover.hovered || attachProc.running
+                implicitWidth: expanded ? attachRow.implicitWidth + 12 : 30
+                implicitHeight: 22
+                radius: 11
+                color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on color { ColorAnimation { duration: 140 } }
+                clip: true
+                Row {
+                  id: attachRow
+                  anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                  spacing: 5
+                  Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 16; height: 16
+                    name: "paperclip"
+                    color: attachPill.tint
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: attachPill.expanded
+                    text: "ATTACH"
+                    color: attachPill.tint
+                    font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+                  }
+                }
+                HoverHandler { id: attachHover }
+                TapHandler { onTapped: rail.attachFiles() }
+              }
+              Rectangle {
+                id: modelPill
+                anchors.verticalCenter: parent.verticalCenter
+                visible: rail.selectedModelLabel.length > 0
+                readonly property color tint: chin.muted
+                readonly property bool expanded: rail.onSteamDeck || modelHover.hovered || rail.modelOpen
+                implicitWidth: expanded ? modelRow.implicitWidth + 12 : 30
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                clip: true
+                implicitHeight: 22
+                radius: 11
+                color: modelHover.hovered || rail.modelOpen ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
+                border.width: 1
+                border.color: "transparent"
+                Behavior on color { ColorAnimation { duration: 140 } }
+                Behavior on border.color { ColorAnimation { duration: 140 } }
+                Row {
+                  id: modelRow
+                  anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                  spacing: 5
+                  Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 16; height: 16
+                    name: "bolt-lightning"
+                    color: modelPill.tint
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: rail.selectedModelLabel
+                    visible: modelPill.expanded
+                    color: modelPill.tint
+                    font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+                  }
+                }
+                HoverHandler { id: modelHover }
+                TapHandler { onTapped: rail.toggleModelPicker() }
+              }
+              Rectangle {
+                id: goalPill
+                anchors.verticalCenter: parent.verticalCenter
+                visible: !rail.onSteamDeck && (rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator)
+                readonly property bool armed: rail.selectedGoal.length > 0
+                readonly property color tint: armed ? Theme.green : Theme.orange
+                readonly property bool expanded: goalHover.hovered
+                implicitWidth: expanded ? goalRow.implicitWidth + 12 : 30
+                implicitHeight: 22
+                radius: 11
+                color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
+                border.width: 1
+                border.color: "transparent"
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on color { ColorAnimation { duration: 140 } }
+                Behavior on border.color { ColorAnimation { duration: 140 } }
+                clip: true
+                Row {
+                  id: goalRow
+                  anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                  spacing: 5
+                  Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 18; height: 18
+                    name: "target"
+                    color: goalPill.tint
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: goalPill.expanded
+                    text: goalPill.armed ? "RE-ARM" : "SET GOAL"
+                    color: goalPill.tint
+                    font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+                  }
+                }
+                HoverHandler { id: goalHover }
+                TapHandler {
+                  onTapped: rail.prefillComposer(goalPill.armed ? "/goal " + rail.selectedGoal : "/goal ")
+                }
+              }
+              Rectangle {
+                id: scopeSwitch
+                anchors.verticalCenter: parent.verticalCenter
+                readonly property color tint: rail.scopeMode === "work" ? rail.skyAccent : Theme.orange
+                readonly property bool expanded: scopeHover.hovered
+                implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
+                implicitHeight: 22
+                radius: 11
+                color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
+                border.width: 1
+                border.color: "transparent"
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on color { ColorAnimation { duration: 140 } }
+                Behavior on border.color { ColorAnimation { duration: 140 } }
+                clip: true
+                Row {
+                  id: scopeRow
+                  anchors { left: parent.left; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                  spacing: 5
+                  Icon {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 18; height: 18
+                    name: "toggle-3"
+                    color: scopeSwitch.tint
+                  }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: scopeSwitch.expanded
+                    text: "SWITCH TO " + (rail.scopeMode === "work" ? "PERSONAL" : "WORK")
+                    color: scopeSwitch.tint
+                    font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+                  }
+                }
+                HoverHandler { id: scopeHover }
+                TapHandler {
+                  onTapped: rail.requestScopeMode(rail.scopeMode === "work" ? "personal" : "work")
+                }
+              }
           }
-          Rectangle {
-            anchors.centerIn: parent
-            visible: parent.asking || parent.colors.length === 0
-            width: 10; height: 10; radius: 5
-            color: parent.asking ? Theme.orange : rail.dotColor(rail.featured.status)
+          Item {
+            id: sendButton
+            objectName: "composerStatus"
+            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            width: 32; height: 32
+            readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
+            readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")
+            readonly property bool ready: composerInput.text.trim().length > 0
+            ThinkingOrb {
+              anchors.fill: parent
+              opacity: sendButton.working ? 1 : 0
+              scale: sendButton.working ? 1 : 0.6
+              visible: opacity > 0
+              running: visible
+              activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
+              glow: activityColors[0]
+              seedKey: rail.featured.rawName
+              Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+              Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
+            }
+            Rectangle {
+              anchors.fill: parent
+              radius: width / 2
+              opacity: sendButton.working ? 0 : 1
+              scale: sendButton.working ? 1.15 : 1
+              color: sendButton.ready ? Theme.fg : (sendHover.hovered ? chin.itemHover : Qt.alpha(Theme.fg, 0.08))
+              Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+              Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
+              Behavior on color { ColorAnimation { duration: 160 } }
+            }
+            Icon {
+              anchors.centerIn: parent
+              width: 16; height: 16
+              name: "paper-plane-2"
+              color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : chin.muted
+              Behavior on color { ColorAnimation { duration: 200 } }
+            }
+            Rectangle {
+              anchors { right: parent.right; top: parent.top }
+              visible: !!rail.pendingAsk
+              width: 9; height: 9; radius: 4.5
+              color: Theme.orange
+            }
+            HoverHandler { id: sendHover; cursorShape: Qt.PointingHandCursor }
+            TapHandler { onTapped: if (sendButton.ready) composerInput.sendNow() }
           }
         }
       }

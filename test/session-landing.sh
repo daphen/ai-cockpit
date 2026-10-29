@@ -27,6 +27,7 @@ cleanup() {
 trap cleanup EXIT
 cp qs-shell/*.qml "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
+[[ "${1:-}" != "test/composer-attach.qml" ]] || cp test/fake-chooser.sh "$tmp/"
 mkdir -p "$tmp/home"
 if [[ "${1:-}" == "test/private-font.qml" ]]; then
   mkdir -p "$tmp/home/.local/share"
