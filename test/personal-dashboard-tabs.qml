@@ -27,6 +27,7 @@ ShellRoot {
       if (stage === 0) {
         if (String(dash.tabs) !== "sessions,changes,tests") test.fail("tabs were " + dash.tabs)
         if (!dash.showSessions || dash.workers.length !== 2) test.fail("selected private session did not show every session card")
+        if (dash.ticketState("nixos").label !== "~/nixos") test.fail("private card status was " + dash.ticketState("nixos").label)
         dash.dispatch("tab:changes")
         if (String(test.requested) !== "tab:changes") test.fail("changes tab did not ask Neovim for the changes view")
         if (!dash.showSessions) test.fail("showed the plan view under the Changes tab before Neovim answered")

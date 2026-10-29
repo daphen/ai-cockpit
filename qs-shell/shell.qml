@@ -49,7 +49,7 @@ ShellRoot {
     }
     TicketStatuses {
       id: ticketStatuses
-      sessions: dashboard.workers
+      sessions: dashboard.personalHome ? [] : dashboard.workers
       enabled: win.dashboardActive && dashboard.showSessions
     }
     readonly property string runtimeDir: Quickshell.env("XDG_RUNTIME_DIR")
