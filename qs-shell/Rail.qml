@@ -4283,24 +4283,27 @@ Item {
         visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
         // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
         // Flickable scrolls the caret into view.
-        readonly property real toolbarHeight: 45
-        implicitHeight: Math.min(composerInput.implicitHeight, 66) + 20 + toolbarHeight
+        readonly property real toolbarHeight: 34
+        readonly property real textHeight: Math.min(composerInput.implicitHeight, 66)
+        implicitHeight: inputFill.y + inputFill.height + toolbarHeight
         radius: 26
         color: "transparent"
         border.width: 0
         Rectangle {
-          anchors { fill: parent; leftMargin: 0; rightMargin: -6; topMargin: 4; bottomMargin: parent.toolbarHeight - 4 }
-          radius: 8
+          id: inputFill
+          anchors { left: parent.left; right: parent.right; rightMargin: -6 }
+          y: 4; height: parent.textHeight + 30
+          radius: Math.min(height / 2, 24)
           color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
           border.width: 0
         }
         RowLayout {
-          anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 12; rightMargin: 6; bottomMargin: parent.toolbarHeight }
+          anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
+          y: inputFill.y + 15; height: parent.textHeight
           spacing: 8
           Flickable {
             id: composerFlick
             Layout.fillWidth: true; Layout.fillHeight: true
-            Layout.topMargin: 14; Layout.bottomMargin: 6
             contentHeight: composerInput.implicitHeight; clip: true
             boundsBehavior: Flickable.StopAtBounds
             // keep the caret in view once the text grows past the 3-line cap
@@ -4636,7 +4639,8 @@ Item {
           Item {
             id: sendButton
             objectName: "composerStatus"
-            anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+            anchors { right: parent.right; rightMargin: 6 }
+            y: inputFill.y + (inputFill.height - height) / 2 - parent.y
             width: 38; height: 38
             readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
             readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")
