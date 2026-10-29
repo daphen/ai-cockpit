@@ -4645,6 +4645,9 @@ Item {
             readonly property int ribs: 24
             readonly property int filled: Math.round(percent / 100 * ribs)
             readonly property color ink: percent >= 90 ? Theme.red : Theme.orange
+            // Pi's default compaction reserve; no settings file overrides it.
+            readonly property real compactAt: usage && usage.contextWindow ? usage.contextWindow - 16384 : 0
+            readonly property int compactRib: compactAt ? Math.floor(compactAt / usage.contextWindow * ribs) : ribs
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: contextRow.implicitWidth; height: 22
@@ -4656,7 +4659,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: contextHover.hovered
                 text: "CONTEXT " + Math.round(contextMeter.percent) + "%" + (contextMeter.usage && contextMeter.usage.contextWindow
-                      ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K" : "")
+                      ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K · compacts at " + Math.round(contextMeter.compactAt / 1000) + "K" : "")
                 color: contextMeter.ink
                 font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
               }
@@ -4667,7 +4670,10 @@ Item {
                   model: contextMeter.ribs
                   Rectangle {
                     width: 3; height: 20; radius: 1
-                    color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.12 : 0.2)
+                    objectName: index >= contextMeter.compactRib ? "compactRib" : ""
+                    color: index < contextMeter.filled ? (index >= contextMeter.compactRib ? Theme.red : contextMeter.ink)
+                         : index >= contextMeter.compactRib ? Qt.alpha(Theme.red, Theme.mode === "light" ? 0.3 : 0.4)
+                         : Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.12 : 0.2)
                     Behavior on color { ColorAnimation { duration: 200 } }
                   }
                 }
