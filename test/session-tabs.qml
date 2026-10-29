@@ -66,7 +66,7 @@ ShellRoot {
         var frame = find(rail, "composerFrame")
         test.check(label.visible && label.text === "Tab strip task" && label.mapToItem(frame, 0, 0).y + label.height <= 0, "task line is not above the composer input")
         var status = find(rail, "composerStatus"), sp = status.mapToItem(frame, 0, 0)
-        test.check(status.visible && sp.y >= 0 && sp.x + status.width <= frame.width && sp.x > frame.width / 2, "session status is not inside the input on the right")
+        test.check(status.visible && sp.y >= 0 && sp.x + status.width <= frame.width + 8 && sp.x > frame.width / 2, "session status is not in the composer's bottom-right corner")
         var parentOrb = find(find(strip, "sessionTab", "worker-2"), "rootActivityOrb")
         test.check(parentOrb && parentOrb.running && parentOrb.visible, "subagent activity did not fold into its parent's tab")
         var idleOrb = find(find(strip, "sessionTab", "worker-9"), "rootActivityOrb")

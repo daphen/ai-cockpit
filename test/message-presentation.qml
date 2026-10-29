@@ -186,13 +186,9 @@ ShellRoot {
         test.check(test.find(human.parent, item => item.name === "paper-plane-2"), "human lacks prompt icon")
         var humanFace = test.find(human.parent.parent.parent.parent, item => item.faceTop !== undefined)
         test.check(humanFace && humanFace.elevated, "human card lost its distinct surface")
-        var composer = test.find(rail, item => item.objectName === "composerFrame")
-        var composerFace = test.find(composer, item => item.faceTop !== undefined)
         var pane = test.find(rail, item => item.objectName === "chinContent").parent
         var paneFace = test.find(pane, item => item.faceTop !== undefined)
-        test.check(composerFace && paneFace && Qt.colorEqual(composerFace.faceTop, humanFace.faceTop)
-                   && Qt.colorEqual(composerFace.faceBottom, humanFace.faceBottom)
-                   && Qt.colorEqual(paneFace.faceTop, humanFace.faceTop)
+        test.check(paneFace && Qt.colorEqual(paneFace.faceTop, humanFace.faceTop)
                    && Qt.colorEqual(paneFace.faceBottom, humanFace.faceBottom), "composer surfaces do not match human cards")
         var humanCard = human.parent.parent.parent.parent
         var reportCard = test.label("From css-map").parent.parent.parent.parent

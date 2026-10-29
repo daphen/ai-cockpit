@@ -58,12 +58,12 @@ ShellRoot {
       } else if (test.phase === 1) {
         if (++test.settleTicks < 3) return   // a session switch fetches and builds once the roster collapse ends
         check(selected(rail) > 0, "fixture has no initial rail selection")
-        check(frame().children.some(item => item.visible && item.border && item.border.width === 1 && item.border.color.a === 0 && item.color.a > 0), "unfocused dark composer should be a borderless tinted field")
+        check(!frame().children.some(item => item.visible && item.border && item.border.width > 0 && item.border.color.a > 0), "composer input should have no outline")
         click(composer(), 20, composer().height / 2)
       } else if (test.phase === 2) test.typing()
       else if (test.phase === 4) {
         test.typing()
-        check(frame().children.some(item => item.border && item.visible && item.border && item.border.color.a > 0.2), "focused composer lacks its active outline")
+        check(!frame().children.some(item => item.visible && item.border && item.border.width > 0 && item.border.color.a > 0), "focused composer input should stay outline-free")
         input.keyClick(Qt.Key_X, Qt.NoModifier, 0)
         var article = find(rail, item => item.turn && item.turn.kind === "turn")
         var card = find(article, item => item.radius === 18 && item.border)

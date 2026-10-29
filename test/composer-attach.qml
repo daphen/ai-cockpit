@@ -29,9 +29,9 @@ ShellRoot {
         var frame = test.find(rail, "composerFrame"), bar = test.find(rail, "composerToolbar"), attach = test.find(rail, "attachPill"), send = test.find(rail, "composerStatus")
         if (!frame || !bar || !attach || !send) { test.fail("composer toolbar missing"); return }
         var f = frame.mapToItem(rail, 0, 0), a = attach.mapToItem(rail, 0, 0), b = send.mapToItem(rail, 0, 0)
-        if (a.y < f.y + frame.height / 2 || a.y + attach.height > f.y + frame.height) { test.fail("attach is not in the input's bottom row"); return }
+        if (a.y < f.y + frame.height / 2 || a.y + attach.height > f.y + frame.height + 2) { test.fail("attach is not in the input's bottom row"); return }
         if (a.x > f.x + 24) { test.fail("toolbar is not in the left corner: attach at x=" + (a.x - f.x)); return }
-        if (b.x + send.width < f.x + frame.width - 16 || b.y + send.height / 2 < f.y + frame.height / 2 || b.y + send.height > f.y + frame.height - 6) { test.fail("send button is not in the bottom-right corner"); return }
+        if (b.x + send.width < f.x + frame.width - 16 || b.y + send.height / 2 < f.y + frame.height / 2 || b.y + send.height > f.y + frame.height + 2) { test.fail("send button is not in the bottom-right corner"); return }
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "streaming", scope: "personal" }]
         if (!send.working) { test.fail("send button did not become the orb while the agent works"); return }
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "idle", scope: "personal" }]

@@ -4288,36 +4288,8 @@ Item {
         radius: 26
         color: "transparent"
         border.width: 0
-        ContrastCard {
-          anchors.fill: parent
-          cardRadius: parent.radius
-          elevated: false
-          faceTop: Theme.mode === "light" ? rail.userCardBottom : rail.userCardTop
-          faceUpper: faceTop
-          faceMid: rail.userCardBottom
-          faceBottom: faceMid
-        }
-        Rectangle {
-          anchors.fill: parent
-          visible: Theme.mode !== "light"
-          radius: parent.radius
-          color: Qt.alpha(Theme.fg, 0.035)
-          border.color: rail.insert ? Qt.alpha(Theme.fg, 0.3) : "transparent"
-          border.width: 1
-          Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
-        }
-        LightKey {
-          anchors.fill: parent
-          visible: Theme.mode === "light"
-          radius: parent.radius
-          ring: 1
-          outline: Qt.alpha(Theme.fg, rail.insert ? 0.3 : 0)
-          faceTop: Qt.alpha(Theme.fg, 0.035)
-          faceBottom: Qt.alpha(Theme.fg, 0.05)
-          fade: 650
-        }
         RowLayout {
-          anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 16; rightMargin: 16; bottomMargin: parent.toolbarHeight }
+          anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 6; rightMargin: 6; bottomMargin: parent.toolbarHeight }
           spacing: 8
           Flickable {
             id: composerFlick
@@ -4497,7 +4469,7 @@ Item {
         }
         Item {
           objectName: "composerToolbar"
-          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 6; rightMargin: 7; bottomMargin: 7 }
+          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: -4; rightMargin: -6; bottomMargin: -1 }
           height: parent.toolbarHeight - 7
           Row {
             id: cornerControls
