@@ -1108,7 +1108,7 @@ Item {
       return
     }
     if (t === "response" && (m.command === "prompt" || m.command === "steer") && String(m.id || "").indexOf("cockpit-send:") === 0) {
-      _echoDelivery(m.session, m.id, m.success ? "accepted" : "failed")
+      _echoDelivery(m.session, m.id, !m.success ? "failed" : (m.data || {}).disposition === "handled" ? "handled" : "accepted")
       if (!m.success) {
         _clearPending(m.session)
         _steerPending[m.session] = (_steerPending[m.session] || []).filter(entry => entry.id !== m.id)
@@ -1582,6 +1582,7 @@ Item {
         // literal text), so the echo never matched and re-appended forever.
         var sk = qt.match(/^\/(?:skill:)?([\w-]+)\b/)
         if (sk && joined.indexOf('<skill name="' + sk[1] + '"') >= 0) continue
+        if (qe.delivery === "handled") continue          // extension command: pi records nothing
         var insertAt = feeds[esid].length
         if (qe.beforeMid) {
           for (var bi = 0; bi < feeds[esid].length; bi++)

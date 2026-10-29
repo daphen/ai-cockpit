@@ -3488,11 +3488,11 @@ Item {
               Item {
                 objectName: "delivery-status"
                 readonly property string delivery: turnDel.localDelivery
-                visible: delivery === "pending" || delivery === "accepted"
+                visible: delivery === "pending" || delivery === "accepted" || delivery === "handled"
                 anchors { right: parent.right; verticalCenter: parent.verticalCenter }
                 width: 14; height: 14
                 Spinner { anchors.centerIn: parent; visible: parent.delivery === "pending"; running: visible; color: turnDel.cardMutedColor; dotSize: 1.6 }
-                Icon { anchors.fill: parent; visible: parent.delivery === "accepted"; name: "check"; color: turnDel.cardMutedColor }
+                Icon { anchors.fill: parent; visible: parent.delivery === "accepted" || parent.delivery === "handled"; name: "check"; color: turnDel.cardMutedColor }
               }
             }
 

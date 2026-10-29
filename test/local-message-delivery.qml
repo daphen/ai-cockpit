@@ -94,7 +94,15 @@ ShellRoot {
       } else if (test.phase === 8) {
         test.online = true; test.click("Resend")
       } else if (test.phase === 9) {
+        test.check(!!test.row(test.attachmentMessage),"resent attachment message is missing")
         test.check(test.sent.filter(item => item.message === test.attachmentMessage).length === 1,"resend altered or duplicated attachment references or selected code")
+        state.submit("worker","/jev-pruning status")
+        var command = test.sent[test.sent.length - 1]
+        test.event({type:"response",command:"prompt",id:command.id,session:"worker",success:true,data:{disposition:"handled"}})
+        test.check(state.feedFor("worker").some(item => item.text === "/jev-pruning status" && item.delivery === "handled"),"handled command lacks its sent status")
+        test.history("Real history")
+      } else if (test.phase === 10) {
+        test.check(!state.feedFor("worker").some(item => item.text === "/jev-pruning status"),"handled extension command was re-appended after a history rebuild")
         console.log("PASS: not-delivered tag, discard and resend clicks, quiet sent status; attachment and selected-code preservation, Pi and daemon rejections, delayed acceptance, confirmed history and agent isolation")
         Qt.quit()
       }
