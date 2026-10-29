@@ -4668,6 +4668,8 @@ Item {
               activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
               glow: activityColors[0]
               seedKey: rail.featured.rawName
+              layer.enabled: true
+              layer.effect: MultiEffect { blurEnabled: true; blur: 0.6; blurMax: 24; autoPaddingEnabled: false }
               Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
             }
@@ -4683,8 +4685,8 @@ Item {
             }
             Rectangle {
               anchors.centerIn: parent
-              width: 24; height: 24; radius: 12
-              color: Qt.rgba(1, 1, 1, 0.6)
+              width: parent.width; height: parent.height; radius: width / 2
+              color: Qt.rgba(1, 1, 1, 0.45)
               border { width: 1.5; color: Qt.rgba(1, 1, 1, 0.9) }
               opacity: sendButton.working ? 1 : 0
               scale: sendButton.working ? 1 : 0.5
@@ -4695,7 +4697,7 @@ Item {
               anchors.centerIn: parent
               // The glyph's mass sits top-right; nudge it to the optical centre.
               anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
-              width: sendButton.working ? 15 : 18; height: width
+              width: 18; height: width
               Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
               name: "paper-plane-2"
               color: sendButton.working ? "#111111" : sendButton.ready ? Theme.bg : chin.muted
