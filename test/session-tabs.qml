@@ -61,6 +61,14 @@ ShellRoot {
         test.check(rail.rSize === 11 && all.length >= 4, "tabs must list every root session and no subagent: " + rail.rSize)
         test.check(!find(strip, "sessionTab", "helper"), "subagent got its own tab")
         test.check(find(strip, "sessionTab", "lovable").selected, "selected session lost its tab")
+        for (var mode of ["light", "dark"]) {
+          Theme.mode = mode
+          for (var sid of ["lovable", "worker-0"]) {
+            var offlineTab = find(strip, "sessionTab", sid)
+            test.check(offlineTab.offline && find(offlineTab, "sessionTabLabel").color === Theme.red, "disconnected tab label is not red in " + mode)
+            test.check(find(offlineTab, "sessionTabRemoteIcon").name === "cloud--outline-thin--18", "disconnected tab retains the crossed-lightning icon")
+          }
+        }
         test.check(strip.contentWidth > strip.width + 1, "crowded strip does not overflow into a scroll")
         test.check(test.inView("lovable"), "selected tab is outside the strip viewport")
         var frame = find(rail, "composerFrame")
@@ -114,7 +122,13 @@ ShellRoot {
         test.check(rail.cur === rail.rSize - 1, "h on the first tab did not wrap to the last")
       } else if (test.phase === 6) {
         test.check(test.inView(rail.rosterList[rail.rSize - 1].rawName || rail.rosterList[rail.rSize - 1].name), "wrapped-to last tab is not in view")
-        console.log("PASS: root-only tabs overflow into a scroll, keep the selected tab in view, fold subagent activity, and show the task line only when set, and h/l wrap around the ends")
+        state.sessions = state.sessions.map(s => Object.assign({}, s, {offline:false, status:"idle"}))
+        rail.jumpToSession("lovable")
+      } else if (test.phase === 7) {
+        var onlineTab = find(strip, "sessionTab", "lovable")
+        test.check(!onlineTab.offline && find(onlineTab, "sessionTabLabel").color !== Theme.red, "reconnected tab label stays red")
+        test.check(find(onlineTab, "sessionTabRemoteIcon").name === "cloud--outline-thin--18", "remote cloud indicator changed")
+        console.log("PASS: root-only scrollable tabs, activity and navigation, red disconnected labels in both themes, no offline icon, and normal labels after reconnect")
         Qt.quit()
       }
       test.phase++

@@ -4856,7 +4856,7 @@ Item {
           readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index
           height: 28; radius: 14
           width: Math.round(inlineRow.implicitWidth) + 2 + 12
-          onWidthChanged: if (selected) Qt.callLater(inlineList.reveal)
+          onWidthChanged: if (selected || cursor) Qt.callLater(inlineList.reveal)
           readonly property bool lightKey: selected && Theme.mode === "light"
           readonly property bool darkKey: selected && !cursor && Theme.mode !== "light"
           // Pills slide under a still pointer while re-sorting; hover would flash each one.
@@ -4888,15 +4888,15 @@ Item {
               Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } } }
             Item { width: 7; height: 1 }
             Text {
+              objectName: "sessionTabLabel"
               anchors.verticalCenter: parent.verticalCenter
               text: pill.md.name
-              color: pill.selected || pill.cursor || pill.hovered ? chin.fg : chin.muted
+              color: pill.offline ? Theme.red : pill.selected || pill.cursor || pill.hovered ? chin.fg : chin.muted
               font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
               font.weight: pill.selected ? 600 : 400
             }
-            // Offline always shows; the remote cloud only while hovered or under the keyboard cursor.
             Item {
-              readonly property bool shown: pill.offline || (pill.md.remote === true && (inlineHover.hovered || pill.cursor))
+              readonly property bool shown: pill.md.remote === true && (inlineHover.hovered || pill.cursor)
               anchors.verticalCenter: parent.verticalCenter
               visible: width > 0.5
               width: shown ? 4 + pillDot.size : 0; height: pillDot.size
@@ -4907,8 +4907,9 @@ Item {
               Icon {
                 anchors.right: parent.right
                 width: pillDot.size; height: pillDot.size
-                name: pill.offline ? "bolt-slash" : "cloud--outline-thin--18"
-                color: pill.offline ? Theme.red : rail.skyAccent
+                objectName: "sessionTabRemoteIcon"
+                name: "cloud--outline-thin--18"
+                color: rail.skyAccent
               }
             }
             Text {
