@@ -1236,9 +1236,9 @@ FocusScope {
   }
 
   Image {
-    anchors { right: parent.right; bottom: parent.bottom; margins: 14 }
+    anchors { right: parent.right; bottom: parent.bottom; margins: 16 }
     visible: root.model.masthead !== "lovable"
-    height: 34
+    height: 44
     width: height * 248 / 308
     source: visible ? root.assetUrl("cockpit-mark-" + Theme.mode + ".png") : ""
     sourceSize.height: height * 2
