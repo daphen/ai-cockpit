@@ -60,9 +60,9 @@ text=text[:end]+'''
           expect = [c.target("composer")]
           win.pane = "nvim"
         } else if (stage === 6) {
-          check("composer to dashboard row", expect[0], c.target("dashboard"), true, "fade")
+          check("composer to dashboard row", expect[0], c.target("dashboard"), true, "rest")
           const row = dashboard.findRow(dashboard), r = row && row.mapToItem(c.parent, 0, 0)
-          if (!r || Math.abs(c.target("dashboard").y - (r.y + row.height / 2)) > 1) throw new Error("dashboard glide did not land on the focused row")
+          if (!r || Math.abs(c.target("dashboard").y - (r.y + row.height / 2)) > 1 || c.target("dashboard").x >= r.x) throw new Error("dashboard glide did not land on the focused row")
           if (term.active) throw new Error("dashboard focus turned the terminal cursor on")
           console.log("PASS: focus glides a dot between Neovim, the focused dashboard row and composer, one cursor at a time")
           Qt.quit()

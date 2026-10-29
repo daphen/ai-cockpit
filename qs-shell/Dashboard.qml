@@ -217,7 +217,7 @@ FocusScope {
   function cursorPoint() {
     if (!currentAction) return null
     var item = showSessions ? sessionRows.itemAt(selectable.indexOf(currentAction)) : findRow(content)
-    return item && item.visible ? item.mapToItem(root, 12, showSessions ? 24 : item.height / 2) : null
+    return item && item.visible ? item.mapToItem(root, -14, showSessions ? 24 : item.height / 2) : null
   }
   function findRow(item) {
     if (item.objectName === "dashRow:" + currentAction) return item

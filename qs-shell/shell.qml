@@ -715,7 +715,7 @@ ShellRoot {
             const q = dashboard.cursorPoint()
             if (q) {
               const p = dashboard.mapToItem(paneLayout, q.x, q.y)
-              return { x: p.x, y: p.y, h: dot, landing: "fade" }
+              return { x: p.x, y: p.y, h: dot, landing: "rest" }
             }
             const tab = viewTabRepeater.itemAt(viewTabs.views.indexOf(viewTabs.current))
             if (!tab) return null
