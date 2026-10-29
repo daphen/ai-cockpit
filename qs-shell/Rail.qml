@@ -4674,7 +4674,7 @@ Item {
               radius: width / 2
               opacity: sendButton.working ? 0 : 1
               scale: sendButton.working ? 1.15 : 1
-              color: sendButton.ready ? Theme.fg : (sendHover.hovered ? chin.itemHover : Qt.alpha(Theme.fg, 0.08))
+              color: sendButton.ready ? Theme.fg : (sendHover.hovered ? chin.itemHover : Qt.alpha(Theme.fg, Theme.mode === "dark" ? 0.16 : 0.08))
               Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 160 } }
@@ -4699,7 +4699,7 @@ Item {
               anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
               width: 18; height: width
               name: "paper-plane-2"
-              color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : chin.muted
+              color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
 
             }
