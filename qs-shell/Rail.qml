@@ -4283,9 +4283,9 @@ Item {
         visible: (!rail.pendingAsk || rail.askDeferred) && !rail.newOpen
         // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
         // Flickable scrolls the caret into view.
-        readonly property real toolbarHeight: 40
+        readonly property real toolbarHeight: 45
         implicitHeight: Math.min(composerInput.implicitHeight, 66) + 20 + toolbarHeight
-        radius: 20
+        radius: 26
         color: "transparent"
         border.width: 0
         ContrastCard {
@@ -4495,11 +4495,11 @@ Item {
         }
         Item {
           objectName: "composerToolbar"
-          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 6; rightMargin: 6; bottomMargin: 4 }
-          height: parent.toolbarHeight - 4
+          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 6; rightMargin: 7; bottomMargin: 7 }
+          height: parent.toolbarHeight - 7
           Row {
             id: cornerControls
-            anchors { left: parent.left; leftMargin: 4; verticalCenter: parent.verticalCenter }
+            anchors { left: parent.left; leftMargin: 4; bottom: parent.bottom; bottomMargin: 1 }
             spacing: 2
               Rectangle {
                 id: attachPill
@@ -4655,7 +4655,7 @@ Item {
             id: sendButton
             objectName: "composerStatus"
             anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-            width: 32; height: 32
+            width: 38; height: 38
             readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
             readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")
             readonly property bool ready: composerInput.text.trim().length > 0
@@ -4681,11 +4681,23 @@ Item {
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 160 } }
             }
+            Rectangle {
+              anchors.centerIn: parent
+              width: 24; height: 24; radius: 12
+              color: "#F4F4F4"
+              opacity: sendButton.working ? 0.92 : 0
+              scale: sendButton.working ? 1 : 0.5
+              Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+              Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
+            }
             Icon {
               anchors.centerIn: parent
-              width: 16; height: 16
+              // The glyph's mass sits top-right; nudge it to the optical centre.
+              anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
+              width: sendButton.working ? 14 : 18; height: width
+              Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
               name: "paper-plane-2"
-              color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : chin.muted
+              color: sendButton.working ? "#111111" : sendButton.ready ? Theme.bg : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
             }
             Rectangle {
