@@ -225,8 +225,12 @@ FocusScope {
   }
   function cursorPoint() {
     if (!currentAction) return null
-    var item = showSessions ? sessionRows.itemAt(selectable.indexOf(currentAction)) : findRow(content)
-    return item && item.visible ? item.mapToItem(root, -14, showSessions ? 24 : item.height / 2) : null
+    if (showSessions) {
+      var card = sessionRows.itemAt(selectable.indexOf(currentAction)), title = card && card.titleItem
+      return title && card.visible ? title.mapToItem(root, Math.min(title.implicitWidth, title.width) + 12, 10) : null
+    }
+    var item = findRow(content)
+    return item && item.visible ? item.mapToItem(root, -14, item.height / 2) : null
   }
   function findRow(item) {
     if (item.objectName === "dashRow:" + currentAction) return item
@@ -406,6 +410,7 @@ FocusScope {
             required property string modelData
             required property int index
             objectName: "sessionCard:" + modelData
+            readonly property Item titleItem: sessionName
             readonly property int group: root.workerGroups[index] === undefined ? -1 : root.workerGroups[index]
             readonly property int groupStart: root.workerGroups.indexOf(group)
             readonly property int slot: index - groupStart
@@ -1274,6 +1279,7 @@ FocusScope {
   }
 
   Rectangle {
+    id: dashRestDot
     objectName: "dashRestDot"
     z: 5
     width: 8; height: 8; radius: 4
@@ -1281,5 +1287,7 @@ FocusScope {
     visible: !!root.restPoint && !root.caretHeld && root.restPoint.y > view.y && root.restPoint.y < view.y + view.height
     x: root.restPoint ? root.restPoint.x - width / 2 : 0
     y: root.restPoint ? root.restPoint.y - height / 2 : 0
+    Behavior on x { enabled: dashRestDot.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on y { enabled: dashRestDot.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
   }
 }
