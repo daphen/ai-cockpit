@@ -4659,31 +4659,15 @@ Item {
             readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
             readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")
             readonly property bool ready: composerInput.text.trim().length > 0
-            Item {
+            ThinkingOrb {
               anchors.fill: parent
+              running: sendButton.working
               opacity: sendButton.working ? 1 : 0
-              scale: sendButton.working ? 1 : 0.6
               visible: opacity > 0
-              layer.enabled: true
-              layer.effect: MultiEffect { maskEnabled: true; maskSource: sendOrbMask; autoPaddingEnabled: false }
+              activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
+              glow: activityColors[0]
+              seedKey: rail.featured.rawName
               Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-              Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
-              ThinkingOrb {
-                anchors.fill: parent
-                running: sendButton.working
-                activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
-                glow: activityColors[0]
-                seedKey: rail.featured.rawName
-                layer.enabled: true
-                layer.effect: MultiEffect { blurEnabled: true; blur: 0.6; blurMax: 24; autoPaddingEnabled: false }
-              }
-            }
-            Rectangle {
-              id: sendOrbMask
-              anchors.fill: parent
-              radius: width / 2
-              visible: false
-              layer.enabled: true
             }
             Rectangle {
               anchors.fill: parent
@@ -4695,24 +4679,16 @@ Item {
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 160 } }
             }
-            Rectangle {
-              anchors.centerIn: parent
-              width: parent.width; height: parent.height; radius: width / 2
-              color: Qt.rgba(1, 1, 1, 0.45)
-              border { width: 1.5; color: Qt.rgba(1, 1, 1, 0.9) }
-              opacity: sendButton.working ? 1 : 0
-              scale: sendButton.working ? 1 : 0.5
-              Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-              Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
-            }
             Icon {
               anchors.centerIn: parent
               // The glyph's mass sits top-right; nudge it to the optical centre.
               anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
               width: 18; height: width
               name: "paper-plane-2"
-              color: sendButton.working ? "#111111" : sendButton.ready ? Theme.bg : chin.muted
+              color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
+              layer.enabled: sendButton.working
+              layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "#000000"; shadowOpacity: 0.55; shadowBlur: 0.5; shadowVerticalOffset: 1; shadowHorizontalOffset: 0 }
             }
             Rectangle {
               anchors { right: parent.right; top: parent.top }
