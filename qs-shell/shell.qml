@@ -712,6 +712,11 @@ ShellRoot {
               const p = rail.mapToItem(paneLayout, q.x, q.y)
               return { x: p.x, y: p.y, h: dot, landing: "rest" }
             }
+            const q = dashboard.cursorPoint()
+            if (q) {
+              const p = dashboard.mapToItem(paneLayout, q.x, q.y)
+              return { x: p.x, y: p.y, h: dot, landing: "fade" }
+            }
             const tab = viewTabRepeater.itemAt(viewTabs.views.indexOf(viewTabs.current))
             if (!tab) return null
             const p = tab.mapToItem(paneLayout, 24, tab.height / 2)

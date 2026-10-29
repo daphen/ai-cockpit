@@ -51,7 +51,7 @@ text=text[:end]+'''
         } else if (stage === 3) {
           check("composer to nvim", expect[0], c.target("nvim"), true, "caret")
           if (!term.active) throw new Error("terminal cursor did not return after the glide")
-          rail.workspaceTab = "dashboard"; chin.st = ({ dashboard: { active: true, model: {} } })
+          rail.workspaceTab = "dashboard"; chin.st = ({ dashboard: { active: true, model: { kind: "session", cards: [{ title: "CHANGES", rows: [{ text: "flake.nix", action: "open:flake.nix" }] }] } } })
         } else if (stage === 4) {
           if (!dashboard.activeFocus) throw new Error("dashboard did not take focus")
           win.pane = "rail"; rail.composerField.forceActiveFocus()
@@ -60,9 +60,11 @@ text=text[:end]+'''
           expect = [c.target("composer")]
           win.pane = "nvim"
         } else if (stage === 6) {
-          check("composer to dashboard tab", expect[0], c.target("dashboard"), true, "fade")
+          check("composer to dashboard row", expect[0], c.target("dashboard"), true, "fade")
+          const row = dashboard.findRow(dashboard), r = row && row.mapToItem(c.parent, 0, 0)
+          if (!r || Math.abs(c.target("dashboard").y - (r.y + row.height / 2)) > 1) throw new Error("dashboard glide did not land on the focused row")
           if (term.active) throw new Error("dashboard focus turned the terminal cursor on")
-          console.log("PASS: focus glides a dot between Neovim, the dashboard tab and composer, one cursor at a time")
+          console.log("PASS: focus glides a dot between Neovim, the focused dashboard row and composer, one cursor at a time")
           Qt.quit()
         }
         stage++

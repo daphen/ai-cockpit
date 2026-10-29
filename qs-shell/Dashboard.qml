@@ -214,6 +214,16 @@ FocusScope {
     answerRequested(target.modelData, {confirmed:value})
     return true
   }
+  function cursorPoint() {
+    if (!currentAction) return null
+    var item = showSessions ? sessionRows.itemAt(selectable.indexOf(currentAction)) : findRow(content)
+    return item && item.visible ? item.mapToItem(root, 12, showSessions ? 24 : item.height / 2) : null
+  }
+  function findRow(item) {
+    if (item.objectName === "dashRow:" + currentAction) return item
+    for (var child of item.children || []) { var match = findRow(child); if (match) return match }
+    return null
+  }
   function revealCard() {
     if (!showSessions || !activeFocus) return
     var item = sessionRows.itemAt(selectable.indexOf(currentAction))
@@ -1096,6 +1106,7 @@ FocusScope {
                   delegate: Rectangle {
                 id: row
                 required property var modelData
+                objectName: modelData.action ? "dashRow:" + modelData.action : ""
                 width: cardBody.width
                 height: modelData.text ? 32 : 12
                 radius: 8
