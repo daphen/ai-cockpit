@@ -4288,6 +4288,12 @@ Item {
         radius: 26
         color: "transparent"
         border.width: 0
+        Rectangle {
+          anchors { fill: parent; leftMargin: -10; rightMargin: -10; topMargin: -4; bottomMargin: -9 }
+          radius: 22
+          color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
+          border.width: 0
+        }
         RowLayout {
           anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 2; rightMargin: 6; bottomMargin: parent.toolbarHeight }
           spacing: 8
