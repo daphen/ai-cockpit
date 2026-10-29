@@ -4668,7 +4668,7 @@ Item {
                   model: contextMeter.ribs
                   Rectangle {
                     width: 3; height: 20; radius: 1
-                    color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, 0.12)
+                    color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.12 : 0.2)
                     Behavior on color { ColorAnimation { duration: 200 } }
                   }
                 }
