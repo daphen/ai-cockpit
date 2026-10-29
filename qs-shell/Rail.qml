@@ -4301,8 +4301,8 @@ Item {
           anchors.fill: parent
           visible: Theme.mode !== "light"
           radius: parent.radius
-          color: "transparent"
-          border.color: rail.insert ? rail.activeRing : Theme.hairline
+          color: Qt.alpha(Theme.fg, 0.035)
+          border.color: rail.insert ? rail.activeRing : "transparent"
           border.width: rail.insert ? 1.5 : 1
           Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
         }
@@ -4577,7 +4577,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: !rail.onSteamDeck && (rail.selectedGoal.length > 0 || rail.selectedIsOrchestrator)
                 readonly property bool armed: rail.selectedGoal.length > 0
-                readonly property color tint: armed ? Theme.green : Theme.orange
+                readonly property color tint: armed ? Theme.green : chin.muted
                 readonly property bool expanded: goalHover.hovered
                 implicitWidth: expanded ? goalRow.implicitWidth + 12 : 30
                 implicitHeight: 22
@@ -4615,7 +4615,7 @@ Item {
               Rectangle {
                 id: scopeSwitch
                 anchors.verticalCenter: parent.verticalCenter
-                readonly property color tint: rail.scopeMode === "work" ? rail.skyAccent : Theme.orange
+                readonly property color tint: expanded ? (rail.scopeMode === "work" ? rail.skyAccent : Theme.orange) : chin.muted
                 readonly property bool expanded: scopeHover.hovered
                 implicitWidth: expanded ? scopeRow.implicitWidth + 12 : 30
                 implicitHeight: 22
