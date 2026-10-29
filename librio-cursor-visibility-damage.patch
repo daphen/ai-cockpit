@@ -1,0 +1,28 @@
+diff --git a/rio-vt/src/crosswords/mod.rs b/rio-vt/src/crosswords/mod.rs
+index e236132461..77aef27532 100644
+--- a/rio-vt/src/crosswords/mod.rs
++++ b/rio-vt/src/crosswords/mod.rs
+@@ -2834,7 +2834,10 @@ impl<U: EventListener> Handler for Crosswords<U> {
+                     self.swap_alt();
+                 }
+             }
+-            NamedPrivateMode::ShowCursor => self.mode.insert(Mode::SHOW_CURSOR),
++            NamedPrivateMode::ShowCursor => {
++                self.mode.insert(Mode::SHOW_CURSOR);
++                self.damage_cursor();
++            }
+             NamedPrivateMode::CursorKeys => self.mode.insert(Mode::APP_CURSOR),
+             // Mouse protocols are mutually exclusive.
+             NamedPrivateMode::ReportX10MouseClicks => {
+@@ -2924,7 +2927,10 @@ impl<U: EventListener> Handler for Crosswords<U> {
+                     self.swap_alt();
+                 }
+             }
+-            NamedPrivateMode::ShowCursor => self.mode.remove(Mode::SHOW_CURSOR),
++            NamedPrivateMode::ShowCursor => {
++                self.mode.remove(Mode::SHOW_CURSOR);
++                self.damage_cursor();
++            }
+             NamedPrivateMode::CursorKeys => self.mode.remove(Mode::APP_CURSOR),
+             // The mouse protocols are one setting, so resetting any of them
+             // turns reporting off. There is no protocol underneath to fall
