@@ -4289,8 +4289,8 @@ Item {
         color: "transparent"
         border.width: 0
         Rectangle {
-          anchors { fill: parent; leftMargin: -10; rightMargin: -10; topMargin: -4; bottomMargin: -9 }
-          radius: 22
+          anchors { fill: parent; leftMargin: -10; rightMargin: -10; topMargin: 2; bottomMargin: parent.toolbarHeight - 2 }
+          radius: 14
           color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
           border.width: 0
         }
