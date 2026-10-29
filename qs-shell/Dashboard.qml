@@ -32,7 +32,10 @@ FocusScope {
   readonly property bool personalHome: model.scope === "personal"
   readonly property bool sessionHome: !project && model.kind === "home" && (model.scope === "lovable" || personalHome)
   readonly property string homeOtherTab: personalHome ? "plans" : "tickets"
+  readonly property bool personalPage: !project && personalHome && model.kind === "session"
+  readonly property var pageTabs: personalPage ? ["changes", "tests"].filter(t => (model.tabs || []).indexOf(t) >= 0) : []
   readonly property bool showSessions: !!project || (sessionHome && homeTab !== homeOtherTab)
+    || (personalPage && !(pageTabs.indexOf(homeTab) >= 0 && model.activeTab === homeTab))
   readonly property var groupNames: ["NEEDS YOU", "WORKING", "READY"]
   function groupOf(s) {
     if (!project) return -1
@@ -49,11 +52,12 @@ FocusScope {
         .sort((a, b) => b.name.localeCompare(a.name))
   readonly property string workerNames: workers.map(s => s.name).join("\n")
   readonly property var workerGroups: workers.map(s => groupOf(s))
-  readonly property var tabs: sessionHome ? ["sessions", homeOtherTab] : project ? [] : (model.tabs || [])
-  readonly property string activeTab: sessionHome ? (showSessions ? "sessions" : homeOtherTab) : (model.activeTab || "")
+  readonly property var tabs: sessionHome ? ["sessions", homeOtherTab] : personalPage ? ["sessions"].concat(pageTabs) : project ? [] : (model.tabs || [])
+  readonly property string activeTab: sessionHome ? (showSessions ? "sessions" : homeOtherTab) : personalPage ? (showSessions ? "sessions" : homeTab) : (model.activeTab || "")
   readonly property var visibleActions: showSessions
     ? [{ key: "Enter", label: "expand / collapse", id: "expand-card" }, { key: "Ctrl+Enter", label: "open session", id: currentAction }]
-        .concat(sessionHome ? [{ key: "Tab", label: homeOtherTab, id: "tab:" + homeOtherTab }] : [])
+        .concat(sessionHome ? [{ key: "Tab", label: homeOtherTab, id: "tab:" + homeOtherTab }]
+          : personalPage && pageTabs.length ? [{ key: "Tab", label: pageTabs[0], id: "tab:" + pageTabs[0] }] : [])
     : (model.actions || [])
   signal sessionRequested(string sid)
   signal prRequested(string url)
@@ -110,6 +114,10 @@ FocusScope {
     if (sessionHome && (id === "tab" || id.indexOf("tab:") === 0)) {
       homeTab = id === "tab" ? (showSessions ? homeOtherTab : "sessions") : id.slice(4)
       cursor = 0
+    } else if (personalPage && (id === "tab" || id.indexOf("tab:") === 0)) {
+      homeTab = id === "tab" ? tabs[(tabs.indexOf(activeTab) + 1) % tabs.length] : id.slice(4)
+      cursor = 0
+      if (homeTab !== "sessions") actionRequested("tab:" + homeTab)
     } else if (showSessions && id === "expand-card") activate(false)
     else if (showSessions && id.indexOf("session:") === 0) sessionRequested(id.slice(8))
     else if (id) actionRequested(id)
@@ -1091,7 +1099,7 @@ FocusScope {
             spacing: 4
 
             Text {
-              text: (root.model.tabs || []).length
+              text: (root.model.tabs || []).length && !root.personalPage
                 ? String(root.model.activeTab || modelData.title || "").toUpperCase()
                 : String(modelData.title || "")
               color: Theme.fg
