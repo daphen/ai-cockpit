@@ -266,6 +266,11 @@ FocusScope {
     color: Theme.bg
   }
 
+  function assetUrl(name) {
+    var dir = Quickshell.env("COCKPIT_ASSET_DIR") || ""
+    return dir ? "file://" + dir + "/" + name : ""
+  }
+
   Flickable {
     id: view
     anchors { fill: parent; bottomMargin: hints.height }
@@ -282,17 +287,11 @@ FocusScope {
       spacing: 24
 
       Image {
-        readonly property bool lovableMasthead: String(root.model.masthead || "") === "lovable"
         anchors.horizontalCenter: parent.horizontalCenter
-        width: lovableMasthead
-          ? Math.min(parent.width * 0.36, 350)
-          : Math.min(parent.width * 0.48, 470)
-        height: width * 0.233
-        source: {
-          var dir = Quickshell.env("COCKPIT_ASSET_DIR") || ""
-          var name = String(root.model.masthead || "cockpit") + "-" + Theme.mode + ".png"
-          return dir ? "file://" + dir + "/" + name : ""
-        }
+        visible: root.model.masthead === "lovable"
+        width: Math.min(parent.width * 0.36, 350)
+        height: visible ? width * 0.233 : 0
+        source: visible ? root.assetUrl("lovable-" + Theme.mode + ".png") : ""
         fillMode: Image.PreserveAspectFit
         asynchronous: true
         smooth: true
@@ -1234,5 +1233,17 @@ FocusScope {
         }
       }
     }
+  }
+
+  Image {
+    anchors { right: parent.right; bottom: parent.bottom; margins: 14 }
+    visible: root.model.masthead !== "lovable"
+    height: 34
+    width: height * 248 / 308
+    source: visible ? root.assetUrl("cockpit-mark-" + Theme.mode + ".png") : ""
+    sourceSize.height: height * 2
+    fillMode: Image.PreserveAspectFit
+    asynchronous: true
+    smooth: true
   }
 }
