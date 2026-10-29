@@ -1325,9 +1325,9 @@ Item {
     if (latest && latest.charAt(0) !== "/") latest = localCwd + "/" + latest
     return 'require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) && socket !== remoteNvimSock ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'
   }
-  function showWorkspace(view) {
+  function showWorkspace(view, keepFocus) {
     landNvim(selectedRaw, view, view === "vault" ? localNvimSock : "")
-    focusNvim()
+    if (!keepFocus) focusNvim()
   }
 
   function openInNvim(path, baseCwd, line, column) {

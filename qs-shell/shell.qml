@@ -400,7 +400,7 @@ ShellRoot {
             readonly property var tabs: [{ view: "code", label: "Code", icon: "file-content" }, { view: "dashboard", label: "Dashboard", icon: "gauge-3" }, { view: "vault", label: "Vault", icon: "vault-3" }]
               .concat(rail.selectedPlan ? [{ view: "plan", label: "Plan", icon: "clipboard-check" }] : [])
             readonly property var views: tabs.map(function(tab) { return tab.view })
-            function cycle(step) { rail.showWorkspace(views[(views.indexOf(current) + step + views.length) % views.length]) }
+            function cycle(step) { rail.showWorkspace(views[(views.indexOf(current) + step + views.length) % views.length], true) }
             Rectangle {
               id: viewBar
               readonly property int padding: 4
