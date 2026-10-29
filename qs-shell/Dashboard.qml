@@ -29,8 +29,10 @@ FocusScope {
     var focused = sessions.find(s => s.name === focusedSession)
     return focused && focused.project && !focused.parent ? focused.project : ""
   }
-  readonly property bool sessionHome: !project && model.kind === "home" && model.scope === "lovable"
-  readonly property bool showSessions: !!project || (sessionHome && homeTab === "sessions")
+  readonly property bool personalHome: model.scope === "personal"
+  readonly property bool sessionHome: !project && model.kind === "home" && (model.scope === "lovable" || personalHome)
+  readonly property string homeOtherTab: personalHome ? "plans" : "tickets"
+  readonly property bool showSessions: !!project || (sessionHome && homeTab !== homeOtherTab)
   readonly property var groupNames: ["NEEDS YOU", "WORKING", "READY"]
   function groupOf(s) {
     if (!project) return -1
@@ -40,15 +42,18 @@ FocusScope {
   readonly property var workers: project
     ? sessions.filter(s => s.project === project && s.name !== focusedSession && !s.offline)
         .sort((a, b) => groupOf(a) - groupOf(b) || a.name.localeCompare(b.name))
+    : personalHome
+    ? sessions.filter(s => s.scope === "personal" && !s.offline && !s.parent)
+        .sort((a, b) => a.name.localeCompare(b.name))
     : sessions.filter(s => s.scope === "work" && !s.offline && s.profile === "lovable-worker" && !s.parent)
         .sort((a, b) => b.name.localeCompare(a.name))
   readonly property string workerNames: workers.map(s => s.name).join("\n")
   readonly property var workerGroups: workers.map(s => groupOf(s))
-  readonly property var tabs: sessionHome ? ["sessions", "tickets"] : project ? [] : (model.tabs || [])
-  readonly property string activeTab: sessionHome ? homeTab : (model.activeTab || "")
+  readonly property var tabs: sessionHome ? ["sessions", homeOtherTab] : project ? [] : (model.tabs || [])
+  readonly property string activeTab: sessionHome ? (showSessions ? "sessions" : homeOtherTab) : (model.activeTab || "")
   readonly property var visibleActions: showSessions
     ? [{ key: "Enter", label: "expand / collapse", id: "expand-card" }, { key: "Ctrl+Enter", label: "open session", id: currentAction }]
-        .concat(sessionHome ? [{ key: "Tab", label: "tickets", id: "tab:tickets" }] : [])
+        .concat(sessionHome ? [{ key: "Tab", label: homeOtherTab, id: "tab:" + homeOtherTab }] : [])
     : (model.actions || [])
   signal sessionRequested(string sid)
   signal prRequested(string url)
@@ -103,7 +108,7 @@ FocusScope {
   }
   function dispatch(id) {
     if (sessionHome && (id === "tab" || id.indexOf("tab:") === 0)) {
-      homeTab = id === "tab" ? (showSessions ? "tickets" : "sessions") : id.slice(4)
+      homeTab = id === "tab" ? (showSessions ? homeOtherTab : "sessions") : id.slice(4)
       cursor = 0
     } else if (showSessions && id === "expand-card") activate(false)
     else if (showSessions && id.indexOf("session:") === 0) sessionRequested(id.slice(8))
@@ -113,10 +118,11 @@ FocusScope {
     var id = sid.toUpperCase()
     for (var ticket of tickets)
       if (ticket.id.toUpperCase() === id) return ticket.title
-    return (ticketStates[sid] || {}).title || taskFor(sid) || "No ticket summary available"
+    return (ticketStates[sid] || {}).title || taskFor(sid) || (personalHome ? "No task yet" : "No ticket summary available")
   }
   function ticketState(sid) {
-    var state = ticketStates[sid] || {label:"Status unknown", tone:"muted", chips:[], details:""}
+    var session = personalHome ? sessions.find(s => s.name === sid) : null
+    var state = ticketStates[sid] || {label:session ? String(session.cwd || "").replace(/^\/home\/[^/]+/, "~") : "Status unknown", tone:"muted", chips:[], details:""}
     if (state.checkedAt && statusClock - state.checkedAt > 120000)
       state = Object.assign({}, state, {label:"Status stale", tone:"muted"})
     var ask = askFor(sid)

@@ -188,7 +188,9 @@ ShellRoot {
         test.check(!test.card("every-3710") && dash.currentAction === "session:every-3711", "closed session retained a card or invalid selection")
         dash.model = {kind:"home",scope:"personal",cards:[{title:"PLANS",rows:[{text:"Personal plan",action:"plan:p"}]}]}
       } else if (test.phase === 10) {
-        test.check(!test.card("every-3790").visible && test.find(dash,item => item.text === "Personal plan"), "personal home changed")
+        test.check(test.card("personal") && test.card("personal").visible && !test.card("every-3790") && !test.find(dash,item => item.text === "Personal plan" && item.visible), "personal home does not lead with personal sessions")
+        dash.dispatch("tab")
+        test.check(dash.activeTab === "plans" && test.find(dash,item => item.text === "Personal plan" && item.visible), "personal plans tab missing")
         dash.model = {kind:"session",scope:"lovable",tabs:["plan","changes"],activeTab:"plan",cards:[{title:"PLAN",rows:[{text:"Worker plan",action:"plan:p"}]}]}
       } else if (test.phase === 11) {
         test.check(test.find(dash,item => item.text === "Worker plan") && test.find(dash,item => item.text === "CHANGES"), "worker tabs changed")
