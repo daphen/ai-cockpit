@@ -63,9 +63,10 @@ ShellRoot {
       if (++ticks > 70) throw new Error("timeout at " + phase)
       if (!ready || ticks < 5) return
       if (phase === 0) {
-        state.onLine(JSON.stringify({type:"roster",sessions:[{id:"main",name:"main",cwd:"/tmp/main",status:"idle"},{id:"worker",name:"ticket-worker",profile:"lovable-worker",cwd:vm+"lovable-every-123",status:"idle"},{id:"local",name:"local",cwd:"/tmp/local",status:"idle"},{id:"orch",name:"orch",profile:"lovable-orchestrator",cwd:vm+"lovable-every-999",status:"idle"}]}), 0)
+        state.onLine(JSON.stringify({type:"roster",sessions:[{id:"main",name:"main",cwd:"/tmp/main",status:"idle"},{id:"worker",name:"ticket-worker",profile:"lovable-worker",cwd:vm+"lovable-every-123",status:"idle"},{id:"local",name:"local",cwd:"/tmp/local",status:"idle"},{id:"pls",name:"pls-683",profile:"lovable-worker",cwd:vm+"lovable-pls-683",status:"idle"},{id:"orch",name:"orch",profile:"lovable-orchestrator",cwd:vm+"lovable-every-999",status:"idle"}]}), 0)
         rail.jumpToSession("main")
         check(!rail._ticketLifecycle("local") && !rail._ticketLifecycle("orch"), "protected context became eligible")
+        check((rail._ticketLifecycle("pls-683") || {}).ticket === "PLS-683", "non-EVERY ticket checkout has no lifecycle")
         openActions(); phase++
       } else if (phase === 1) {
         check(textItem(rail, "Turn off — keep files"), "Turn off choice missing")

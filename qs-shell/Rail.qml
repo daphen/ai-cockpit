@@ -266,7 +266,7 @@ Item {
     if (!ss || ss.parent || !_isRemote(ss.cwd)) return null
     var role = String(ss.profile || ss.role || "")
     if (role.indexOf("orchestrator") >= 0 || String(ss.cwd || "").indexOf("/src/lovable") < 0) return null
-    var match = String(ss.cwd || "").match(/(?:^|[-.])(every-\d+)(?:-|$)/i)
+    var match = String(ss.cwd || "").match(/(?:^|[-.])([a-z][a-z0-9]*-\d+)(?:-|$)/i)
     return match ? { session: String(ss.name || name), ticket: match[1].toUpperCase() } : null
   }
   function stopSession(name) {
