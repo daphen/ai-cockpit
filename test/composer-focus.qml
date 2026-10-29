@@ -58,7 +58,7 @@ ShellRoot {
       } else if (test.phase === 1) {
         if (++test.settleTicks < 3) return   // a session switch fetches and builds once the roster collapse ends
         check(selected(rail) > 0, "fixture has no initial rail selection")
-        check(frame().children.some(item => item.border && item.border.width === 1 && Qt.colorEqual(item.border.color, Theme.hairline)), "unfocused composer lacks its subtle outline")
+        check(frame().children.some(item => item.visible && item.border && item.border.width === 1 && item.border.color.a === 0 && item.color.a > 0), "unfocused dark composer should be a borderless tinted field")
         click(composer(), 20, composer().height / 2)
       } else if (test.phase === 2) test.typing()
       else if (test.phase === 4) {
