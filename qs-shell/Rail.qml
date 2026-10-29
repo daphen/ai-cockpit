@@ -4690,7 +4690,7 @@ Item {
                 width: 18; height: width
                 name: "paper-plane-2"
                 color: "#2A2A2E"
-                opacity: sendButton.working ? 0.55 : 0
+                opacity: sendButton.working ? 0.3 : 0
                 visible: opacity > 0
                 Behavior on opacity { NumberAnimation { duration: 200 } }
               }
