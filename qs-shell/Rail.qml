@@ -4659,19 +4659,31 @@ Item {
             readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
             readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")
             readonly property bool ready: composerInput.text.trim().length > 0
-            ThinkingOrb {
+            Item {
               anchors.fill: parent
               opacity: sendButton.working ? 1 : 0
               scale: sendButton.working ? 1 : 0.6
               visible: opacity > 0
-              running: visible
-              activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
-              glow: activityColors[0]
-              seedKey: rail.featured.rawName
               layer.enabled: true
-              layer.effect: MultiEffect { blurEnabled: true; blur: 0.6; blurMax: 24; autoPaddingEnabled: false }
+              layer.effect: MultiEffect { maskEnabled: true; maskSource: sendOrbMask; autoPaddingEnabled: false }
               Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
+              ThinkingOrb {
+                anchors.fill: parent
+                running: sendButton.working
+                activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
+                glow: activityColors[0]
+                seedKey: rail.featured.rawName
+                layer.enabled: true
+                layer.effect: MultiEffect { blurEnabled: true; blur: 0.6; blurMax: 24; autoPaddingEnabled: false }
+              }
+            }
+            Rectangle {
+              id: sendOrbMask
+              anchors.fill: parent
+              radius: width / 2
+              visible: false
+              layer.enabled: true
             }
             Rectangle {
               anchors.fill: parent
@@ -4697,8 +4709,7 @@ Item {
               anchors.centerIn: parent
               // The glyph's mass sits top-right; nudge it to the optical centre.
               anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
-              width: sendButton.working ? 21 : 18; height: width
-              Behavior on width { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+              width: 18; height: width
               name: "paper-plane-2"
               color: sendButton.working ? "#111111" : sendButton.ready ? Theme.bg : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
