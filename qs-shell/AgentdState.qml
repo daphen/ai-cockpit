@@ -586,7 +586,16 @@ Item {
     if (tokens.cacheWrite !== undefined && tokens.cacheWrite !== null) breakdown.push("cache write " + _numberText(tokens.cacheWrite))
     if (breakdown.length) lines.push(breakdown.join(" · "))
     if (!lines.length) return null
-    return { kind: "sys", tool: "usage", text: lines.join("\n"), detailsText: _safeJson(data) }
+    var percent = context && context.percent !== undefined && context.percent !== null ? Number(context.percent) : -1
+    return { kind: "sys", tool: "usage", text: lines.join("\n"), detailsText: _safeJson(data),
+             contextPercent: percent, contextTokens: context ? context.tokens : null, contextWindow: context ? context.contextWindow : null }
+  }
+  function contextUsage(sid) {
+    void feedGen
+    var rows = feeds[sid] || []
+    for (var i = rows.length - 1; i >= 0; i--)
+      if (rows[i].feedKey === "session-usage") return rows[i].contextPercent >= 0 ? rows[i] : null
+    return null
   }
   function _findToolItem(sid, id) {
     var rows = feeds[sid] || []

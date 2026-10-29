@@ -4639,6 +4639,44 @@ Item {
               }
           }
           Item {
+            id: contextMeter
+            objectName: "contextMeter"
+            readonly property var usage: rail.agentd ? rail.agentd.contextUsage(rail.selectedRaw) : null
+            readonly property real percent: usage ? Math.max(0, Math.min(100, usage.contextPercent)) : 0
+            readonly property int ribs: 30
+            readonly property int filled: Math.round(percent / 100 * ribs)
+            readonly property color ink: percent >= 90 ? Theme.red : Theme.orange
+            visible: usage !== null
+            anchors { right: parent.right; rightMargin: 6; verticalCenter: cornerControls.verticalCenter }
+            width: contextRow.implicitWidth; height: 22
+            Row {
+              id: contextRow
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: 8
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: contextHover.hovered
+                text: "CONTEXT " + Math.round(contextMeter.percent) + "%" + (contextMeter.usage && contextMeter.usage.contextWindow
+                      ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K" : "")
+                color: contextMeter.ink
+                font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+              }
+              Row {
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 2
+                Repeater {
+                  model: contextMeter.ribs
+                  Rectangle {
+                    width: 3; height: 14; radius: 1
+                    color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, 0.12)
+                    Behavior on color { ColorAnimation { duration: 200 } }
+                  }
+                }
+              }
+            }
+            HoverHandler { id: contextHover }
+          }
+          Item {
             id: sendButton
             objectName: "composerStatus"
             anchors { right: parent.right; rightMargin: 6 }
