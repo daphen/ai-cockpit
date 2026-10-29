@@ -4667,7 +4667,7 @@ Item {
                 Repeater {
                   model: contextMeter.ribs
                   Rectangle {
-                    width: 3; height: 14; radius: 1
+                    width: 3; height: 20; radius: 1
                     color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, 0.12)
                     Behavior on color { ColorAnimation { duration: 200 } }
                   }
