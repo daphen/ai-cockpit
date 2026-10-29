@@ -3347,7 +3347,7 @@ Item {
           id: cursorDot
           z: 2
           x: card.x + 10 - width / 2
-          y: card.y + turnDel.padY + Math.round(rail.fsBody * 0.7) - height / 2
+          y: card.y + Math.min(card.height / 2, turnDel.padY + Math.round(rail.fsBody * 0.7)) - height / 2
           width: 8; height: 8; radius: 4
           color: Theme.cursor
           visible: turnDel.cursor && !rail.caretHeld
@@ -4302,16 +4302,18 @@ Item {
           visible: Theme.mode !== "light"
           radius: parent.radius
           color: Qt.alpha(Theme.fg, 0.035)
-          border.color: rail.insert ? rail.activeRing : "transparent"
-          border.width: rail.insert ? 1.5 : 1
+          border.color: rail.insert ? Qt.alpha(Theme.fg, 0.3) : "transparent"
+          border.width: 1
           Behavior on border.color { ColorAnimation { duration: 650; easing.type: Easing.InOutQuad } }
         }
         LightKey {
           anchors.fill: parent
           visible: Theme.mode === "light"
           radius: parent.radius
-          ring: rail.insert ? 1.5 : 1
-          outline: rail.insert ? rail.activeRing : Qt.alpha(Theme.fg, 0.16)
+          ring: 1
+          outline: Qt.alpha(Theme.fg, rail.insert ? 0.3 : 0)
+          faceTop: Qt.alpha(Theme.fg, 0.035)
+          faceBottom: Qt.alpha(Theme.fg, 0.05)
           fade: 650
         }
         RowLayout {
@@ -4881,7 +4883,7 @@ Item {
               Icon {
                 anchors.right: parent.right
                 width: pillDot.size; height: pillDot.size
-                name: pill.offline ? "bolt-slash" : "cloud--outline--18"
+                name: pill.offline ? "bolt-slash" : "cloud--outline-thin--18"
                 color: pill.offline ? Theme.red : rail.skyAccent
               }
             }
