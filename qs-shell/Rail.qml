@@ -1533,8 +1533,7 @@ Item {
   readonly property color silverAccent: Theme.mode === "light" ? "#6F777C" : "#C2C8CC"
   readonly property color mintAccent: Theme.mode === "light" ? "#3F8C69" : "#86D7B0"
   readonly property color goldAccent: Theme.mode === "light" ? "#9A6500" : "#F2C572"
-  readonly property color codePanelColor: Theme.mode === "light" ? "#FFFFFF" : Qt.tint(userCardBottom, Qt.rgba(1, 1, 1, 0.08))
-  readonly property color codePanelBorder: Theme.mode === "light" ? Theme.hairline : Qt.rgba(1, 1, 1, 0.32)
+  readonly property color codePanelColor: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.04 : 0.05)
   readonly property color userCardTop: Theme.mode === "light" ? "#FFFFFF" : Qt.lighter(Theme.surface0, 1.25)
   readonly property color userCardBottom: Theme.mode === "light" ? "#FDFDFD" : Qt.lighter(Theme.surface0, 1.2)
 
@@ -5468,45 +5467,27 @@ Item {
         x: resultCol.grouped ? 0 : 12; width: parent.width - 2 * x
         spacing: 8
         visible: expanded && entry.tool !== "read" && entry.tool !== "read_file"
-        ButtonSurface {
-          primary: false; radius: 6
+        ToolChip {
           visible: resultCol.showOutput && !!entry.result
-          width: detailRow.implicitWidth + 16; height: 26
-          Row {
-            id: detailRow; anchors.centerIn: parent; spacing: 5
-            Icon { name: expanded ? "chevron-down" : "chevron-right"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: expanded ? "Hide details" : "Show details"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
-          }
-          TapHandler { onTapped: rail.toggleGroupKey(gkey) }
+          icon: expanded ? "chevron-down" : "chevron-right"; label: expanded ? "Hide details" : "Show details"
+          onTapped: rail.toggleGroupKey(gkey)
         }
-        ButtonSurface {
-          primary: false; radius: 6
+        ToolChip {
           visible: !!entry.result
-          width: copyRow.implicitWidth + 16; height: 26
-          Row {
-            id: copyRow; anchors.centerIn: parent; spacing: 5
-            Icon { name: "clipboard"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "Copy output"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
-          }
-          TapHandler { onTapped: rail.copyText(rail.plainToolText(entry.result)) }
+          icon: "clipboard"; label: "Copy output"
+          onTapped: rail.copyText(rail.plainToolText(entry.result))
           ItemFocus { itemKey: "copyout:" + gkey }
         }
-        ButtonSurface {
-          primary: false; radius: 6
+        ToolChip {
           visible: !!entry.command
-          width: commandRow.implicitWidth + 16; height: 26
-          Row {
-            id: commandRow; anchors.centerIn: parent; spacing: 5
-            Icon { name: "clipboard"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "Copy command"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
-          }
-          TapHandler { onTapped: rail.copyText(String(entry.command)) }
+          icon: "clipboard"; label: "Copy command"
+          onTapped: rail.copyText(String(entry.command))
           ItemFocus { itemKey: "copycmd:" + gkey }
         }
         Row {
           visible: entry.partial === true; height: 26; spacing: 5
           Icon { name: "clock"; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
-          Text { text: "Streaming"; color: Theme.fg_muted; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1; anchors.verticalCenter: parent.verticalCenter }
+          Text { text: "Streaming"; color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1; anchors.verticalCenter: parent.verticalCenter }
         }
       }
       Rectangle {
@@ -5557,8 +5538,7 @@ Item {
           }
           Rectangle {
             width: parent.width; implicitHeight: outputText.implicitHeight + 32
-            radius: 8; color: rail.codePanelColor
-            border.width: 1; border.color: rail.codePanelBorder
+            radius: 12; color: rail.codePanelColor
             TextEdit {
               id: outputText
               objectName: "tool-" + modelData.label.toLowerCase() + ":" + (entry.id || entry.tool)
@@ -5714,6 +5694,22 @@ Item {
       }
     }
   }
+  component ToolChip: Rectangle {
+    id: chip
+    property string icon
+    property string label
+    signal tapped()
+    width: chipRow.implicitWidth + 20; height: 26; radius: height / 2
+    color: Qt.alpha(Theme.fg, chipHover.hovered ? 0.09 : Theme.mode === "light" ? 0.045 : 0.05)
+    Behavior on color { ColorAnimation { duration: 120 } }
+    HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
+    TapHandler { onTapped: chip.tapped() }
+    Row {
+      id: chipRow; anchors.centerIn: parent; spacing: 5
+      Icon { name: chip.icon; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
+      Text { text: chip.label; color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1; anchors.verticalCenter: parent.verticalCenter }
+    }
+  }
   component InlineAttachmentSurface: Rectangle {
     readonly property color contentColor: Theme.fg
     color: Theme.mode === "light" ? Theme.surface : "transparent"
@@ -5839,10 +5835,10 @@ Item {
       id: fence
       width: parent ? parent.width : 400
       implicitHeight: fenceCol.implicitHeight + 20
-      radius: 9
+      radius: 12
       color: rail.codePanelColor
-      border.width: 1
-      border.color: block.runnable && agentAuthored ? rail.summaryColor : rail.codePanelBorder
+      border.width: block.runnable && agentAuthored ? 1 : 0
+      border.color: rail.summaryColor
       readonly property var activeHint: rail.hintForKey(block.key, rowIndex)
       readonly property bool requestsApproval: block.runnable && agentAuthored
       Column {
@@ -5967,8 +5963,7 @@ Item {
       readonly property string language: rail.codeLanguage(entry.path)
       width: parent ? parent.width : 400
       implicitHeight: diffCol.implicitHeight + 12
-      radius: 6; color: rail.codePanelColor
-      border.width: 1; border.color: Theme.hairline
+      radius: 12; color: rail.codePanelColor
       clip: true
       Column {
         id: diffCol
