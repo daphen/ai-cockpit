@@ -4459,7 +4459,7 @@ Item {
             Text {
               anchors.fill: parent
               verticalAlignment: Text.AlignVCenter
-              visible: !composerInput.text && !composerInput.activeFocus
+              visible: !composerInput.text && !composerInput.preeditText
               text: (rail.pendingAsk && (rail.pendingAsk.method === "input" || rail.pendingAsk.method === "editor"))
                     ? "type your reply…   (⏎ to send · esc cancels)"
                     : "message " + rail.featured.name + "…"
