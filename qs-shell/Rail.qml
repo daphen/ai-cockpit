@@ -4276,6 +4276,7 @@ Item {
       // ask is pending: the question TAKES OVER the input rather than floating above a
       // composer that still looks ready for an unrelated message.
       Rectangle {
+        id: composerFrame
         objectName: "composerFrame"
         TapHandler { onTapped: { if (!rail.focused) rail.requestFocus(); rail.enterInsert() } }
         Layout.fillWidth: true
@@ -4284,7 +4285,8 @@ Item {
         // Grows with the text up to ~3 lines (slqs Composer pattern); beyond that the
         // Flickable scrolls the caret into view.
         readonly property real toolbarHeight: 34
-        readonly property real textHeight: Math.min(composerInput.implicitHeight, 66)
+        readonly property real lineHeight: composerInput.cursorRectangle.height
+        readonly property real textHeight: Math.min(Math.max(1, composerInput.lineCount), 3) * lineHeight
         implicitHeight: inputFill.y + inputFill.height + toolbarHeight
         radius: 26
         color: "transparent"
@@ -4640,7 +4642,7 @@ Item {
             id: sendButton
             objectName: "composerStatus"
             anchors { right: parent.right; rightMargin: 6 }
-            y: inputFill.y + (inputFill.height - height) / 2 - parent.y
+            y: inputFill.y + inputFill.height - height - (30 + composerFrame.lineHeight - height) / 2 - parent.y
             width: 38; height: 38
             readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
             readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")

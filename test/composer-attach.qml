@@ -19,6 +19,7 @@ ShellRoot {
     for (var child of item.children || []) { var match = find(child, name); if (match) return match }
     return null
   }
+  property real oneLineGap: 0
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   Timer { interval: 250; repeat: true; running: true
     onTriggered: {
@@ -32,6 +33,16 @@ ShellRoot {
         if (a.y < f.y + frame.height / 2 || a.y + attach.height > f.y + frame.height + 2) { test.fail("attach is not in the input's bottom row"); return }
         if (a.x > f.x + 24) { test.fail("toolbar is not in the left corner: attach at x=" + (a.x - f.x)); return }
         if (b.x + send.width < f.x + frame.width - 16 || b.y + send.height > a.y) { test.fail("send button is not at the right of the input, above the toolbar"); return }
+        test.oneLineGap = frame.height + f.y - (b.y + send.height)
+        rail.composerField.text = "one\ntwo\nthree"
+      } else if (test.phase === 3) {
+        var frame3 = test.find(rail, "composerFrame"), send3 = test.find(rail, "composerStatus")
+        var f3 = frame3.mapToItem(rail, 0, 0), b3 = send3.mapToItem(rail, 0, 0)
+        if (frame3.height < 100) { test.fail("three-line input did not grow: " + frame3.height); return }
+        if (Math.abs(frame3.height + f3.y - (b3.y + send3.height) - test.oneLineGap) > 0.5) { test.fail("send orb is not bottom-aligned in multiline input"); return }
+        rail.composerField.text = ""
+      } else if (test.phase === 4) {
+        var send = test.find(rail, "composerStatus")
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "streaming", scope: "personal" }]
         if (!send.working) { test.fail("send button did not become the orb while the agent works"); return }
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "idle", scope: "personal" }]
