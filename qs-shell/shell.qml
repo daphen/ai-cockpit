@@ -165,13 +165,11 @@ ShellRoot {
     Shortcut {
       sequence: "Ctrl+Shift+H"
       context: Qt.ApplicationShortcut
-      enabled: win.pane === "nvim"
       onActivated: viewTabs.cycle(-1)
     }
     Shortcut {
       sequence: "Ctrl+Shift+L"
       context: Qt.ApplicationShortcut
-      enabled: win.pane === "nvim"
       onActivated: viewTabs.cycle(1)
     }
     Shortcut {
