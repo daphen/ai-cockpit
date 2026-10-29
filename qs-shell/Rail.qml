@@ -4289,7 +4289,7 @@ Item {
         color: "transparent"
         border.width: 0
         RowLayout {
-          anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 6; rightMargin: 6; bottomMargin: parent.toolbarHeight }
+          anchors { left: parent.left; right: parent.right; top: parent.top; bottom: parent.bottom; leftMargin: 2; rightMargin: 6; bottomMargin: parent.toolbarHeight }
           spacing: 8
           Flickable {
             id: composerFlick
@@ -4307,6 +4307,7 @@ Item {
             onActiveFocusChanged: if (activeFocus) { if (!rail.focused) rail.requestFocus(); rail.enterInsert() }
             width: composerFlick.width
             padding: 0
+            leftPadding: 0
             background: null
             wrapMode: TextArea.Wrap
             color: chin.fg
@@ -4469,7 +4470,7 @@ Item {
         }
         Item {
           objectName: "composerToolbar"
-          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: -4; rightMargin: -6; bottomMargin: -1 }
+          anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: -8; rightMargin: -6; bottomMargin: -1 }
           height: parent.toolbarHeight - 7
           Row {
             id: cornerControls
