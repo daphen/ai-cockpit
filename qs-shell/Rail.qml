@@ -4457,8 +4457,9 @@ Item {
               }
             }
             Text {
-              anchors.fill: parent
-              verticalAlignment: Text.AlignVCenter
+              x: composerInput.leftPadding; y: composerInput.topPadding
+              width: parent.width - x
+              elide: Text.ElideRight
               visible: !composerInput.text && !composerInput.preeditText
               text: (rail.pendingAsk && (rail.pendingAsk.method === "input" || rail.pendingAsk.method === "editor"))
                     ? "type your reply…   (⏎ to send · esc cancels)"
