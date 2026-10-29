@@ -4687,8 +4687,8 @@ Item {
                 anchors.horizontalCenterOffset: -1 + modelData[0]; anchors.verticalCenterOffset: 1 + modelData[1]
                 width: 18; height: width
                 name: "paper-plane-2"
-                color: "#000000"
-                opacity: sendButton.working ? 0.85 : 0
+                color: "#2A2A2E"
+                opacity: sendButton.working ? 0.55 : 0
                 visible: opacity > 0
                 Behavior on opacity { NumberAnimation { duration: 200 } }
               }
