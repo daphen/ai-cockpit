@@ -4679,6 +4679,20 @@ Item {
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 160 } }
             }
+            Repeater {
+              model: [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]
+              Icon {
+                required property var modelData
+                anchors.centerIn: parent
+                anchors.horizontalCenterOffset: -1 + modelData[0]; anchors.verticalCenterOffset: 1 + modelData[1]
+                width: 18; height: width
+                name: "paper-plane-2"
+                color: "#000000"
+                opacity: sendButton.working ? 0.85 : 0
+                visible: opacity > 0
+                Behavior on opacity { NumberAnimation { duration: 200 } }
+              }
+            }
             Icon {
               anchors.centerIn: parent
               // The glyph's mass sits top-right; nudge it to the optical centre.
@@ -4687,8 +4701,7 @@ Item {
               name: "paper-plane-2"
               color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
-              layer.enabled: sendButton.working
-              layer.effect: MultiEffect { shadowEnabled: true; shadowColor: "#000000"; shadowOpacity: 0.9; shadowBlur: 0.25; shadowVerticalOffset: 0.5; shadowHorizontalOffset: 0 }
+
             }
             Rectangle {
               anchors { right: parent.right; top: parent.top }
