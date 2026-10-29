@@ -4684,8 +4684,8 @@ Item {
             Rectangle {
               anchors.centerIn: parent
               width: 24; height: 24; radius: 12
-              color: "#F4F4F4"
-              opacity: sendButton.working ? 0.92 : 0
+              color: "#FFFFFF"
+              opacity: sendButton.working ? 0.35 : 0
               scale: sendButton.working ? 1 : 0.5
               Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
               Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutBack } }
