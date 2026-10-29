@@ -531,6 +531,7 @@ ShellRoot {
               }
               second: Dashboard {
                 id: dashboard
+                caretHeld: glideCaret.holding
                 anchors.fill: parent
                 // Leaving for another editor resets chin.st; keep the cards through the fade-out.
                 Binding on model {

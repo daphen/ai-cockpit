@@ -214,6 +214,15 @@ FocusScope {
     answerRequested(target.modelData, {confirmed:value})
     return true
   }
+  property bool caretHeld: false
+  property int layoutTick: 0
+  onModelChanged: Qt.callLater(() => layoutTick++)
+  onSessionsChanged: Qt.callLater(() => layoutTick++)
+  onWidthChanged: Qt.callLater(() => layoutTick++)
+  readonly property var restPoint: {
+    layoutTick; view.contentY; height
+    return activeFocus && currentAction ? cursorPoint() : null
+  }
   function cursorPoint() {
     if (!currentAction) return null
     var item = showSessions ? sessionRows.itemAt(selectable.indexOf(currentAction)) : findRow(content)
@@ -1262,5 +1271,15 @@ FocusScope {
     fillMode: Image.PreserveAspectFit
     asynchronous: true
     smooth: true
+  }
+
+  Rectangle {
+    objectName: "dashRestDot"
+    z: 5
+    width: 8; height: 8; radius: 4
+    color: Theme.cursor
+    visible: !!root.restPoint && !root.caretHeld && root.restPoint.y > view.y && root.restPoint.y < view.y + view.height
+    x: root.restPoint ? root.restPoint.x - width / 2 : 0
+    y: root.restPoint ? root.restPoint.y - height / 2 : 0
   }
 }

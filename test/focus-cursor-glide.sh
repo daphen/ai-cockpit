@@ -63,6 +63,8 @@ text=text[:end]+'''
           check("composer to dashboard row", expect[0], c.target("dashboard"), true, "rest")
           const row = dashboard.findRow(dashboard), r = row && row.mapToItem(c.parent, 0, 0)
           if (!r || Math.abs(c.target("dashboard").y - (r.y + row.height / 2)) > 1 || c.target("dashboard").x >= r.x) throw new Error("dashboard glide did not land on the focused row")
+          const dot = dashboard.children.find(k => k.objectName === "dashRestDot"), d = dot && dot.mapToItem(c.parent, 4, 4)
+          if (!dot || !dot.visible || !near(d.x, c.target("dashboard").x) || !near(d.y, c.target("dashboard").y)) throw new Error("dashboard dot vanished after landing")
           if (term.active) throw new Error("dashboard focus turned the terminal cursor on")
           console.log("PASS: focus glides a dot between Neovim, the focused dashboard row and composer, one cursor at a time")
           Qt.quit()
