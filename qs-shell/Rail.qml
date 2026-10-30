@@ -4299,7 +4299,7 @@ Item {
           border.width: 0
         }
         RowLayout {
-          anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
+          anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: rail.featuredStreaming ? 90 : 46 }
           y: inputFill.y + 15; height: parent.textHeight
           spacing: 8
           Flickable {
@@ -4328,6 +4328,16 @@ Item {
             cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible && !rail.caretHeld ? 1 : 0 }
             // TextArea has no onAccepted — plain Enter routes here from Keys below.
             // Shift+Enter falls through to the default handler = a newline.
+            function queueNow() {
+              if (rail.planDraft) { feedbackPill.show("Use Enter to send a plan action"); return }
+              if (rail.agentd && rail.selectedRaw && rail.attachRefs(text).trim().length) {
+                rail.agentd.enqueue(rail.selectedRaw, rail.attachRefs(text))
+                rail.clearCode()
+                rail.rosterOverride = false
+                rail.pastedImages = []
+                text = ""
+              }
+            }
             function sendNow() {
               if (rail.planDraft && !rail.pendingAsk) { rail.sendPlanDraft(); return }
               if (rail.askDeferred) return
@@ -4425,15 +4435,7 @@ Item {
               // aborted), then send it as a fresh prompt. Plain Enter steers the live
               // turn instead — see onAccepted / submit().
               if (ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
-                if (rail.planDraft) { feedbackPill.show("Use Enter to send a plan action"); e.accepted = true; return }
-                if (rail.agentd && rail.selectedRaw && rail.attachRefs(text).trim().length) {
-                  rail.agentd.enqueue(rail.selectedRaw, rail.attachRefs(text))
-                  rail.clearCode()
-                  rail.rosterOverride = false
-                  rail.pastedImages = []
-                  text = ""
-                }
-                e.accepted = true; return
+                composerInput.queueNow(); e.accepted = true; return
               }
               // Ctrl+V: the clipboard may hold an IMAGE, and we only learn that
               // asynchronously (wl-paste --list-types), so swallow the key and let
@@ -4718,6 +4720,30 @@ Item {
             y: inputFill.y + inputFill.height - height - (30 + composerFrame.lineHeight - height) / 2 - parent.y
             width: 38; height: 38
             readonly property bool ready: composerInput.text.trim().length > 0
+            readonly property bool steering: rail.featuredStreaming
+            Item {
+              id: queueButton
+              objectName: "queueButton"
+              visible: sendButton.steering
+              anchors { right: parent.left; rightMargin: 6 }
+              width: 38; height: 38
+              Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: queueHover.hovered && sendButton.ready ? chin.itemHover : "transparent"
+                border.width: 1; border.color: chin.hairline
+                Behavior on color { ColorAnimation { duration: 160 } }
+              }
+              Icon {
+                anchors.centerIn: parent
+                width: 18; height: width
+                name: "ordered-list"
+                color: sendButton.ready ? Theme.fg : chin.muted
+                Behavior on color { ColorAnimation { duration: 200 } }
+              }
+              HoverHandler { id: queueHover; cursorShape: Qt.PointingHandCursor }
+              TapHandler { onTapped: if (sendButton.ready) composerInput.queueNow() }
+            }
             Rectangle {
               anchors.fill: parent
               radius: width / 2
@@ -4727,9 +4753,9 @@ Item {
             Icon {
               anchors.centerIn: parent
               // The glyph's mass sits top-right; nudge it to the optical centre.
-              anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
+              anchors.horizontalCenterOffset: sendButton.steering ? 0 : -1; anchors.verticalCenterOffset: sendButton.steering ? 0 : 1
               width: 18; height: width
-              name: "paper-plane-2"
+              name: sendButton.steering ? "bolt" : "paper-plane-2"
               color: sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
 
