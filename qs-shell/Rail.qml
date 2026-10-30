@@ -4748,7 +4748,7 @@ Item {
               Icon {
                 anchors.centerIn: parent
                 width: 18; height: width
-                name: "ordered-list"
+                name: "loader"
                 color: sendButton.ready ? Theme.fg : chin.muted
                 Behavior on color { ColorAnimation { duration: 200 } }
               }
@@ -4766,7 +4766,7 @@ Item {
               // The glyph's mass sits top-right; nudge it to the optical centre.
               anchors.horizontalCenterOffset: sendButton.steering ? 0 : -1; anchors.verticalCenterOffset: sendButton.steering ? 0 : 1
               width: 18; height: width
-              name: sendButton.steering ? "bolt" : "paper-plane-2"
+              name: sendButton.steering ? "half-dotted-circle-play" : "paper-plane-2"
               color: sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
 
