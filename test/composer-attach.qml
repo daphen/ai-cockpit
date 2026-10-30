@@ -46,9 +46,7 @@ ShellRoot {
         var meter = test.find(rail, "contextMeter")
         if (!meter || meter.visible) { test.fail("context meter shown before any usage arrived"); return }
         state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:80000,contextWindow:200000,percent:40}}}),0)
-        var field = test.find(meter, "contextField"), notch = test.find(meter, "compactNotch")
-        if (!meter.visible || meter.percent !== 40 || String(meter.ink) !== String(Theme.sky)) { test.fail("context meter does not fill 40% in blue: " + meter.percent + " " + meter.ink); return }
-        if (meter.compactAt !== 183616 || Math.abs(notch.x - field.width * 0.91808) > 0.01) { test.fail("compaction point is not marked at 183,616 tokens: " + meter.compactAt + " notch " + notch.x); return }
+                if (!meter.visible || meter.percent !== 40 || String(meter.ink) !== String(Theme.sky)) { test.fail("context meter does not fill 40% in blue: " + meter.percent + " " + meter.ink); return }
         state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:180000,contextWindow:200000,percent:90}}}),0)
         if (String(meter.ink) !== String(Theme.red)) { test.fail("context meter is not red at 90%: " + meter.ink); return }
         var mb = meter.mapToItem(rail, 0, 0), fb = test.find(rail, "composerFrame").mapToItem(rail, 0, 0), ab = test.find(rail, "attachPill").mapToItem(rail, 0, 0)

@@ -4649,7 +4649,6 @@ Item {
             readonly property color ink: percent < 40 ? Theme.green : percent < 60 ? Theme.sky : percent < 85 ? Theme.orange : Theme.red
             // Pi's default compaction reserve; no settings file overrides it.
             readonly property real compactAt: usage && usage.contextWindow ? usage.contextWindow - 16384 : 0
-            readonly property real compactFraction: compactAt ? compactAt / usage.contextWindow : 1
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
@@ -4705,12 +4704,6 @@ Item {
               Behavior on fill { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
               Behavior on colA { ColorAnimation { duration: 650 } }
               Behavior on colB { ColorAnimation { duration: 650 } }
-              Rectangle {
-                objectName: "compactNotch"
-                x: parent.width * contextMeter.compactFraction; width: 1
-                anchors.verticalCenter: parent.verticalCenter; height: parent.height - 4
-                color: chin.muted; opacity: 0.6
-              }
             }
             HoverHandler { id: contextHover }
           }
@@ -5735,31 +5728,6 @@ Item {
       id: chipRow; anchors.centerIn: parent; spacing: 5
       Icon { name: chip.icon; width: 12; height: 12; color: Theme.fg_muted; anchors.verticalCenter: parent.verticalCenter }
       Text { text: chip.label; color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1; anchors.verticalCenter: parent.verticalCenter }
-    }
-  }
-  component PillSurface: Item {
-    id: pillSurface
-    property real radius: height / 2
-    property bool hovered: false
-    readonly property color contentColor: Theme.fg
-    GradientFrame {
-      anchors.fill: parent
-      visible: Theme.mode !== "light"
-      radius: pillSurface.radius
-      fill: Qt.tint(rail.userCardTop, Qt.rgba(1, 1, 1, 0.10))
-      edge: "#FAFAFA"
-    }
-    LightKey {
-      anchors.fill: parent
-      visible: Theme.mode === "light"
-      radius: pillSurface.radius
-      outline: Qt.alpha("#23272B", 0.16)
-    }
-    Rectangle {
-      anchors.fill: parent
-      radius: pillSurface.radius
-      color: Qt.alpha(Theme.fg, pillSurface.hovered ? 0.05 : 0)
-      Behavior on color { ColorAnimation { duration: 120 } }
     }
   }
   Component {
