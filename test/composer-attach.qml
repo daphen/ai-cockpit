@@ -53,21 +53,22 @@ ShellRoot {
         if (String(meter.ink) !== String(Theme.red)) { test.fail("context meter is not red at 90%: " + meter.ink); return }
         var mb = meter.mapToItem(rail, 0, 0), fb = test.find(rail, "composerFrame").mapToItem(rail, 0, 0), ab = test.find(rail, "attachPill").mapToItem(rail, 0, 0)
         if (mb.x < fb.x + test.find(rail, "composerFrame").width / 2 || Math.abs(mb.y + meter.height / 2 - (ab.y + test.find(rail, "attachPill").height / 2)) > 1) { test.fail("context meter is not in the toolbar's bottom-right"); return }
-        var queueBtn = test.find(rail, "queueButton")
-        if (queueBtn.visible) { test.fail("queue button shown while the session is idle"); return }
+        var sendBtn = test.find(rail, "composerStatus")
+        if (sendBtn.steering) { test.fail("steer shown while the session is idle"); return }
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "streaming", scope: "personal" }]
-        var sendBtn = test.find(rail, "composerStatus"), qb = queueBtn.mapToItem(rail, 0, 0), sb = sendBtn.mapToItem(rail, 0, 0)
-        if (!queueBtn.visible || qb.x + queueBtn.width > sb.x || Math.abs(qb.y - sb.y) > 0.5) { test.fail("queue button is not beside send while working"); return }
-        rail.composerField.text = "after this turn"
-        for (var h of queueBtn.data) if (h instanceof TapHandler) h.tapped(null, Qt.LeftButton)
-        if (state.queuedFor("worker") !== 1 || state.queuedFirst("worker") !== "after this turn" || rail.composerField.text !== "") { test.fail("queue button did not queue the message: " + state.queuedFor("worker")); return }
+        if (!sendBtn.steering) { test.fail("send did not turn into steer while working"); return }
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "idle", scope: "personal" }]
+        state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "streaming", scope: "personal" }]
+        state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "idle", scope: "personal" }]
+        if (!sendBtn.steering) { test.fail("steer blinked back to send the instant the turn ended"); return }
         rail.attachFiles()
       } else if (test.phase === 8) {
         var text = rail.composerField.text, home = Quickshell.env("HOME")
         var want = "@" + home + "/notes.md @" + JSON.stringify(home + "/My Files/shot.png") + " "
         if (text !== want) { test.fail("composer text was " + JSON.stringify(text)); return }
-        console.log("PASS: attach/model/switch sit in the input's bottom-left, send bottom-right, queue beside it while working; attach inserts chosen files as @references")
+      } else if (test.phase === 10) {
+        if (test.find(rail, "composerStatus").steering) { test.fail("steer stayed after the session went idle"); return }
+        console.log("PASS: attach/model/switch sit in the input's bottom-left, send bottom-right and steers while working without blinking between turns; attach inserts chosen files as @references")
         Qt.quit()
       }
       test.phase++

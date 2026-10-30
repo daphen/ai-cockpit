@@ -4299,7 +4299,7 @@ Item {
           border.width: 0
         }
         RowLayout {
-          anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: rail.featuredStreaming ? 90 : 46 }
+          anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
           y: inputFill.y + 15; height: parent.textHeight
           spacing: 8
           Flickable {
@@ -4731,45 +4731,40 @@ Item {
             y: inputFill.y + inputFill.height - height - (30 + composerFrame.lineHeight - height) / 2 - parent.y
             width: 38; height: 38
             readonly property bool ready: composerInput.text.trim().length > 0
-            readonly property bool steering: rail.featuredStreaming
-            Item {
-              id: queueButton
-              objectName: "queueButton"
-              visible: sendButton.steering
-              anchors { right: parent.left; rightMargin: 6 }
-              width: 38; height: 38
-              Rectangle {
-                anchors.fill: parent
-                radius: width / 2
-                color: queueHover.hovered && sendButton.ready ? chin.itemHover : "transparent"
-                border.width: 1; border.color: chin.hairline
-                Behavior on color { ColorAnimation { duration: 160 } }
-              }
-              Icon {
-                anchors.centerIn: parent
-                width: 18; height: width
-                name: "loader"
-                color: sendButton.ready ? Theme.fg : chin.muted
-                Behavior on color { ColorAnimation { duration: 200 } }
-              }
-              HoverHandler { id: queueHover; cursorShape: Qt.PointingHandCursor }
-              TapHandler { onTapped: if (sendButton.ready) composerInput.queueNow() }
-            }
+            readonly property bool busy: rail.featuredStreaming
+            // Status dips to idle between chained turns; hold the working controls so they don't blink.
+            property bool steering: busy
+            onBusyChanged: if (busy) { steerHold.stop(); steering = true } else steerHold.restart()
+            Timer { id: steerHold; interval: 700; onTriggered: sendButton.steering = sendButton.busy }
+            Connections { target: rail; function onSelectedRawChanged() { steerHold.stop(); sendButton.steering = sendButton.busy } }
             Rectangle {
               anchors.fill: parent
               radius: width / 2
               color: sendButton.ready ? Theme.fg : (sendHover.hovered ? chin.itemHover : Qt.alpha(Theme.fg, Theme.mode === "dark" ? 0.16 : 0.08))
               Behavior on color { ColorAnimation { duration: 160 } }
             }
-            Icon {
-              anchors.centerIn: parent
-              // The glyph's mass sits top-right; nudge it to the optical centre.
-              anchors.horizontalCenterOffset: sendButton.steering ? 0 : -1; anchors.verticalCenterOffset: sendButton.steering ? 0 : 1
-              width: 18; height: width
-              name: sendButton.steering ? "half-dotted-circle-play" : "paper-plane-2"
-              color: sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
-              Behavior on color { ColorAnimation { duration: 200 } }
-
+            Crossfade {
+              id: sendGlyph
+              anchors.fill: parent
+              showSecond: sendButton.steering
+              enterDuration: 220; exitDuration: 180
+              property color ink: sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
+              Behavior on ink { ColorAnimation { duration: 200 } }
+              first: Icon {
+                anchors.centerIn: parent
+                // The glyph's mass sits top-right; nudge it to the optical centre.
+                anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
+                width: 18; height: width
+                name: "paper-plane-2"
+                color: sendGlyph.ink
+              }
+              second: Icon {
+                objectName: "steerIcon"
+                anchors.centerIn: parent
+                width: 18; height: width
+                name: "half-dotted-circle-play"
+                color: sendGlyph.ink
+              }
             }
             Rectangle {
               anchors { right: parent.right; top: parent.top }
