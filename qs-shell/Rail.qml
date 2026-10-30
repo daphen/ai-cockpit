@@ -5738,7 +5738,9 @@ Item {
       PillSurface {
         id: imagePill
         width: imagePillRow.implicitWidth + 16
-        height: rail.bodyLeading
+        // Shorter than the line so pills on stacked lines keep a gap.
+        height: rail.bodyLeading - 4
+        anchors.verticalCenter: parent.verticalCenter
         radius: height / 2
         Row {
           id: imagePillRow
@@ -5763,7 +5765,9 @@ Item {
       PillSurface {
         id: filePill
         width: filePillRow.implicitWidth + 16
-        height: rail.bodyLeading
+        // Shorter than the line so pills on stacked lines keep a gap.
+        height: rail.bodyLeading - 4
+        anchors.verticalCenter: parent.verticalCenter
         radius: height / 2
         Row {
           id: filePillRow
