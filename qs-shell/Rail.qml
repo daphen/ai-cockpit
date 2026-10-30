@@ -4637,23 +4637,24 @@ Item {
                 }
               }
           }
-          Item {
+          Rectangle {
             id: contextMeter
             objectName: "contextMeter"
             readonly property var usage: rail.agentd ? rail.agentd.contextUsage(rail.selectedRaw) : null
             readonly property real percent: usage ? Math.max(0, Math.min(100, usage.contextPercent)) : 0
-            readonly property int ribs: 24
-            readonly property int filled: Math.round(percent / 100 * ribs)
-            readonly property color ink: percent >= 90 ? Theme.red : Theme.orange
+            readonly property color ink: percent < 40 ? Theme.green : percent < 60 ? Theme.sky : percent < 85 ? Theme.orange : Theme.red
             // Pi's default compaction reserve; no settings file overrides it.
             readonly property real compactAt: usage && usage.contextWindow ? usage.contextWindow - 16384 : 0
-            readonly property int compactRib: compactAt ? Math.floor(compactAt / usage.contextWindow * ribs) : ribs
+            readonly property real compactFraction: compactAt ? compactAt / usage.contextWindow : 1
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
-            width: contextRow.implicitWidth; height: 22
+            width: contextRow.implicitWidth + (contextHover.hovered ? 14 : 6); height: 22
+            radius: height / 2
+            color: "transparent"
+            border.width: 1; border.color: chin.hairline
             Row {
               id: contextRow
-              anchors.verticalCenter: parent.verticalCenter
+              anchors { right: parent.right; rightMargin: 3; verticalCenter: parent.verticalCenter }
               spacing: 8
               Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -4663,17 +4664,48 @@ Item {
                 color: contextMeter.ink
                 font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
               }
-              Row {
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 3
-                Repeater {
-                  model: contextMeter.ribs
-                  Rectangle {
-                    width: 3; height: 20; radius: 1
-                    objectName: index >= contextMeter.compactRib ? "compactRib" : ""
-                    color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.12 : 0.2)
-                    Behavior on color { ColorAnimation { duration: 200 } }
-                  }
+              ShaderEffect {
+                id: contextField
+                objectName: "contextField"
+                width: 134; height: 16
+                fragmentShader: Qt.resolvedUrl("context-field.frag.qsb")
+                readonly property real hu: contextMeter.ink.hslHue < 0 ? 0 : contextMeter.ink.hslHue
+                readonly property real sat: Math.min(1, Math.max(0.75, contextMeter.ink.hslSaturation))
+                readonly property real lift: Theme.mode === "light" ? 0.047 : 0
+                readonly property bool warm: hu < 0.45
+                readonly property bool orange: hu < 0.17
+                readonly property real coolLift: 0.10 * Math.max(0, Math.min(1, (hu - 0.565) / 0.06))
+                function phase(period) { return ((OrbClock.now * 0.9) % period) / period * 2 * Math.PI }
+                property real ph1: phase(47000)
+                property real ph2: phase(61000) + 1.3
+                property real ph3: phase(83000) + 2.9
+                property real ph4: phase(29000) + 4.2
+                // ThinkingOrb's palette minus its pale crest, so the long pill stays calm.
+                property color colA: orange ? Qt.hsla((hu - 0.027 + 1) % 1, sat, 0.359 + lift, 1)
+                  : Qt.hsla((hu + (warm ? 0.02 : 0.03)) % 1, sat * 0.60, (Theme.mode === "light" ? 0.30 : 0.24) + coolLift * 0.6, 1)
+                property color colB: orange ? Qt.hsla(hu, sat * 0.867, 0.55 + lift, 1)
+                  : Qt.hsla(hu, sat * (warm ? 0.70 : 0.55), (Theme.mode === "light" ? 0.58 : 0.52) + coolLift, 1)
+                property color colC: colB
+                property real angle: -0.76
+                property real bandX: 3
+                property real bandY: 1.2
+                property real warp: 0.8
+                property real gain: 0.54
+                property real feather: 0.96
+                property real bright: 0.55
+                property real swirl: 1.2
+                property real plasma: 0.05
+                property real fill: contextMeter.percent / 100
+                property real aspect: width / height
+                property real pixel: 2 / height
+                Behavior on fill { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                Behavior on colA { ColorAnimation { duration: 650 } }
+                Behavior on colB { ColorAnimation { duration: 650 } }
+                Rectangle {
+                  objectName: "compactNotch"
+                  x: parent.width * contextMeter.compactFraction; width: 1
+                  anchors.verticalCenter: parent.verticalCenter; height: parent.height - 4
+                  color: chin.muted; opacity: 0.6
                 }
               }
             }
@@ -4685,42 +4717,12 @@ Item {
             anchors { right: parent.right; rightMargin: 6 }
             y: inputFill.y + inputFill.height - height - (30 + composerFrame.lineHeight - height) / 2 - parent.y
             width: 38; height: 38
-            readonly property var colors: rail.fleetActivityColors(rail.featured.rawName)
-            readonly property bool working: !rail.pendingAsk && (colors.length > 0 || rail.featured.status === "streaming")
             readonly property bool ready: composerInput.text.trim().length > 0
-            ThinkingOrb {
-              anchors.fill: parent
-              running: sendButton.working
-              opacity: sendButton.working ? 1 : 0
-              visible: opacity > 0
-              activityColors: sendButton.colors.length ? sendButton.colors : [rail.actionGlow(rail.featured.rawName)]
-              glow: activityColors[0]
-              seedKey: rail.featured.rawName
-              Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-            }
             Rectangle {
               anchors.fill: parent
               radius: width / 2
-              opacity: sendButton.working ? 0 : 1
-              scale: sendButton.working ? 1.15 : 1
               color: sendButton.ready ? Theme.fg : (sendHover.hovered ? chin.itemHover : Qt.alpha(Theme.fg, Theme.mode === "dark" ? 0.16 : 0.08))
-              Behavior on opacity { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-              Behavior on scale { NumberAnimation { duration: 320; easing.type: Easing.OutCubic } }
               Behavior on color { ColorAnimation { duration: 160 } }
-            }
-            Repeater {
-              model: [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]
-              Icon {
-                required property var modelData
-                anchors.centerIn: parent
-                anchors.horizontalCenterOffset: -1 + modelData[0]; anchors.verticalCenterOffset: 1 + modelData[1]
-                width: 18; height: width
-                name: "paper-plane-2"
-                color: "#2A2A2E"
-                opacity: sendButton.working ? 0.3 : 0
-                visible: opacity > 0
-                Behavior on opacity { NumberAnimation { duration: 200 } }
-              }
             }
             Icon {
               anchors.centerIn: parent
@@ -4728,7 +4730,7 @@ Item {
               anchors.horizontalCenterOffset: -1; anchors.verticalCenterOffset: 1
               width: 18; height: width
               name: "paper-plane-2"
-              color: sendButton.working ? "#FFFFFF" : sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
+              color: sendButton.ready ? Theme.bg : Theme.mode === "dark" ? Qt.alpha(Theme.fg, 0.8) : chin.muted
               Behavior on color { ColorAnimation { duration: 200 } }
 
             }

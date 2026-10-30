@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import QsLib
 import "."
 ShellRoot {
   id: test
@@ -45,22 +46,19 @@ ShellRoot {
         var meter = test.find(rail, "contextMeter")
         if (!meter || meter.visible) { test.fail("context meter shown before any usage arrived"); return }
         state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:80000,contextWindow:200000,percent:40}}}),0)
-        if (!meter.visible || meter.filled !== 10) { test.fail("context meter does not show 40% as 10 of 24 ribs: " + meter.filled); return }
-        var zone = 0; (function walk(item) { if (item.objectName === "compactRib") zone++; for (var c of item.children || []) walk(c) })(meter)
-        if (meter.compactAt !== 183616 || meter.compactRib !== 22 || zone !== 2) { test.fail("compaction point is not marked at 183,616 tokens (rib 22): " + meter.compactAt + " rib " + meter.compactRib); return }
+        var field = test.find(meter, "contextField"), notch = test.find(meter, "compactNotch")
+        if (!meter.visible || meter.percent !== 40 || String(meter.ink) !== String(Theme.sky)) { test.fail("context meter does not fill 40% in blue: " + meter.percent + " " + meter.ink); return }
+        if (meter.compactAt !== 183616 || Math.abs(notch.x - field.width * 0.91808) > 0.01) { test.fail("compaction point is not marked at 183,616 tokens: " + meter.compactAt + " notch " + notch.x); return }
+        state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:180000,contextWindow:200000,percent:90}}}),0)
+        if (String(meter.ink) !== String(Theme.red)) { test.fail("context meter is not red at 90%: " + meter.ink); return }
         var mb = meter.mapToItem(rail, 0, 0), fb = test.find(rail, "composerFrame").mapToItem(rail, 0, 0), ab = test.find(rail, "attachPill").mapToItem(rail, 0, 0)
         if (mb.x < fb.x + test.find(rail, "composerFrame").width / 2 || Math.abs(mb.y + meter.height / 2 - (ab.y + test.find(rail, "attachPill").height / 2)) > 1) { test.fail("context meter is not in the toolbar's bottom-right"); return }
-        var send = test.find(rail, "composerStatus")
-        state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "streaming", scope: "personal" }]
-        if (!send.working) { test.fail("send button did not become the orb while the agent works"); return }
-        state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "idle", scope: "personal" }]
-        if (send.working) { test.fail("send button stayed an orb while the agent is idle"); return }
         rail.attachFiles()
       } else if (test.phase === 8) {
         var text = rail.composerField.text, home = Quickshell.env("HOME")
         var want = "@" + home + "/notes.md @" + JSON.stringify(home + "/My Files/shot.png") + " "
         if (text !== want) { test.fail("composer text was " + JSON.stringify(text)); return }
-        console.log("PASS: attach/model/switch sit in the input's bottom-left, send bottom-right and turns into the orb only while working; attach inserts chosen files as @references")
+        console.log("PASS: attach/model/switch sit in the input's bottom-left, send bottom-right; attach inserts chosen files as @references")
         Qt.quit()
       }
       test.phase++
