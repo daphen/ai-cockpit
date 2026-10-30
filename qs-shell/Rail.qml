@@ -4639,7 +4639,7 @@ Item {
                 }
               }
           }
-          Rectangle {
+          Item {
             id: contextMeter
             objectName: "contextMeter"
             readonly property var usage: rail.agentd ? rail.agentd.contextUsage(rail.selectedRaw) : null
@@ -4650,65 +4650,76 @@ Item {
             readonly property real compactFraction: compactAt ? compactAt / usage.contextWindow : 1
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
-            width: contextRow.implicitWidth + (contextHover.hovered ? 14 : 6); height: 22
-            radius: height / 2
-            color: "transparent"
-            border.width: 1; border.color: chin.hairline
-            Row {
-              id: contextRow
-              anchors { right: parent.right; rightMargin: 3; verticalCenter: parent.verticalCenter }
-              spacing: 8
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: contextHover.hovered
-                text: "CONTEXT " + Math.round(contextMeter.percent) + "%" + (contextMeter.usage && contextMeter.usage.contextWindow
-                      ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K · compacts at " + Math.round(contextMeter.compactAt / 1000) + "K" : "")
-                color: contextMeter.ink
-                font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
-              }
-              ShaderEffect {
-                id: contextField
-                objectName: "contextField"
-                width: 134; height: 16
-                fragmentShader: Qt.resolvedUrl("context-field.frag.qsb")
-                readonly property real hu: contextMeter.ink.hslHue < 0 ? 0 : contextMeter.ink.hslHue
-                readonly property real sat: Math.min(1, Math.max(0.75, contextMeter.ink.hslSaturation))
-                readonly property real lift: Theme.mode === "light" ? 0.047 : 0
-                readonly property bool warm: hu < 0.45
-                readonly property bool orange: hu < 0.17
-                readonly property real coolLift: 0.10 * Math.max(0, Math.min(1, (hu - 0.565) / 0.06))
-                function phase(period) { return ((OrbClock.now * 0.9) % period) / period * 2 * Math.PI }
-                property real ph1: phase(47000)
-                property real ph2: phase(61000) + 1.3
-                property real ph3: phase(83000) + 2.9
-                property real ph4: phase(29000) + 4.2
-                // ThinkingOrb's palette minus its pale crest, so the long pill stays calm.
-                property color colA: orange ? Qt.hsla((hu - 0.027 + 1) % 1, sat, 0.359 + lift, 1)
-                  : Qt.hsla((hu + (warm ? 0.02 : 0.03)) % 1, sat * 0.60, (Theme.mode === "light" ? 0.30 : 0.24) + coolLift * 0.6, 1)
-                property color colB: orange ? Qt.hsla(hu, sat * 0.867, 0.55 + lift, 1)
-                  : Qt.hsla(hu, sat * (warm ? 0.70 : 0.55), (Theme.mode === "light" ? 0.58 : 0.52) + coolLift, 1)
-                property color colC: colB
-                property real angle: -0.76
-                property real bandX: 3
-                property real bandY: 1.2
-                property real warp: 0.8
-                property real gain: 0.54
-                property real feather: 0.96
-                property real bright: 0.55
-                property real swirl: 1.2
-                property real plasma: 0.05
-                property real fill: contextMeter.percent / 100
-                property real aspect: width / height
-                property real pixel: 2 / height
-                Behavior on fill { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
-                Behavior on colA { ColorAnimation { duration: 650 } }
-                Behavior on colB { ColorAnimation { duration: 650 } }
-                Rectangle {
-                  objectName: "compactNotch"
-                  x: parent.width * contextMeter.compactFraction; width: 1
-                  anchors.verticalCenter: parent.verticalCenter; height: parent.height - 4
-                  color: chin.muted; opacity: 0.6
-                }
+            width: 140; height: 22
+            GradientFrame {
+              anchors.fill: parent
+              visible: Theme.mode !== "light"
+              radius: height / 2
+              fill: Qt.tint(rail.userCardTop, chin.itemSelected)
+              edge: chin.fg
+            }
+            LightKey {
+              anchors.fill: parent
+              visible: Theme.mode === "light"
+              radius: height / 2
+              outline: Qt.alpha(chin.fg, 0.16)
+            }
+            Text {
+              id: contextLabel
+              anchors { right: parent.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
+              property real shown: contextHover.hovered ? 1 : 0
+              Behavior on shown { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+              opacity: shown
+              visible: shown > 0
+              layer.enabled: shown < 1
+              layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: 1 - contextLabel.shown }
+              text: "CONTEXT " + Math.round(contextMeter.percent) + "%" + (contextMeter.usage && contextMeter.usage.contextWindow
+                    ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K · compacts at " + Math.round(contextMeter.compactAt / 1000) + "K" : "")
+              color: contextMeter.ink
+              font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
+            }
+            ShaderEffect {
+              id: contextField
+              objectName: "contextField"
+              anchors { fill: parent; margins: 3 }
+              fragmentShader: Qt.resolvedUrl("context-field.frag.qsb")
+              readonly property real hu: contextMeter.ink.hslHue < 0 ? 0 : contextMeter.ink.hslHue
+              readonly property real sat: Math.min(1, Math.max(0.75, contextMeter.ink.hslSaturation))
+              readonly property real lift: Theme.mode === "light" ? 0.047 : 0
+              readonly property bool warm: hu < 0.45
+              readonly property bool orange: hu < 0.17
+              readonly property real coolLift: 0.10 * Math.max(0, Math.min(1, (hu - 0.565) / 0.06))
+              function phase(period) { return ((OrbClock.now * 0.9) % period) / period * 2 * Math.PI }
+              property real ph1: phase(47000)
+              property real ph2: phase(61000) + 1.3
+              property real ph3: phase(83000) + 2.9
+              property real ph4: phase(29000) + 4.2
+              // ThinkingOrb's palette minus its pale crest, so the long pill stays calm.
+              property color colA: orange ? Qt.hsla((hu - 0.027 + 1) % 1, sat, 0.359 + lift, 1)
+                : Qt.hsla((hu + (warm ? 0.02 : 0.03)) % 1, sat * 0.60, (Theme.mode === "light" ? 0.30 : 0.24) + coolLift * 0.6, 1)
+              property color colB: orange ? Qt.hsla(hu, sat * 0.867, 0.55 + lift, 1)
+                : Qt.hsla(hu, sat * (warm ? 0.70 : 0.55), (Theme.mode === "light" ? 0.58 : 0.52) + coolLift, 1)
+              property color colC: colB
+              property real angle: -0.76
+              property real bandX: 3
+              property real bandY: 1.2
+              property real warp: 0.8
+              property real gain: 0.54
+              property real feather: 0.96
+              property real bright: 0.55
+              property real swirl: 1.2
+              property real plasma: 0.05
+              property real fill: contextMeter.percent / 100
+              property real aspect: width / height
+              property real pixel: 2 / height
+              Behavior on fill { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+              Behavior on colA { ColorAnimation { duration: 650 } }
+              Behavior on colB { ColorAnimation { duration: 650 } }
+              Rectangle {
+                objectName: "compactNotch"
+                x: parent.width * contextMeter.compactFraction; width: 1
+                anchors.verticalCenter: parent.verticalCenter; height: parent.height - 4
+                color: chin.muted; opacity: 0.6
               }
             }
             HoverHandler { id: contextHover }
