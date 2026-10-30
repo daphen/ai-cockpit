@@ -3466,26 +3466,30 @@ Item {
                     font { family: Theme.fontFamily; pixelSize: noteDisclosure.fontPixelSize; weight: 500 }
                   }
                 }
-                // A steer redirected a LIVE turn — visibly different from a normal
-                // prompt, so "why did it abort" has its answer in the header.
-                Rectangle {
-                  id: steerBadge
-                  visible: turnDel.isSteering || (turnDel.isHandoff && turnDel.turn.steered === true)
-                  implicitWidth: steerCap.implicitWidth + 12
-                  implicitHeight: 17; radius: 8.5
-                  color: "transparent"
-                  border.width: 1; border.color: Theme.orange
-                  anchors.verticalCenter: parent.verticalCenter
-                  Text {
-                    id: steerCap; anchors.centerIn: parent
-                    text: "steer"
-                    color: Theme.orange
-                    font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(700)
-                    font.pixelSize: rail.fsMeta - 3; font.bold: true
-                  }
+              }
+              Rectangle {
+                id: steerBadge
+                objectName: "steerBadge"
+                visible: turnDel.isSteering || (turnDel.isHandoff && turnDel.turn.steered === true)
+                anchors { right: deliveryStatus.visible ? deliveryStatus.left : parent.right; rightMargin: deliveryStatus.visible ? 8 : 0; verticalCenter: parent.verticalCenter }
+                implicitWidth: steerCap.implicitWidth + 12
+                implicitHeight: 17; radius: 8.5
+                color: "transparent"
+                border.width: 1; border.color: Theme.orange
+                FontMetrics { id: steerMetrics; font: steerCap.font }
+                Text {
+                  id: steerCap
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  // Lowercase-only label: centre the x-height, not the line box.
+                  y: Math.round(parent.height / 2 + steerMetrics.xHeight / 2 - steerMetrics.ascent)
+                  text: "steer"
+                  color: Theme.orange
+                  font.family: rail.labelFontFamily; font.styleName: rail.labelFontStyle(700)
+                  font.pixelSize: rail.fsMeta - 3; font.bold: true
                 }
               }
               Item {
+                id: deliveryStatus
                 objectName: "delivery-status"
                 readonly property string delivery: turnDel.localDelivery
                 visible: delivery === "pending" || delivery === "accepted" || delivery === "handled"
@@ -3777,22 +3781,20 @@ Item {
         Flow {
           id: attachmentFlow
           y: chinCol.spacing; width: parent.width; spacing: 6
-          Rectangle {
+          PillSurface {
             visible: rail.planDraft !== null
-            width: planDraftLabel.implicitWidth + 24; height: 28; radius: 14
-            color: chin.raisedSurface; border.color: chin.softHairline
+            width: planDraftLabel.implicitWidth + 24; height: 28
             Text { id: planDraftLabel; anchors.centerIn: parent; text: (rail.planDraft ? rail.planDraft.title : "") + " ×"; color: chin.fg; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 1 }
             TapHandler { onTapped: rail.removePlanDraft() }
           }
           Repeater {
             model: rail.codeAttachments
-            Rectangle {
+            PillSurface {
               required property var modelData
               required property int index
               objectName: "codeAttachment-" + index
               width: Math.min(codeLabel.implicitWidth + codeRange.implicitWidth + 74, attachmentFlow.width)
-              height: 28; radius: height / 2
-              color: chin.raisedSurface; border.color: Qt.alpha(rail.goldAccent, 0.38)
+              height: 28
               Icon {
                 id: codeIcon
                 anchors { left: parent.left; leftMargin: 10; verticalCenter: parent.verticalCenter }
@@ -4651,19 +4653,7 @@ Item {
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
-            GradientFrame {
-              anchors.fill: parent
-              visible: Theme.mode !== "light"
-              radius: height / 2
-              fill: Qt.tint(rail.userCardTop, chin.itemSelected)
-              edge: chin.fg
-            }
-            LightKey {
-              anchors.fill: parent
-              visible: Theme.mode === "light"
-              radius: height / 2
-              outline: Qt.alpha(chin.fg, 0.16)
-            }
+            PillSurface { anchors.fill: parent }
             Text {
               id: contextLabel
               anchors { right: parent.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
@@ -5732,14 +5722,13 @@ Item {
       }
     }
   }
-  component ToolChip: Rectangle {
+  component ToolChip: PillSurface {
     id: chip
     property string icon
     property string label
     signal tapped()
-    width: chipRow.implicitWidth + 20; height: 26; radius: height / 2
-    color: Qt.alpha(Theme.fg, chipHover.hovered ? 0.09 : Theme.mode === "light" ? 0.045 : 0.05)
-    Behavior on color { ColorAnimation { duration: 120 } }
+    width: chipRow.implicitWidth + 20; height: 26
+    hovered: chipHover.hovered
     HoverHandler { id: chipHover; cursorShape: Qt.PointingHandCursor }
     TapHandler { onTapped: chip.tapped() }
     Row {
@@ -5748,16 +5737,29 @@ Item {
       Text { text: chip.label; color: Theme.fg_muted; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta - 1; anchors.verticalCenter: parent.verticalCenter }
     }
   }
-  component InlineAttachmentSurface: Rectangle {
+  component PillSurface: Item {
+    id: pillSurface
+    property real radius: height / 2
+    property bool hovered: false
     readonly property color contentColor: Theme.fg
-    color: Theme.mode === "light" ? Theme.surface : "transparent"
-    border.width: Theme.mode === "light" ? 1 : 0
-    border.color: Theme.hairlineSoft
-    ButtonSurface {
+    GradientFrame {
       anchors.fill: parent
-      visible: Theme.mode === "dark"
-      primary: false
-      radius: parent.radius
+      visible: Theme.mode !== "light"
+      radius: pillSurface.radius
+      fill: Qt.tint(rail.userCardTop, Qt.rgba(1, 1, 1, 0.10))
+      edge: "#FAFAFA"
+    }
+    LightKey {
+      anchors.fill: parent
+      visible: Theme.mode === "light"
+      radius: pillSurface.radius
+      outline: Qt.alpha("#23272B", 0.16)
+    }
+    Rectangle {
+      anchors.fill: parent
+      radius: pillSurface.radius
+      color: Qt.alpha(Theme.fg, pillSurface.hovered ? 0.05 : 0)
+      Behavior on color { ColorAnimation { duration: 120 } }
     }
   }
   Component {
@@ -5765,7 +5767,7 @@ Item {
     Item {
       width: imagePill.width + (token.trailing ? 7 : 0)
       height: rail.bodyLeading
-      InlineAttachmentSurface {
+      PillSurface {
         id: imagePill
         width: imagePillRow.implicitWidth + 16
         height: rail.bodyLeading
@@ -5790,7 +5792,7 @@ Item {
     Item {
       width: filePill.width + (token.trailing ? 7 : 0)
       height: rail.bodyLeading
-      InlineAttachmentSurface {
+      PillSurface {
         id: filePill
         width: filePillRow.implicitWidth + 16
         height: rail.bodyLeading

@@ -133,13 +133,9 @@ ShellRoot {
           test.check(Qt.colorEqual(rail.railGroundColor, Theme.bgDim), "rail backdrop differs from Dsqrd")
           for (var badge of [tagText.parent.parent, fileText.parent.parent]) {
             test.check(Qt.colorEqual(badge.contentColor, Theme.fg), "badge text loses contrast")
-            var raised = test.find(badge, item => item.primary !== undefined)
-            if (mode === "light")
-              test.check(!raised && !badge.gradient && Qt.colorEqual(badge.color, Theme.surface)
-                         && Qt.colorEqual(badge.border.color, Theme.hairlineSoft), "light badge retains a bevel or heavy border")
-            else
-              test.check(raised && !raised.primary && Qt.colorEqual(raised.topColor, Theme.surface3)
-                         && Qt.colorEqual(raised.bottomColor, Theme.surface1), "dark badge is not the quiet secondary surface")
+            var frame = test.find(badge, item => item.visible && item.edge !== undefined)
+            var key = test.find(badge, item => item.visible && item.outline !== undefined)
+            test.check(mode === "light" ? key && !frame : frame && !key, mode + " badge does not use the active session pill's frame")
           }
         }
         Theme.mode = originalMode; gui.wait(20)
