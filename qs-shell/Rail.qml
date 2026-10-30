@@ -4671,9 +4671,7 @@ Item {
                   Rectangle {
                     width: 3; height: 20; radius: 1
                     objectName: index >= contextMeter.compactRib ? "compactRib" : ""
-                    color: index < contextMeter.filled ? (index >= contextMeter.compactRib ? Theme.red : contextMeter.ink)
-                         : index >= contextMeter.compactRib ? Qt.alpha(Theme.red, Theme.mode === "light" ? 0.3 : 0.4)
-                         : Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.12 : 0.2)
+                    color: index < contextMeter.filled ? contextMeter.ink : Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.12 : 0.2)
                     Behavior on color { ColorAnimation { duration: 200 } }
                   }
                 }
