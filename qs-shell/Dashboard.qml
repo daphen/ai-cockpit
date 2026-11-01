@@ -636,9 +636,10 @@ FocusScope {
                   clockNow: elapsed
                   flow: 0.35
                   Behavior on motion { NumberAnimation { duration: 1800; easing.type: Easing.InOutCubic } }
-                  FrameAnimation {
-                    running: sessionOrb.visible && sessionOrb.motion > 0
-                    onTriggered: sessionOrb.elapsed += frameTime * 1000 * sessionOrb.motion
+                  Connections {
+                    target: OrbClock
+                    enabled: sessionOrb.visible && sessionOrb.motion > 0
+                    function onNowChanged() { sessionOrb.elapsed += 50 * sessionOrb.motion }
                   }
                 }
               }

@@ -4802,9 +4802,11 @@ Item {
       property real elapsed: 0
       clockNow: elapsed
       Behavior on motion { NumberAnimation { duration: 1800; easing.type: Easing.InOutCubic } }
-      FrameAnimation {
-        running: dotOrb.visible && dotOrb.motion > 0
-        onTriggered: dotOrb.elapsed += frameTime * 1000 * dotOrb.motion
+      // 20 Hz shared tick: a FrameAnimation repaints the whole window at the compositor's rate.
+      Connections {
+        target: OrbClock
+        enabled: dotOrb.visible && dotOrb.motion > 0
+        function onNowChanged() { dotOrb.elapsed += 50 * dotOrb.motion }
       }
     }
     Rectangle {
