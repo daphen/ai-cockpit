@@ -29,7 +29,7 @@ cp qs-shell/*.qml qs-shell/*.qsb "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
 [[ "${1:-}" != "test/composer-attach.qml" ]] || cp test/fake-chooser.sh "$tmp/"
 mkdir -p "$tmp/home"
-if [[ "${1:-}" == "test/private-font.qml" ]]; then
+if [[ "${1:-}" == "test/private-font.qml" || "${1:-}" == "test/composer-lines.qml" ]]; then
   mkdir -p "$tmp/home/.local/share"
   ln -s "$HOME/.local/share/fonts" "$tmp/home/.local/share/fonts"
 fi
