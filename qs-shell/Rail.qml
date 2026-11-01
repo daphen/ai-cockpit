@@ -4531,7 +4531,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: rail.selectedModelLabel.length > 0
                 readonly property color tint: chin.muted
-                readonly property bool expanded: rail.onSteamDeck || modelHover.hovered || rail.modelOpen
+                readonly property bool expanded: modelHover.hovered || rail.modelOpen
                 implicitWidth: expanded ? modelRow.implicitWidth + 12 : 30
                 Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                 clip: true
