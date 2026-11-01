@@ -37,6 +37,7 @@ ShellRoot {
   function notch(index, width, height, color) {
     var stroke = find(rail, "taskNotch-" + index)
     check(stroke && Math.abs(stroke.width - width) < 0.1 && Math.abs(stroke.height - height) < 0.1, "wrong horizontal notch geometry " + index)
+    check(Math.abs(stroke.x + stroke.width - stroke.parent.width) < 0.1, "notch not right-aligned " + index)
     check(String(stroke.color) === String(color), "wrong notch color " + index + ": " + stroke.color + " expected " + color)
     check(stroke.radius === stroke.height / 2, "notch ends are not rounded")
   }

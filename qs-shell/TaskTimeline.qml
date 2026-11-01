@@ -26,7 +26,7 @@ Item {
       Behavior on y { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
       Rectangle {
         objectName: "taskNotch-" + mark.index
-        anchors.centerIn: parent
+        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
         readonly property real dot: Math.min(hover.hovered || mark.selected ? 6 : 4, timeline.pitch)
         width: mark.segment?.active ? 14 : dot
         height: mark.segment?.active ? Math.min(6, timeline.pitch) : dot
