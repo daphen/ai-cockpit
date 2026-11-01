@@ -4489,6 +4489,7 @@ Item {
           height: parent.toolbarHeight - 7
           Row {
             id: cornerControls
+            objectName: "cornerControls"
             anchors { left: parent.left; leftMargin: 4; bottom: parent.bottom; bottomMargin: 1 }
             spacing: 2
               Rectangle {
@@ -4655,6 +4656,7 @@ Item {
             PillSurface { anchors.fill: parent }
             Text {
               id: contextLabel
+              objectName: "contextLabel"
               anchors { right: parent.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
               property real shown: contextHover.hovered ? 1 : 0
               Behavior on shown { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
@@ -4662,8 +4664,17 @@ Item {
               visible: shown > 0
               layer.enabled: shown < 1
               layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: 1 - contextLabel.shown }
-              text: "CONTEXT " + Math.round(contextMeter.percent) + "%" + (contextMeter.usage && contextMeter.usage.contextWindow
-                    ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K · compacts at " + Math.round(contextMeter.compactAt / 1000) + "K" : "")
+              readonly property string brief: "CONTEXT " + Math.round(contextMeter.percent) + "%"
+              TextMetrics {
+                id: contextFull
+                font: contextLabel.font
+                text: contextLabel.brief + (contextMeter.usage && contextMeter.usage.contextWindow
+                      ? " · " + Math.round(contextMeter.usage.contextTokens / 1000) + "K / " + Math.round(contextMeter.usage.contextWindow / 1000) + "K · compacts at " + Math.round(contextMeter.compactAt / 1000) + "K" : "")
+              }
+              TextMetrics { id: contextBrief; font: contextLabel.font; text: contextLabel.brief }
+              readonly property real room: contextMeter.x - cornerControls.x - cornerControls.width - 16
+              text: contextFull.advanceWidth <= room ? contextFull.text
+                  : contextBrief.advanceWidth <= room ? brief : Math.round(contextMeter.percent) + "%"
               color: contextMeter.ink
               font { family: Theme.fontFamily; pixelSize: rail.fsMeta - 2; weight: 650 }
             }

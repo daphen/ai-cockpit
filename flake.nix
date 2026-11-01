@@ -119,8 +119,8 @@
           if [ "''${COCKPIT_SCOPE:-lovable}" = "personal" ]; then
             export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · private}"
             mirror="$HOME/.local/state/cockpit/private-shell-pkg"
-            mkdir -p "$mirror"; rm -f "$mirror"/*.qml
-            for f in "$shell"/*.qml; do ln -sf "$f" "$mirror/$(basename "$f")"; done
+            mkdir -p "$mirror"; rm -f "$mirror"/*.qml "$mirror"/*.qsb
+            for f in "$shell"/*.qml "$shell"/*.qsb; do ln -sf "$f" "$mirror/$(basename "$f")"; done
             shell="$mirror"
           else
             export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · lovable}"

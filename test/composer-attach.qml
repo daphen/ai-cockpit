@@ -13,7 +13,7 @@ ShellRoot {
       'cp "$1" "$d/yazi-file-chooser"; chmod +x "$d/yazi-file-chooser"', "sh", Qt.resolvedUrl("fake-chooser.sh").toString().replace("file://", "")]
   }
   FloatingWindow { visible: true; width: 900; height: 1100
-    Rail { id: rail; anchors.fill: parent; agentd: state; scopeMode: "personal"; instanceName: "attach-test"; focused: false }
+    Rail { id: rail; width: test.railWidth; height: parent.height; agentd: state; scopeMode: "personal"; instanceName: "attach-test"; focused: false }
   }
   function find(item, name) {
     if (item.objectName === name) return item
@@ -21,6 +21,7 @@ ShellRoot {
     return null
   }
   property real oneLineGap: 0
+  property real railWidth: 900
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   Timer { interval: 250; repeat: true; running: true
     onTriggered: {
@@ -51,6 +52,9 @@ ShellRoot {
         if (String(meter.ink) !== String(Theme.red)) { test.fail("context meter is not red at 90%: " + meter.ink); return }
         var mb = meter.mapToItem(rail, 0, 0), fb = test.find(rail, "composerFrame").mapToItem(rail, 0, 0), ab = test.find(rail, "attachPill").mapToItem(rail, 0, 0)
         if (mb.x < fb.x + test.find(rail, "composerFrame").width / 2 || Math.abs(mb.y + meter.height / 2 - (ab.y + test.find(rail, "attachPill").height / 2)) > 1) { test.fail("context meter is not in the toolbar's bottom-right"); return }
+        var label = test.find(rail, "contextLabel")
+        if (label.text.indexOf("compacts at") < 0) { test.fail("wide composer does not show the full context label: " + label.text); return }
+        test.railWidth = 480
         var sendBtn = test.find(rail, "composerStatus")
         if (sendBtn.steering) { test.fail("steer shown while the session is idle"); return }
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "streaming", scope: "personal" }]
@@ -60,6 +64,12 @@ ShellRoot {
         state.sessions = [{ id: "worker", name: "worker", cwd: "/tmp", status: "idle", scope: "personal" }]
         if (!sendBtn.steering) { test.fail("steer blinked back to send the instant the turn ended"); return }
         rail.attachFiles()
+      } else if (test.phase === 5) {
+        var label5 = test.find(rail, "contextLabel"), corner = test.find(rail, "cornerControls")
+        label5.shown = 1
+        var lx = label5.mapToItem(rail, 0, 0).x, cx = corner.mapToItem(rail, corner.width, 0).x
+        if (lx < cx) { test.fail("context label overlaps the toolbar controls in a narrow composer: " + JSON.stringify(label5.text)); return }
+        test.railWidth = 900
       } else if (test.phase === 8) {
         var text = rail.composerField.text, home = Quickshell.env("HOME")
         var want = "@" + home + "/notes.md @" + JSON.stringify(home + "/My Files/shot.png") + " "
