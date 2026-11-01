@@ -2628,6 +2628,14 @@ Item {
       return true
     }
     if (ctrl && e.key === Qt.Key_K) return true
+    // Arrows for the Deck d-pad: Down past the last row lands in the composer.
+    if (!ctrl && e.key === Qt.Key_Down) {
+      if (onTabs && navTotal > rSize) { rosterOverride = false; cur = navTotal - 1 }
+      else if (!onTabs && cur >= navTotal - 1) enterInsert()
+      else moveDown()
+      return true
+    }
+    if (!ctrl && e.key === Qt.Key_Up) { moveUp(); return true }
     if (onTabs && !ctrl && (e.key === Qt.Key_H || e.key === Qt.Key_L)) {
       cur = (cur + (e.key === Qt.Key_L ? 1 : -1) + rSize) % rSize
       return true
@@ -4316,6 +4324,7 @@ Item {
             }
           TextArea {
             id: composerInput
+            objectName: "composerInput"
             onActiveFocusChanged: if (activeFocus) { if (!rail.focused) rail.requestFocus(); rail.enterInsert() }
             width: composerFlick.width
             padding: 0
@@ -4463,7 +4472,8 @@ Item {
               // focus handler recorded "wasn't typing" and returns landed in the
               // chat. Leave insert set; the blur captures it and re-enters on return.
               else if (ctrl && e.key === Qt.Key_H) { rail.focusNvim(); e.accepted = true }
-              else if (ctrl && e.key === Qt.Key_K) {
+              else if ((ctrl && e.key === Qt.Key_K) || (e.key === Qt.Key_Up && !e.modifiers
+                       && composerInput.cursorRectangle.y <= composerInput.positionToRectangle(0).y + 1)) {
                 rail.view = "chat"
                 rail.exitInsert()
                 rail.cur = Math.max(0, rail.navTotal - 1)
