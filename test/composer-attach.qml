@@ -46,8 +46,8 @@ ShellRoot {
       } else if (test.phase === 4) {
         var meter = test.find(rail, "contextMeter")
         if (!meter || meter.visible) { test.fail("context meter shown before any usage arrived"); return }
-        state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:80000,contextWindow:200000,percent:40}}}),0)
-                if (!meter.visible || meter.percent !== 40 || String(meter.ink) !== String(Theme.sky)) { test.fail("context meter does not fill 40% in blue: " + meter.percent + " " + meter.ink); return }
+        state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:120000,contextWindow:200000,percent:60}}}),0)
+                if (!meter.visible || meter.percent !== 60 || String(meter.ink) !== String(Theme.sky)) { test.fail("context meter does not fill 60% in blue: " + meter.percent + " " + meter.ink); return }
         state.onLine(JSON.stringify({type:"response",command:"get_session_stats",success:true,session:"worker",data:{tokens:{total:1},contextUsage:{tokens:180000,contextWindow:200000,percent:90}}}),0)
         if (String(meter.ink) !== String(Theme.red)) { test.fail("context meter is not red at 90%: " + meter.ink); return }
         var mb = meter.mapToItem(rail, 0, 0), fb = test.find(rail, "composerFrame").mapToItem(rail, 0, 0), ab = test.find(rail, "attachPill").mapToItem(rail, 0, 0)

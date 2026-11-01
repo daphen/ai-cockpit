@@ -4647,7 +4647,7 @@ Item {
             objectName: "contextMeter"
             readonly property var usage: rail.agentd ? rail.agentd.contextUsage(rail.selectedRaw) : null
             readonly property real percent: usage ? Math.max(0, Math.min(100, usage.contextPercent)) : 0
-            readonly property color ink: percent < 40 ? Theme.green : percent < 60 ? Theme.sky : percent < 85 ? Theme.orange : Theme.red
+            readonly property color ink: percent < 50 ? Theme.green : percent < 70 ? Theme.sky : percent < 90 ? Theme.orange : Theme.red
             // Pi's default compaction reserve; no settings file overrides it.
             readonly property real compactAt: usage && usage.contextWindow ? usage.contextWindow - 16384 : 0
             visible: usage !== null
