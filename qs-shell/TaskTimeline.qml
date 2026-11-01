@@ -6,8 +6,8 @@ Item {
   property var segments: []
   property int selectedRow: -1
   signal jumpRequested(int row)
-  implicitWidth: 32
-  readonly property real pitch: Math.min(8, height / Math.max(1, segments.length))
+  implicitWidth: 16
+  readonly property real pitch: Math.min(10, height / Math.max(1, segments.length))
 
   function activate(index) {
     if (index >= 0 && index < segments.length) jumpRequested(segments[index].row)
@@ -26,11 +26,12 @@ Item {
       Behavior on y { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
       Rectangle {
         objectName: "taskNotch-" + mark.index
-        anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-        width: mark.segment?.active ? 28 : (hover.hovered || mark.selected ? 21 : 17)
-        height: mark.segment?.active ? 3 : 2
+        anchors.centerIn: parent
+        readonly property real dot: Math.min(hover.hovered || mark.selected ? 6 : 4, timeline.pitch)
+        width: mark.segment?.active ? 14 : dot
+        height: mark.segment?.active ? Math.min(6, timeline.pitch) : dot
         radius: height / 2
-        color: mark.segment?.active ? Theme.cursor : (hover.hovered || mark.selected ? Theme.fg : Theme.dimmedFg)
+        color: mark.segment?.active ? Theme.orange : (hover.hovered || mark.selected ? Theme.fg : Theme.dimmedFg)
         Behavior on width { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
         Behavior on height { NumberAnimation { duration: 110; easing.type: Easing.OutBack; easing.overshoot: 0.7 } }
         Behavior on color { ColorAnimation { duration: 110 } }

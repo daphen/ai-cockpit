@@ -3198,7 +3198,7 @@ Item {
       Layout.fillWidth: true
       Layout.fillHeight: true
       Layout.leftMargin: 20
-      Layout.rightMargin: rail.view === "chat" && rail.taskSegments.length ? taskTimeline.width + 12 : 20
+      Layout.rightMargin: rail.view === "chat" && rail.taskSegments.length ? taskTimeline.width + 6 : 20
       showSecond: rail.view === "chat"
       enterDuration: 400
       exitDuration: 350

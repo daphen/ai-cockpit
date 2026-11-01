@@ -18,7 +18,7 @@ ShellRoot {
     Rail { id: rail; anchors.fill: parent; agentd: state; scopeMode: "personal"; instanceName: "task-timeline-test"; focused: true
       TestEvent { id: input }
     }
-    TaskTimeline { id: scaled; visible: false; width: 32; height: 16; segments: rail.taskSegments }
+    TaskTimeline { id: scaled; visible: false; width: 16; height: 16; segments: rail.taskSegments }
   }
   function find(item, name) {
     if (item.objectName === name) return item
@@ -78,8 +78,8 @@ ShellRoot {
         if (!test.ready(rail.taskSegments.length === 4 && rail.feedScrollState().count === 11 && firstNotch && Math.abs(firstNotch.color.a - Theme.dimmedFg.a) < 0.001)) return
         test.check(rail.taskSegments.length === 4, "repeated titles did not create separate segments: " + JSON.stringify({segments:rail.taskSegments,feed:state.feedFor("ticket"),selected:rail.selectedRaw}))
         test.check(rail.activeTask === "Current task", "wrong branch/finish affected active task")
-        test.notch(0, 17, 2, Theme.dimmedFg)
-        test.notch(3, 28, 3, Theme.cursor)
+        test.notch(0, 4, 4, Theme.dimmedFg)
+        test.notch(3, 14, 6, Theme.orange)
         test.check(rail.taskSegments[2].outcome === "Recovered" && rail.taskSegments[2].finishedAt.length > 0, "finish details lost")
         test.check(rail.taskSegments[0].title === rail.taskSegments[2].title, "returning to a task changed its identity")
         var taskLabel = test.find(rail,"activeTaskLabel")
@@ -94,7 +94,7 @@ ShellRoot {
         var timeline = test.find(rail,"sessionTaskTimeline")
         var first = test.find(timeline,"taskNotch-0").parent
         var last = test.find(timeline,"taskNotch-3").parent
-        test.check(Math.abs(last.y - first.y - 24) < 0.1 && first.height === 8, "task stack is not compact")
+        test.check(Math.abs(last.y - first.y - 30) < 0.1 && first.height === 10, "task stack is not compact")
         test.check(Math.abs((first.y + last.y + last.height) / 2 - timeline.height / 2) < 0.1, "task stack is not vertically centered")
         test.check(scaled.pitch === 4 && test.find(scaled,"taskNotch-3").parent.y + scaled.pitch <= scaled.height, "dense stack did not shrink to fit")
         test.check(!rail.groupedFeed.some(row => (row.items || []).some(item => item.tool === "task")), "task boundaries became transcript cards")
@@ -108,8 +108,8 @@ ShellRoot {
         var shownDetail = test.find(rail,"taskDetail-2")
         test.check(test.shownText(test.find(rail,"sessionTaskTimeline")).indexOf("Recovered") >= 0, "hover did not show the finish outcome")
         test.check(shownDetail && shownDetail.opacity > 0.99 && Math.abs(shownDetail.y - shownDetail.restingY - 2) < 0.1, "task popup did not finish the orb fade-and-settle transition")
-        test.notch(2, 21, 2, Theme.fg)
-        test.notch(3, 28, 3, Theme.cursor)
+        test.notch(2, 6, 6, Theme.fg)
+        test.notch(3, 14, 6, Theme.orange)
         test.check(rail.activeTask === "Current task", "navigation changed task activity")
         test.check(rail.cur === rail.rSize + 5 && rail.scrollMode === "free", "timeline did not move the real feed cursor or leave follow")
         test.check(rail.curRowText().indexOf("Browser again") >= 0, "cursor landed on unrelated content")
@@ -158,7 +158,7 @@ ShellRoot {
         test.check(rail.activeTask === "" && !rail.taskSegments.some(segment => segment.active), "finished task kept current styling")
         test.find(rail,"sessionTaskTimeline").activate(0)
       } else if (test.phase === 10) {
-        test.notch(0, 21, 2, Theme.fg)
+        test.notch(0, 6, 6, Theme.fg)
         test.check(rail.activeTask === "", "selecting finished history restarted activity")
         test.check(rail.groupedFeed.length === 1 && rail.curRowText().indexOf("Finished answer") >= 0, "finish boundary became a card or jump anchor")
         var shapes = [{fromHook:true}, {details:{strategy:"deterministic-auto-v3"}}, {fromHook:false,details:{strategy:"deterministic-auto-v3"}}, {fromHook:false}, {}, {fromHook:"true",details:{strategy:"other"}}]
