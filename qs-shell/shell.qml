@@ -28,7 +28,11 @@ ShellRoot {
         onRead: data => {
           var socket = data.trim()
           if (!socket) return
-          if (socket === win.remoteEditorSocket) remoteFocus.refresh()
+          if (socket === win.remoteEditorSocket) {
+            remoteFocus.refresh()
+            // Same path, new VM editor: the old attach died with the previous one.
+            if (win.editorSocket === socket) { win.editorSocket = ""; Qt.callLater(() => win.editorSocket = socket) }
+          }
           win.remoteEditorSocket = socket
           if (win.scopeMode === "work") Qt.callLater(() => rail.landNvim(rail.selectedRaw))
         }
