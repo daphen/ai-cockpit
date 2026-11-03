@@ -454,16 +454,10 @@ ShellRoot {
                   Row {
                     anchors { left: parent.left; leftMargin: 5; right: parent.right; rightMargin: 14; verticalCenter: parent.verticalCenter }
                     spacing: 9
-                    GradientFrame {
+                    Item {
                       id: viewBadge
                       anchors.verticalCenter: parent.verticalCenter
-                      width: 22; height: 22; radius: paneLayout.terminalCornerRadius - 3
-                      fill: viewBar.lightMode ? Qt.tint("#FAFAFA", Qt.alpha(rail.palette.fg, viewTab.active ? 0.04 : 0.03))
-                        : Qt.tint(viewPill.fill, Qt.alpha(rail.palette.fg, viewTab.active ? 0.07 : 0.04))
-                      edge: viewPill.edge
-                      strength: viewPill.strength * (viewBar.lightMode ? 0.6 : 1.2)
-                      lowEdge: viewTab.active || viewBar.lightMode ? 0.2 : 0.05
-                      fillTop: viewTab.active || viewBar.lightMode ? fill : Qt.tint(fill, Qt.alpha(rail.palette.fg, 0.04))
+                      width: 22; height: 22
                       Icon {
                         anchors.centerIn: parent
                         name: viewTab.modelData.icon; width: 13; height: 13
