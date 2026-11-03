@@ -4663,23 +4663,26 @@ Item {
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
-            // Recessed well: a thin rim, plus a brighter lip just below the bottom edge.
-            Rectangle {
-              x: 0; y: 1; width: parent.width; height: parent.height
-              radius: height / 2
-              color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.16 : 0.85)
-            }
+            // Recessed well: the rim shades at the top and catches light at the bottom.
             Rectangle {
               anchors.fill: parent
               radius: height / 2
-              color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.02) : Qt.darker(Theme.surface0, 1.01)
-              border { width: 1; color: Theme.mode === "dark" ? Qt.alpha("#FFFFFF", 0.09) : Qt.alpha("#000000", 0.13) }
+              gradient: Gradient {
+                GradientStop { position: 0; color: Theme.mode === "dark" ? Qt.alpha("#000000", 0.30) : Qt.alpha("#000000", 0.14) }
+                GradientStop { position: 0.5; color: Theme.mode === "dark" ? Qt.alpha("#FFFFFF", 0.05) : Qt.alpha("#000000", 0.08) }
+                GradientStop { position: 1; color: Theme.mode === "dark" ? Qt.alpha("#FFFFFF", 0.16) : Qt.alpha("#FFFFFF", 0.9) }
+              }
               Rectangle {
                 anchors { fill: parent; margins: 1 }
                 radius: height / 2
-                gradient: Gradient {
-                  GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.10 : 0.035) }
-                  GradientStop { position: 0.4; color: "transparent" }
+                color: chin.baseSurface
+                Rectangle {
+                  anchors.fill: parent
+                  radius: height / 2
+                  gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.22 : 0.05) }
+                    GradientStop { position: 0.45; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.08 : 0.01) }
+                  }
                 }
               }
             }
