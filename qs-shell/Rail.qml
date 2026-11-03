@@ -4663,7 +4663,28 @@ Item {
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
-            PillSurface { anchors.fill: parent }
+            // Recessed well: the rim darkens at the top and catches light at the bottom.
+            Rectangle {
+              anchors.fill: parent
+              radius: height / 2
+              gradient: Gradient {
+                GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.55 : 0.16) }
+                GradientStop { position: 1; color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.10 : 0.9) }
+              }
+              Rectangle {
+                anchors { fill: parent; margins: 1 }
+                radius: height / 2
+                color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.5) : Qt.darker(Theme.surface0, 1.05)
+                Rectangle {
+                  anchors.fill: parent
+                  radius: height / 2
+                  gradient: Gradient {
+                    GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.45 : 0.10) }
+                    GradientStop { position: 0.45; color: "transparent" }
+                  }
+                }
+              }
+            }
             Text {
               id: contextLabel
               objectName: "contextLabel"
