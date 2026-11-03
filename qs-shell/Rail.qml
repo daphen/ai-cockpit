@@ -4663,25 +4663,23 @@ Item {
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
-            // Recessed well: the rim darkens at the top and catches light at the bottom.
+            // Recessed well: a dark rim on top and sides, a light lip just below the bottom edge.
+            Rectangle {
+              x: 0; y: 1; width: parent.width; height: parent.height
+              radius: height / 2
+              color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.11 : 0.85)
+            }
             Rectangle {
               anchors.fill: parent
               radius: height / 2
-              gradient: Gradient {
-                GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.18 : 0.08) }
-                GradientStop { position: 1; color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.10 : 0.9) }
-              }
+              color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.02) : Qt.darker(Theme.surface0, 1.01)
+              border { width: 1; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.55 : 0.13) }
               Rectangle {
                 anchors { fill: parent; margins: 1 }
                 radius: height / 2
-                color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.04) : Qt.darker(Theme.surface0, 1.015)
-                Rectangle {
-                  anchors.fill: parent
-                  radius: height / 2
-                  gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.12 : 0.04) }
-                    GradientStop { position: 0.45; color: "transparent" }
-                  }
+                gradient: Gradient {
+                  GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.10 : 0.035) }
+                  GradientStop { position: 0.4; color: "transparent" }
                 }
               }
             }
