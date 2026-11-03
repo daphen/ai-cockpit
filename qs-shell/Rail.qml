@@ -4663,17 +4663,17 @@ Item {
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
-            // Recessed well: a dark rim on top and sides, a light lip just below the bottom edge.
+            // Recessed well: a thin rim, plus a brighter lip just below the bottom edge.
             Rectangle {
               x: 0; y: 1; width: parent.width; height: parent.height
               radius: height / 2
-              color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.11 : 0.85)
+              color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.16 : 0.85)
             }
             Rectangle {
               anchors.fill: parent
               radius: height / 2
               color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.02) : Qt.darker(Theme.surface0, 1.01)
-              border { width: 1; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.55 : 0.13) }
+              border { width: 1; color: Theme.mode === "dark" ? Qt.alpha("#FFFFFF", 0.09) : Qt.alpha("#000000", 0.13) }
               Rectangle {
                 anchors { fill: parent; margins: 1 }
                 radius: height / 2
