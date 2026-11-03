@@ -4668,18 +4668,18 @@ Item {
               anchors.fill: parent
               radius: height / 2
               gradient: Gradient {
-                GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.55 : 0.16) }
+                GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.30 : 0.10) }
                 GradientStop { position: 1; color: Qt.alpha("#FFFFFF", Theme.mode === "dark" ? 0.10 : 0.9) }
               }
               Rectangle {
                 anchors { fill: parent; margins: 1 }
                 radius: height / 2
-                color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.5) : Qt.darker(Theme.surface0, 1.05)
+                color: Theme.mode === "dark" ? Qt.darker(Theme.surface0, 1.12) : Qt.darker(Theme.surface0, 1.03)
                 Rectangle {
                   anchors.fill: parent
                   radius: height / 2
                   gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.45 : 0.10) }
+                    GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.20 : 0.06) }
                     GradientStop { position: 0.45; color: "transparent" }
                   }
                 }
