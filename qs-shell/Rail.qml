@@ -959,21 +959,35 @@ Item {
   function markdownBlocks(text, entryIndex, baseOffset) {
     var source = String(text || ""), re = /```([a-zA-Z0-9_-]*)[ \t]*\n([\s\S]*?)(?:```|$)/g
     var out = [], m, pos = 0, base = baseOffset || 0
-    while ((m = re.exec(source)) !== null) {
-      if (m.index > pos) {
-        var prose = source.slice(pos, m.index)
-        out.push({ kind: "markdown", text: prose, start: base + pos,
-                   units: _scanUnits(prose, entryIndex, "yank", base + pos) })
+    // Badge rendering has no markdown, so only paragraphs that carry a badge use it.
+    function pushProse(prose, at) {
+      var paras = prose.split(/(\n[ \t]*\n)/), run = "", runAt = at, cursor = at
+      function flushRun() {
+        if (run.trim().length) out.push({ kind: "markdown", text: run, start: base + runAt,
+                                          units: _scanUnits(run, entryIndex, "yank", base + runAt) })
+        run = ""
       }
+      for (var i = 0; i < paras.length; i++) {
+        var piece = paras[i]
+        if (i % 2 === 0 && piece.trim().length && hasInlineBadges(piece)) {
+          flushRun()
+          out.push({ kind: "inline", text: piece.trim(), start: base + cursor })
+          runAt = cursor + piece.length
+        } else {
+          if (!run.length) runAt = cursor
+          run += piece
+        }
+        cursor += piece.length
+      }
+      flushRun()
+    }
+    while ((m = re.exec(source)) !== null) {
+      if (m.index > pos) pushProse(source.slice(pos, m.index), pos)
       out.push({ kind: "fence", lang: m[1], code: m[2], start: base + m.index,
                  key: "e" + entryIndex + ":p" + (base + m.index), runnable: _shellLanguage(m[1]) })
       pos = re.lastIndex
     }
-    if (pos < source.length) {
-      var tail = source.slice(pos)
-      out.push({ kind: "markdown", text: tail, start: base + pos,
-                 units: _scanUnits(tail, entryIndex, "yank", base + pos) })
-    }
+    if (pos < source.length) pushProse(source.slice(pos), pos)
     return out
   }
   function blockHints(block, rowIdx) {
@@ -3591,7 +3605,7 @@ Item {
               active: turnDel.isUser && (!turnDel.compactUser || turnDel.userExpanded)
               visible: active
               width: cardCol.width
-              sourceComponent: rail.hasInlineBadges(sourceText) ? inlineAttachmentContent : markdownContent
+              sourceComponent: markdownContent
               property string sourceText: turnDel.isUser ? String(turnDel.turn.text || "") : ""
               property int sourceEntry: 0
               property int sourceOffset: 0
@@ -5844,7 +5858,9 @@ Item {
           property int rowIndex: markdownRoot.parent.rowIndex
           property color bodyColor: markdownRoot.parent.bodyColor
           property bool agentAuthored: markdownRoot.parent.agentAuthored
-          sourceComponent: block.kind === "fence" ? fencedCodeBlock : markdownTextBlock
+          property string sourceText: block.text || ""
+          sourceComponent: block.kind === "fence" ? fencedCodeBlock
+            : block.kind === "inline" ? inlineAttachmentContent : markdownTextBlock
         }
       }
     }
@@ -5952,7 +5968,7 @@ Item {
           width: proseCol.width
           readonly property var part: proseCol.parts[index] || ({})
           sourceComponent: part.fileRef !== undefined ? fileRefRow
-            : (rail.hasInlineBadges(sourceText) ? inlineAttachmentContent : markdownContent)
+            : markdownContent
           property var refData: part
           property string sourceText: part.text || ""
           property int sourceEntry: proseCol.parent.entryIndex

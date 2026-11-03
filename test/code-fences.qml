@@ -24,7 +24,7 @@ ShellRoot {
       if (test.phase === 0) {
         state.onLine(JSON.stringify({type:"roster",sessions:[{id:"worker",name:"worker",cwd:"/tmp",status:"idle"}]}),0)
         rail.jumpToSession("worker")
-        var text = "Run this:\n\n```\n" + test.codes[0] + "\n```\n\nThen:\n\n```typescript\n" + test.codes[1] + "\n```\n\nAnd:\n\n```bash\n" + test.codes[2] + "\n```\n\nDone."
+        var text = "Values from `ContrastCard.qml` and `Dashboard.qml`:\n\n**Bold point:** plain.\n\nRun this:\n\n```\n" + test.codes[0] + "\n```\n\nThen:\n\n```typescript\n" + test.codes[1] + "\n```\n\nAnd:\n\n```bash\n" + test.codes[2] + "\n```\n\nDone."
         state.onLine(JSON.stringify({type:"response",command:"get_entries",session:"worker",data:{leafId:"a",entries:[
           {id:"a",parentId:null,type:"message",message:{role:"assistant",content:[{type:"text",text:text}]}}
         ]}}),0)
@@ -33,7 +33,9 @@ ShellRoot {
         var missing = test.codes.filter(code => !shown.some(t => t.indexOf(code) >= 0))
         if (missing.length) throw new Error("code blocks not rendered: " + JSON.stringify(missing))
         if (!shown.some(t => t === "code") || !shown.some(t => t.indexOf("typescript") === 0)) throw new Error("non-shell code blocks lack their label")
-        console.log("PASS: untagged, typed and shell code blocks all render")
+        if (shown.some(t => t.indexOf("**") >= 0 || t.indexOf("```") >= 0)) throw new Error("markdown shown raw next to a file badge")
+        if (!shown.some(t => t === "ContrastCard.qml")) throw new Error("file badge missing")
+        console.log("PASS: code blocks and markdown render, including beside file badges")
         Qt.quit()
       }
       test.phase++
