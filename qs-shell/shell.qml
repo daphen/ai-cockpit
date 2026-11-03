@@ -460,7 +460,7 @@ ShellRoot {
                       width: 22; height: 22
                       Icon {
                         anchors.centerIn: parent
-                        name: viewTab.modelData.icon; width: 13; height: 13
+                        name: viewTab.modelData.icon; width: 17; height: 17
                         color: viewTab.focusMark ? Theme.orange : viewTab.ink
                         Behavior on color { ColorAnimation { duration: 140 } }
                       }
