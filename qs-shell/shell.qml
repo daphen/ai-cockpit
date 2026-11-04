@@ -1,4 +1,6 @@
 import QtQuick
+// Resolves Fusion before QsLib's Material.impl import can make Material the process-wide controls style.
+import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import QsLib
