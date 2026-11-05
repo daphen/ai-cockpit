@@ -4322,10 +4322,10 @@ Item {
           radius: Math.min(height / 2, 24)
           base: Theme.mode === "light" ? chin.baseSurface : "#282828"
           field: true; emphasis: composerInput.activeFocus ? 1.25 : 1
-          // On the lighter dark-mode inside, a bottom shadow reads as a glossy tube; keep a hairline top shadow.
-          topShade: Theme.mode === "light" ? 0.021 : 0.20
-          bottomShade: Theme.mode === "light" ? 0.021 : 0
-          depth: Theme.mode === "light" ? 14 : 4
+          // A bottom shadow reads as a glossy tube here; keep a hairline top shadow.
+          topShade: Theme.mode === "light" ? 0.07 : 0.20
+          bottomShade: 0
+          depth: 4
         }
         RowLayout {
           anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
