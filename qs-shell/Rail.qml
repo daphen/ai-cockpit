@@ -4323,7 +4323,7 @@ Item {
           base: Theme.mode === "light" ? chin.baseSurface : "#282828"
           field: true; emphasis: (composerInput.activeFocus ? 1.25 : 1) * (Theme.mode === "light" ? 0.55 : 1)
           // A bottom shadow reads as a glossy tube here; keep a hairline top shadow.
-          topShade: Theme.mode === "light" ? 0.06 : 0.20
+          topShade: Theme.mode === "light" ? 0.035 : 0.20
           bottomShade: 0
           depth: 4
           // The light rim's lower half is white-on-white; a hairline keeps the bottom edge.
