@@ -26,6 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT
 cp qs-shell/*.qml qs-shell/*.qsb "$tmp/"
+cp -r qs-shell/crew "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
 [[ "${1:-}" != "test/composer-attach.qml" ]] || cp test/fake-chooser.sh "$tmp/"
 mkdir -p "$tmp/home"

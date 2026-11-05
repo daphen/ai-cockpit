@@ -17,7 +17,6 @@ FocusScope {
   property var answerSendingFor: sid => false
   property double statusClock: Date.now()
   Timer { interval: 15000; repeat: true; running: root.enabled && root.showSessions; onTriggered: root.statusClock = Date.now() }
-  property var activityFor: sid => []
   property var activityLabelFor: sid => "idle"
   property var taskFor: sid => ""
   property string homeTab: "sessions"
@@ -436,7 +435,6 @@ FocusScope {
               }
               return top + (group >= 0 ? sessionCards.headerHeight : 0)
             }
-            readonly property var activity: root.activityFor(modelData)
             readonly property bool expanded: root.expandedSession === modelData
             readonly property var ticket: reaping ? Object.assign({}, root.ticketState(modelData), {label:"Reaping\u2026", tone:"accent"})
               : reapState === "failed" ? Object.assign({}, root.ticketState(modelData), {label:"Reap failed", tone:"error"})
@@ -619,28 +617,30 @@ FocusScope {
                 clip: true
                 layer.enabled: true
                 layer.effect: MultiEffect { maskEnabled: true; maskSource: meshMask }
-                ThinkingOrb {
-                  id: sessionOrb
-                  objectName: "sessionOrb"
-                  anchors.centerIn: parent
-                  width: Math.sqrt(parent.width * parent.width + parent.height * parent.height) * 1.25
-                  height: width
-                  running: sessionCards.visible
-                  seedKey: sessionCard.modelData
-                  activityColors: sessionCard.activity
-                  glow: activityColors.length ? activityColors[0] : "#999999"
-                  colorDuration: 1600
-                  property real motion: sessionCard.activity.length ? 1 : 0
-                  idleBlur: 1 - motion
-                  property real elapsed: 0
-                  clockNow: elapsed
-                  flow: 0.35
-                  Behavior on motion { NumberAnimation { duration: 1800; easing.type: Easing.InOutCubic } }
-                  Connections {
-                    target: OrbClock
-                    enabled: sessionOrb.visible && sessionOrb.motion > 0
-                    function onNowChanged() { sessionOrb.elapsed += 50 * sessionOrb.motion }
+                readonly property int pixel: Math.max(1, Math.floor(height * 0.8 / 64))
+                Rectangle {
+                  anchors.fill: parent
+                  gradient: Gradient {
+                    GradientStop { position: 0; color: "#262b44" }
+                    GradientStop { position: 1; color: "#3a4466" }
                   }
+                }
+                Rectangle {
+                  id: deck
+                  anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                  height: Math.round(parent.height * 0.2)
+                  color: "#733e39"
+                  Rectangle { width: parent.width; height: meshPanel.pixel * 2; color: "#3e2731" }
+                }
+                CrewSprite {
+                  id: sessionCrew
+                  objectName: "sessionCrew"
+                  width: 64 * meshPanel.pixel; height: width
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  y: deck.y - 61 * meshPanel.pixel
+                  profile: sessionCard.session.profile || ""
+                  activity: sessionCard.ask ? "asking" : root.activityLabelFor(sessionCard.modelData)
+                  running: sessionCards.visible
                 }
               }
               Rectangle {

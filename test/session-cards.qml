@@ -12,8 +12,7 @@ ShellRoot {
   property string opened: ""
   property string ticketAction: ""
   property var originalCard: null
-  property real lastPhase: 0
-  property real lastChroma: 0
+  property int lastFrame: -1
   property string activityLabel: "bash"
   property var originalSessions: []
   property real collapsedHeight: 0
@@ -50,7 +49,6 @@ ShellRoot {
         {text:"First ticket",action:"ticket:EVERY-3790"},
         {text:"Second ticket",action:"ticket:EVERY-3789"}
       ]}]})
-      activityFor: sid => dash.sessions.find(s => s.name === sid).status === "streaming" ? [Theme.green] : []
       activityLabelFor: sid => dash.sessions.find(s => s.name === sid).status === "streaming" ? test.activityLabel : "idle"
       onSessionRequested: sid => test.opened = sid
       onActionRequested: action => test.ticketAction = action
@@ -95,22 +93,17 @@ ShellRoot {
           var status = test.find(c,item => item.objectName === "sessionStatus")
           test.check(Math.abs(status.width - inset.width) < 0.01 && Math.abs(status.y - inset.y) < 0.01 && Math.abs(status.y + status.height + 16 - summary.parent.parent.y) < 0.01, "mesh does not fill the inset above the description")
           test.check(Math.abs(title.x-status.x)<0.01 && Math.abs(summary.parent.parent.x-status.x)<0.01, "header, mesh and description do not share padding")
-          test.check(test.find(c,item => item.objectName === "sessionOrb").width > status.width && test.find(c,item => item.objectName === "sessionOrb").flow === 0.35, "mesh is not full-width or 10x slower")
           var tag = test.find(c,item => item.objectName === "sessionActivityBadge")
           test.check(test.find(tag,item => item.text === "IDLE") && Math.abs(tag.x-status.x-12)<0.01 && Math.abs(tag.y+tag.height-status.y-status.height+12)<0.01, "idle badge is not inset at mesh bottom-left")
           test.check(test.find(c,item => item.visible === false && item.radius === inset.radius && Math.abs(item.width-status.width)<0.01 && Math.abs(item.height-status.height)<0.01), "mesh mask does not round all four corners")
-          var badge = test.find(c,item => item.objectName === "sessionOrb")
-          var center = badge.mapToItem(status,badge.width/2,badge.height/2)
-          test.check(Math.abs(center.x-status.width/2)<1 && Math.abs(center.y-status.height/2)<1, "orb is not centered in the upper container")
-          var field = test.find(badge,item => item.colB !== undefined)
-          test.check(test.alpha(badge) === 1 && !test.find(badge,item => item.text === "IDLE"), "idle orb was hidden or replaced by a label")
-          test.check(Math.abs(field.colB.r-field.colB.g)<0.0001 && Math.abs(field.colB.g-field.colB.b)<0.0001, "idle orb is not gray")
-          test.check(badge.idleBlur === 1 && field.layer.enabled, "idle orb texture is not softened")
+          var crew = test.find(c,item => item.objectName === "sessionCrew")
+          var center = crew.mapToItem(status,crew.width/2,0)
+          test.check(Math.abs(center.x-status.width/2)<1 && crew.y+crew.height <= status.height && crew.width % 64 === 0 && crew.width >= 128, "crew sprite is not a centered integer-scaled sprite inside the panel: " + JSON.stringify([center.x,status.width,crew.y,crew.height,status.height,crew.width]))
+          test.check(crew.role === "worker" && crew.activity === "idle" && crew.frame >= crew.tags.idle[0] && crew.frame <= crew.tags.idle[1] && test.alpha(crew) === 1, "idle worker does not show the deckhand's idle loop")
         }
         first.grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card.png"))
         test.originalSessions = dash.sessions
         test.originalCard = first
-        test.lastPhase = test.find(first,item => item.colB !== undefined).ph1
       } else if (test.phase === 1) {
         input.keyClick(Qt.Key_L,Qt.NoModifier,0)
         test.check(dash.currentAction === "session:every-3789", "l did not move right")
@@ -121,8 +114,9 @@ ShellRoot {
         var c = test.card("every-3790")
         test.check(c === test.originalCard, "activity update recreated the card and broke crossfade")
         test.check(test.card("every-3789").x > c.x && test.card("every-3711").x > test.card("every-3789").x && test.card("every-3710").y > c.y, "unordered status roster reshuffled the cards")
-        var orb = test.find(c,item => item.objectName === "sessionOrb"), field = test.find(orb,item => item.colB !== undefined)
-        test.check(test.alpha(orb) === 1 && orb.motion > 0 && orb.motion < 1 && Math.abs(field.ph1-test.lastPhase)<0.03, "orb did not ease into motion without a phase jump")
+        var crew = test.find(c,item => item.objectName === "sessionCrew")
+        test.check(crew.activity === "bash" && crew.frame === crew.tags.bash[0], "working card did not switch the sprite to its bash loop")
+        test.lastFrame = crew.frame
         window.implicitHeight = 520
       } else if (test.phase === 3) {
         if (++test.ticks < 55) return
@@ -136,35 +130,19 @@ ShellRoot {
         test.check(dash.currentAction === "session:every-3790", "k did not move up")
         input.keyClick(Qt.Key_Return,Qt.ControlModifier,0)
         test.check(test.opened === "every-3790", "Ctrl+Enter did not open the selected session")
-        var orb = test.find(test.card("every-3790"),item => item.objectName === "sessionOrb")
-        var field = test.find(orb,item => item.colB !== undefined)
-        test.lastPhase = field.ph1
-        test.lastChroma = Math.max(field.colB.r,field.colB.g,field.colB.b) - Math.min(field.colB.r,field.colB.g,field.colB.b)
+        var crew = test.find(test.card("every-3790"),item => item.objectName === "sessionCrew")
+        test.check(crew.frame !== test.lastFrame && crew.frame >= crew.tags.bash[0] && crew.frame <= crew.tags.bash[1], "bash loop did not advance within its frames")
         test.check(test.find(test.card("every-3790"),item => item.text === "BASH" && item.opacity === 1), "badge did not settle to Bash")
-        test.check(orb.motion === 1, "active motion did not reach normal speed")
-        test.check(orb.idleBlur === 0 && !field.layer.enabled, "active orb retains blur or an unnecessary effect layer")
         test.card("every-3790").grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card-active.png"))
         test.working(false); test.ticks = 0
       } else if (test.phase === 4) {
-        var orb = test.find(test.card("every-3790"),item => item.objectName === "sessionOrb"), field = test.find(orb,item => item.colB !== undefined)
-        if (++test.ticks === 1 && orb.motion === 1) { test.ticks = 0; return }
-        if (test.ticks === 1) test.check(orb.motion > 0 && orb.motion < 1 && Math.abs(field.ph1-test.lastPhase)<0.15 && test.alpha(orb) === 1, "idle transition snapped the pattern or hid the orb: " + JSON.stringify([orb.motion,field.ph1-test.lastPhase,test.alpha(orb)]))
-        if (test.ticks === 25) {
-          var chroma = Math.max(field.colB.r,field.colB.g,field.colB.b) - Math.min(field.colB.r,field.colB.g,field.colB.b)
-          test.check(orb.motion > 0 && orb.motion < 0.9 && field.ph1 > test.lastPhase && chroma > 0 && chroma < test.lastChroma, "orb did not gradually slow and desaturate")
-          test.check(orb.idleBlur > 0 && orb.idleBlur < 1 && Math.abs(orb.idleBlur + orb.motion - 1) < 0.0001, "blur does not fade in with the spin-down")
-        }
-        if (test.ticks === 55) {
-          test.check(orb.motion === 0 && Math.abs(field.colB.r-field.colB.g)<0.0001 && Math.abs(field.colB.g-field.colB.b)<0.0001, "idle orb did not stop and become gray")
-          test.lastPhase = field.ph1
-        }
-        if (test.ticks < 60) return
-        test.check(field.ph1 === test.lastPhase, "idle shader keeps swirling after settling")
+        var crew = test.find(test.card("every-3790"),item => item.objectName === "sessionCrew")
+        test.check(crew.activity === "idle" && crew.frame >= crew.tags.idle[0] && crew.frame <= crew.tags.idle[1], "finished session did not return to idle")
+        dash.askFor = sid => sid === "every-3789" ? {method:"confirm", message:"Ship it?"} : null
+        test.check(test.find(test.card("every-3789"),item => item.objectName === "sessionCrew").activity === "asking", "asking session does not hold up the question sign")
+        dash.askFor = sid => null
         test.working(true); railFocus.forceActiveFocus()
       } else if (test.phase === 5) {
-        var orb = test.find(test.card("every-3790"),item => item.objectName === "sessionOrb"), field = test.find(orb,item => item.colB !== undefined)
-        test.check(orb.motion > 0 && orb.motion < 1 && Math.abs(field.ph1-test.lastPhase)<0.03, "resuming idle motion jumped the pattern")
-        test.check(orb.idleBlur > 0 && orb.idleBlur < 1 && Math.abs(orb.idleBlur + orb.motion - 1) < 0.0001, "blur does not clear continuously when activity resumes")
         test.working(false)
         test.check(!dash.activeFocus, "rail did not get focus")
         test.check(test.find(test.card("every-3790"),item => item.objectName === "sessionRing").border.color === test.find(test.card("every-3789"),item => item.objectName === "sessionRing").border.color, "a card remains highlighted while rail is focused")
@@ -275,7 +253,7 @@ ShellRoot {
       } else if (test.phase === 22) {
         if (++test.ticks < 4) return
         test.check(test.card("every-4032") && test.find(test.card("every-4032"), item => item.text === "Title from the session plan"), "session outside the cycle lost its plan title")
-        console.log("PASS: canvas frame, compact shared padding/header/radii, shorter four-corner mesh, 10x slower swirl, animated idle/Bash/Coding/Reading badges, expansion and navigation, plan title fallback")
+        console.log("PASS: canvas frame, compact shared padding/header/radii, shorter four-corner panel, crew sprite idle/bash/asking loops, animated idle/Bash/Coding/Reading badges, expansion and navigation, plan title fallback")
         Qt.quit()
       }
       test.phase++

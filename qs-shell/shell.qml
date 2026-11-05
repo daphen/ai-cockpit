@@ -548,7 +548,6 @@ ShellRoot {
                 onAnswerRequested: (sid, payload) => win.agentd.answerAsk(sid, payload)
                 onPromptRequested: (sid, text) => win.agentd.isBusy(sid) ? win.agentd.steer(sid, text) : win.agentd.sendPrompt(sid, text)
                 onPrRequested: url => Qt.openUrlExternally(url)
-                activityFor: sid => rail.fleetActivityColors(sid)
                 activityLabelFor: sid => {
                   win.agentd.curToolGen
                   if (win.agentd.isInterrupting(sid)) return "stopping"
