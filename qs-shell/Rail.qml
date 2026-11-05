@@ -4314,13 +4314,13 @@ Item {
         radius: 26
         color: "transparent"
         border.width: 0
-        Rectangle {
+        WellSurface {
           id: inputFill
+          objectName: "composerWell"
           anchors { left: parent.left; right: parent.right; rightMargin: -6 }
           y: 4; height: parent.textHeight + 30
           radius: Math.min(height / 2, 24)
-          color: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.035 : 0.03)
-          border.width: 0
+          base: chin.baseSurface
         }
         RowLayout {
           anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
