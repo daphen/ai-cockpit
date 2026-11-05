@@ -4321,6 +4321,7 @@ Item {
           y: 4; height: parent.textHeight + 30
           radius: Math.min(height / 2, 24)
           base: chin.baseSurface
+          field: true; emphasis: composerInput.activeFocus ? 1.25 : 1
         }
         RowLayout {
           anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
