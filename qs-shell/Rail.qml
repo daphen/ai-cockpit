@@ -4677,29 +4677,7 @@ Item {
             visible: usage !== null
             anchors { right: parent.right; rightMargin: 10; verticalCenter: cornerControls.verticalCenter }
             width: 140; height: 22
-            // Recessed well: the rim shades at the top and catches light at the bottom.
-            Rectangle {
-              anchors.fill: parent
-              radius: height / 2
-              gradient: Gradient {
-                GradientStop { position: 0; color: Theme.mode === "dark" ? Qt.alpha("#000000", 0.30) : Qt.alpha("#000000", 0.14) }
-                GradientStop { position: 0.5; color: Theme.mode === "dark" ? Qt.alpha("#FFFFFF", 0.05) : Qt.alpha("#000000", 0.08) }
-                GradientStop { position: 1; color: Theme.mode === "dark" ? Qt.alpha("#FFFFFF", 0.16) : Qt.alpha("#FFFFFF", 0.9) }
-              }
-              Rectangle {
-                anchors { fill: parent; margins: 1 }
-                radius: height / 2
-                color: chin.baseSurface
-                Rectangle {
-                  anchors.fill: parent
-                  radius: height / 2
-                  gradient: Gradient {
-                    GradientStop { position: 0; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.22 : 0.05) }
-                    GradientStop { position: 0.45; color: Qt.alpha("#000000", Theme.mode === "dark" ? 0.08 : 0.01) }
-                  }
-                }
-              }
-            }
+            WellSurface { anchors.fill: parent; base: chin.baseSurface }
             Text {
               id: contextLabel
               objectName: "contextLabel"
