@@ -4326,6 +4326,9 @@ Item {
           topShade: Theme.mode === "light" ? 0.06 : 0.20
           bottomShade: 0
           depth: 4
+          // The light rim's lower half is white-on-white; a hairline keeps the bottom edge.
+          border.width: Theme.mode === "light" ? 1 : 0
+          border.color: Qt.alpha("#000000", 0.08)
         }
         RowLayout {
           anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
