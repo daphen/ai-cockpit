@@ -4320,7 +4320,7 @@ Item {
           anchors { left: parent.left; right: parent.right; rightMargin: -6 }
           y: 4; height: parent.textHeight + 30
           radius: Math.min(height / 2, 24)
-          base: chin.baseSurface
+          base: Theme.mode === "light" ? chin.baseSurface : "#282828"
           field: true; emphasis: composerInput.activeFocus ? 1.25 : 1
         }
         RowLayout {
