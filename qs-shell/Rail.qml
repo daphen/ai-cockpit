@@ -4321,14 +4321,11 @@ Item {
           y: 4; height: parent.textHeight + 30
           radius: Math.min(height / 2, 24)
           base: Theme.mode === "light" ? chin.baseSurface : "#282828"
-          field: true; emphasis: (composerInput.activeFocus ? 1.25 : 1) * (Theme.mode === "light" ? 0.55 : 1)
-          // A bottom shadow reads as a glossy tube here; keep a hairline top shadow.
+          field: true; emphasis: composerInput.activeFocus ? 1.25 : 1
+          // Light keeps the picker's two-edge recipe, tightened; in dark a bottom shadow reads as a glossy tube.
           topShade: Theme.mode === "light" ? 0.035 : 0.20
-          bottomShade: 0
-          depth: 4
-          // The light rim's lower half is white-on-white; a hairline keeps the bottom edge.
-          border.width: Theme.mode === "light" ? 1 : 0
-          border.color: Qt.alpha("#000000", 0.08)
+          bottomShade: Theme.mode === "light" ? 0.03 : 0
+          depth: Theme.mode === "light" ? 8 : 4
         }
         RowLayout {
           anchors { left: parent.left; right: parent.right; leftMargin: 16; rightMargin: 46 }
