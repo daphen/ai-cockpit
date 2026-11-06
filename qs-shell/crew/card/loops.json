@@ -57,14 +57,16 @@
    },
    "working": {
     "frames": [
-     "a",
-     "working-0",
-     "working-1"
+     "working-1",
+     "working-2",
+     "working-3",
+     "working-2"
     ],
     "ms": [
-     260,
-     300,
-     160
+     450,
+     450,
+     450,
+     450
     ]
    }
   },

@@ -513,7 +513,8 @@ FocusScope {
             readonly property bool asking: !!ask && !expanded
             property real askReveal: asking ? 1 : 0
             Behavior on askReveal { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
-            readonly property real veil: Math.max(reveal, askReveal)
+            // A pending question covers only the text below the crew scene, so the character stays in view.
+            readonly property real sceneCut: (1 - reveal) * askReveal * (sessionInset.y + meshPanel.height + 8)
             readonly property var answers: !ask ? [] : ask.method === "confirm"
               ? [{label:"Yes", key:"Y", response:{confirmed:true}}, {label:"No", key:"N", response:{confirmed:false}}]
               : ask.method === "select" ? (ask.options || []).map(option => ({label:String(option), response:{value:option}}))
@@ -599,9 +600,9 @@ FocusScope {
               objectName: "collapsedLayer"
               anchors.fill: parent
               enabled: !sessionCard.expanded && !sessionCard.asking
-              opacity: 1 - 0.55 * sessionCard.veil
-              layer.enabled: sessionCard.veil > 0
-              layer.effect: MultiEffect { blurEnabled: true; blur: sessionCard.veil; blurMax: 64; autoPaddingEnabled: false }
+              opacity: 1 - 0.55 * sessionCard.reveal
+              layer.enabled: sessionCard.reveal > 0
+              layer.effect: MultiEffect { blurEnabled: true; blur: sessionCard.reveal; blurMax: 64; autoPaddingEnabled: false }
               Item { id: insetBox; x: sessionInset.x; y: sessionInset.y; width: sessionInset.width; height: sessionInset.height }
               Rectangle {
                 id: crewMask
@@ -755,10 +756,10 @@ FocusScope {
             }
             Rectangle {
               objectName: "veilScrim"
-              anchors { fill: parent; margins: 1 }
+              anchors { fill: parent; margins: 1; topMargin: 1 + sessionCard.sceneCut }
               radius: sessionCard.radius - 1
               color: sessionCard.faceMid
-              opacity: 0.9 * sessionCard.veil
+              opacity: Math.max(0.9 * sessionCard.reveal, sessionCard.askReveal)
               visible: opacity > 0
             }
             Item {
@@ -766,6 +767,7 @@ FocusScope {
               objectName: "ticketQuestion"
               z: 1
               anchors { left: sessionInset.left; right: sessionInset.right; top: sessionInset.top; bottom: sessionInset.bottom; bottomMargin: 44 }
+              anchors.topMargin: Math.max(0, sessionCard.sceneCut - sessionInset.y)
               opacity: sessionCard.askReveal
               visible: opacity > 0
               enabled: sessionCard.asking
