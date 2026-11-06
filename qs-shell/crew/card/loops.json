@@ -118,13 +118,17 @@
    "working": {
     "frames": [
      "a",
+     "working-2",
      "working-0",
+     "working-3",
      "working-1"
     ],
     "ms": [
-     260,
-     300,
-     160
+     220,
+     120,
+     220,
+     90,
+     180
     ]
    }
   },
