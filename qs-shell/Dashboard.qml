@@ -11,6 +11,7 @@ FocusScope {
   readonly property color muted: Theme.mode === "light" ? Qt.rgba(Theme.fg_muted.r * 0.4 + Theme.fg_secondary.r * 0.6, Theme.fg_muted.g * 0.4 + Theme.fg_secondary.g * 0.6, Theme.fg_muted.b * 0.4 + Theme.fg_secondary.b * 0.6, 1) : Theme.fg_muted
   property var model: ({})
   property var sessions: []
+  property bool compact: Quickshell.env("COCKPIT_DECK") === "1"
   property var tickets: []
   property var ticketStates: ({})
   property var askFor: sid => null
@@ -391,7 +392,7 @@ FocusScope {
         visible: root.showSessions
         readonly property real spacing: 20
         readonly property real headerHeight: 30
-        readonly property int columns: Math.max(1, Math.min(3, Math.floor((width + spacing) / 300)))
+        readonly property int columns: Math.max(1, Math.min(3, Math.floor((width + spacing) / (root.compact ? 200 : 300))))
         Connections {
           target: root
           function onCurrentActionChanged() { root.revealCard() }
@@ -526,7 +527,7 @@ FocusScope {
             Behavior on reveal { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
             onHeightChanged: if (expanded) Qt.callLater(root.revealCard)
             width: (sessionCards.width - sessionCards.spacing * (sessionCards.columns - 1)) / sessionCards.columns
-            height: Math.max(width * 1.6, 420) + Math.max(0, ticketBadges.height - 54)
+            height: (root.compact ? width * 0.75 + 290 : Math.max(width * 1.6, 420)) + Math.max(0, ticketBadges.height - 54)
             radius: 18
             readonly property bool lightFace: Theme.mode === "light"
             readonly property color faceMid: lightFace ? "#F8F8F9" : Qt.lighter(Theme.surface0, 1.2)
