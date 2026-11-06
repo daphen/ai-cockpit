@@ -45,7 +45,7 @@ FocusScope {
     ? sessions.filter(s => s.project === project && s.name !== focusedSession && !s.offline)
         .sort((a, b) => groupOf(a) - groupOf(b) || a.name.localeCompare(b.name))
     : personalHome
-    ? sessions.filter(s => s.scope === "personal" && !s.offline && !s.parent)
+    ? sessions.filter(s => /(^|-)personal$/.test(s.scope) && !s.offline && !s.parent)
         .sort((a, b) => a.name.localeCompare(b.name))
     : sessions.filter(s => s.scope === "work" && !s.offline && !s.parent
         && (s.profile === "lovable-worker" || s.profile === "lovable-orchestrator"))

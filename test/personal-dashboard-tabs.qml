@@ -14,7 +14,8 @@ ShellRoot {
       anchors.fill: parent
       focusedSession: "ai-cockpit"
       sessions: [{ name: "ai-cockpit", scope: "personal", status: "streaming", cwd: "/home/u/personal/ai-cockpit" },
-                 { name: "nixos", scope: "personal", status: "idle", cwd: "/home/u/nixos" }]
+                 { name: "nixos", scope: "personal", status: "idle", cwd: "/home/u/nixos" },
+                 { name: "laptop", scope: "proart-personal", status: "idle", cwd: "/home/u/laptop" }]
       model: ({ scope: "personal", kind: "session", tabs: ["plan", "tests", "changes"], activeTab: "plan",
                 cards: [{ title: "PLAN", rows: [] }] })
       onActionRequested: id => test.requested.push(id)
@@ -26,7 +27,7 @@ ShellRoot {
     onTriggered: {
       if (stage === 0) {
         if (String(dash.tabs) !== "sessions,changes,tests") test.fail("tabs were " + dash.tabs)
-        if (!dash.showSessions || dash.workers.length !== 2) test.fail("selected private session did not show every session card")
+        if (!dash.showSessions || dash.workers.length !== 3) test.fail("selected private session did not show every session card, including another machine's personal scope")
         if (dash.ticketState("nixos").label !== "~/nixos") test.fail("private card status was " + dash.ticketState("nixos").label)
         dash.dispatch("tab:changes")
         if (String(test.requested) !== "tab:changes") test.fail("changes tab did not ask Neovim for the changes view")
