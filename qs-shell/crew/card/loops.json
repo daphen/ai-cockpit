@@ -4,11 +4,13 @@
    "asking": {
     "frames": [
      "asking-0",
+     "asking-2",
      "asking-1"
     ],
     "ms": [
-     700,
-     700
+     650,
+     450,
+     650
     ]
    },
    "idle": {
@@ -16,43 +18,63 @@
      "a",
      "idle-0",
      "a",
-     "idle-1"
+     "idle-2",
+     "a",
+     "idle-1",
+     "a",
+     "idle-3"
     ],
     "ms": [
      1600,
      140,
+     1200,
+     900,
      1400,
-     900
+     900,
+     1200,
+     700
     ]
    },
    "reading": {
     "frames": [
      "reading-0",
-     "reading-1"
+     "reading-2",
+     "reading-1",
+     "reading-3"
     ],
     "ms": [
      1000,
-     1000
+     450,
+     1000,
+     700
     ]
    },
    "subagents": {
     "frames": [
      "subagents-0",
-     "subagents-1"
+     "subagents-2",
+     "subagents-1",
+     "subagents-3"
     ],
     "ms": [
      600,
-     600
+     450,
+     600,
+     700
     ]
    },
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-1"
+     "thinking-2",
+     "thinking-1",
+     "thinking-3"
     ],
     "ms": [
      1100,
-     1100
+     450,
+     1100,
+     700
     ]
    },
    "working": {
@@ -74,9 +96,13 @@
    "asking": {
     "frames": [
      "asking-0",
-     "asking-1"
+     "asking-2",
+     "asking-1",
+     "asking-3"
     ],
     "ms": [
+     700,
+     450,
      700,
      700
     ]
@@ -86,33 +112,49 @@
      "a",
      "idle-0",
      "a",
-     "idle-1"
+     "idle-2",
+     "a",
+     "idle-1",
+     "a",
+     "idle-3"
     ],
     "ms": [
      1600,
      140,
+     1200,
+     900,
      1400,
-     900
+     900,
+     1200,
+     700
     ]
    },
    "reading": {
     "frames": [
      "reading-0",
-     "reading-1"
+     "reading-2",
+     "reading-1",
+     "reading-3"
     ],
     "ms": [
      1000,
-     1000
+     450,
+     1000,
+     700
     ]
    },
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-1"
+     "thinking-2",
+     "thinking-1",
+     "thinking-3"
     ],
     "ms": [
      1100,
-     1100
+     450,
+     1100,
+     700
     ]
    },
    "working": {
@@ -135,12 +177,14 @@
   "mopper": {
    "asking": {
     "frames": [
-     "asking-0",
-     "asking-1"
+     "asking-2",
+     "asking-1",
+     "asking-3"
     ],
     "ms": [
-     700,
-     700
+     650,
+     450,
+     650
     ]
    },
    "idle": {
@@ -148,33 +192,49 @@
      "a",
      "idle-0",
      "a",
-     "idle-1"
+     "idle-2",
+     "a",
+     "idle-1",
+     "a",
+     "idle-3"
     ],
     "ms": [
      1600,
      140,
+     1200,
+     900,
      1400,
-     900
+     900,
+     1200,
+     700
     ]
    },
    "reading": {
     "frames": [
      "reading-0",
-     "reading-1"
+     "reading-2",
+     "reading-1",
+     "reading-3"
     ],
     "ms": [
      1000,
-     1000
+     450,
+     1000,
+     700
     ]
    },
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-1"
+     "thinking-2",
+     "thinking-1",
+     "thinking-3"
     ],
     "ms": [
      1100,
-     1100
+     450,
+     1100,
+     700
     ]
    },
    "working": {
@@ -196,11 +256,13 @@
    "asking": {
     "frames": [
      "asking-0",
+     "asking-3",
      "asking-1"
     ],
     "ms": [
-     700,
-     700
+     650,
+     450,
+     650
     ]
    },
    "idle": {
@@ -208,33 +270,49 @@
      "a",
      "idle-0",
      "a",
-     "idle-1"
+     "idle-2",
+     "a",
+     "idle-1",
+     "a",
+     "idle-3"
     ],
     "ms": [
      1600,
      140,
+     1200,
+     900,
      1400,
-     900
+     900,
+     1200,
+     700
     ]
    },
    "reading": {
     "frames": [
      "reading-0",
-     "reading-1"
+     "reading-2",
+     "reading-1",
+     "reading-3"
     ],
     "ms": [
      1000,
-     1000
+     450,
+     1000,
+     700
     ]
    },
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-1"
+     "thinking-2",
+     "thinking-1",
+     "thinking-3"
     ],
     "ms": [
      1100,
-     1100
+     450,
+     1100,
+     700
     ]
    },
    "working": {
@@ -256,11 +334,13 @@
    "asking": {
     "frames": [
      "asking-0",
-     "asking-1"
+     "asking-2",
+     "asking-3"
     ],
     "ms": [
-     700,
-     700
+     650,
+     450,
+     650
     ]
    },
    "idle": {
@@ -268,33 +348,49 @@
      "a",
      "idle-0",
      "a",
-     "idle-1"
+     "idle-2",
+     "a",
+     "idle-1",
+     "a",
+     "idle-3"
     ],
     "ms": [
      1600,
      140,
+     1200,
+     900,
      1400,
-     900
+     900,
+     1200,
+     700
     ]
    },
    "reading": {
     "frames": [
      "reading-0",
-     "reading-1"
+     "reading-2",
+     "reading-1",
+     "reading-3"
     ],
     "ms": [
      1000,
-     1000
+     450,
+     1000,
+     700
     ]
    },
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-1"
+     "thinking-2",
+     "thinking-1",
+     "thinking-3"
     ],
     "ms": [
      1100,
-     1100
+     450,
+     1100,
+     700
     ]
    },
    "working": {
