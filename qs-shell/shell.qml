@@ -126,6 +126,23 @@ ShellRoot {
     property bool railLayoutCollapsed: false
     property real railReveal: 1
     readonly property bool dashboardActive: !!(chin.st.dashboard && chin.st.dashboard.active)
+    readonly property bool spritesActive: viewTabs.current === "sprites"
+    function focusLeftPane() {
+      if (spritesActive) spriteBench.forceActiveFocus()
+      else if (dashboardActive) dashboard.forceActiveFocus()
+      else term.forceActiveFocus()
+    }
+    // A session whose folder holds spritecook.json is a sprite session: its left pane is the bench.
+    FileView {
+      id: spriteProject
+      path: rail.selectedCwd && !rail._isRemote(rail.selectedCwd) ? rail.selectedCwd + "/spritecook.json" : ""
+      printErrors: false
+      watchChanges: true
+      onFileChanged: reload()
+      onLoaded: if (rail.workspaceTab !== "sprites") rail.showWorkspace("sprites", true)
+    }
+    readonly property bool spriteSession: !!spriteProject.path && spriteProject.loaded
+    onSpriteSessionChanged: if (!spriteSession && rail.workspaceTab === "sprites") rail.workspaceTab = rail.reportedTab
 
     Behavior on railReveal {
       NumberAnimation {
@@ -152,10 +169,7 @@ ShellRoot {
       railLayoutCollapsed = true
       pane = "nvim"
       railReveal = 0
-      Qt.callLater(function() {
-        if (dashboardActive) dashboard.forceActiveFocus()
-        else term.forceActiveFocus()
-      })
+      Qt.callLater(focusLeftPane)
     }
     Shortcut {
       sequence: "Ctrl+Shift+F"
@@ -203,7 +217,7 @@ ShellRoot {
     FocusCache { nvimSocket: term.localNvimSocket }
     FocusCache { id: remoteFocus; nvimSocket: win.remoteEditorSocket }
 
-    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || rail.activeFocus
+    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || spriteBench.activeFocus || rail.activeFocus
     NotificationFocus {
       active: win.modeReady && win.windowFocused && !win.railCollapsed
       session: rail.selectedRaw
@@ -225,7 +239,7 @@ ShellRoot {
       // Heal a pane/focus desync first: a QML hot-reload rebuilds the window tree and
       // can leave `pane` claiming the rail while the keyboard truly sits in the
       // terminal — the cross then answers "passed" and Ctrl+l goes dead. Reality wins.
-      if ((term.activeFocus || dashboard.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
+      if ((term.activeFocus || dashboard.activeFocus || spriteBench.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
       else if (rail.activeFocus && win.pane !== "rail") win.pane = "rail"
       if (dir === "right") {
         if (win.railCollapsed) return "passed"
@@ -238,17 +252,11 @@ ShellRoot {
     }
 
     onPaneChanged: {
-      if (win.pane === "nvim") {
-        if (win.dashboardActive) dashboard.forceActiveFocus()
-        else term.forceActiveFocus()
-      } else rail.forceActiveFocus()
+      if (win.pane === "nvim") win.focusLeftPane()
+      else rail.forceActiveFocus()
     }
-    onDashboardActiveChanged: {
-      if (win.pane === "nvim") Qt.callLater(function() {
-        if (win.dashboardActive) dashboard.forceActiveFocus()
-        else term.forceActiveFocus()
-      })
-    }
+    onDashboardActiveChanged: if (win.pane === "nvim") Qt.callLater(win.focusLeftPane)
+    onSpritesActiveChanged: if (win.pane === "nvim") Qt.callLater(win.focusLeftPane)
 
     IpcHandler {
       target: "cockpit"
@@ -258,7 +266,7 @@ ShellRoot {
         // Report reality, not the cached property: hot-reloads leave win.pane stale
         // ("rail" while the keyboard truly sits in the terminal), and Super+T's
         // "already on the rail?" check then hopped cockpits straight from the terminal.
-        if ((term.activeFocus || dashboard.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
+        if ((term.activeFocus || dashboard.activeFocus || spriteBench.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
         return win.pane
       }
       function title(): string      { return win.title }   // cockpit-ipc instance routing
@@ -405,6 +413,7 @@ ShellRoot {
             readonly property string current: rail.workspaceTab === "plan" && !rail.selectedPlan ? "code" : rail.workspaceTab
             readonly property var tabs: [{ view: "code", label: "Code", icon: "terminal" }, { view: "dashboard", label: "Dashboard", icon: "status-pulse" }, { view: "vault", label: "Vault", icon: "vault-3" }]
               .concat(rail.selectedPlan ? [{ view: "plan", label: "Plan", icon: "clipboard-check" }] : [])
+              .concat(win.spriteSession ? [{ view: "sprites", label: "Sprites", icon: "paintbrush" }] : [])
             readonly property var views: tabs.map(function(tab) { return tab.view })
             function cycle(step) { rail.showWorkspace(views[(views.indexOf(current) + step + views.length) % views.length], true) }
             Rectangle {
@@ -429,7 +438,7 @@ ShellRoot {
                   width: (viewRow.width - (viewTabs.tabs.length - 1) * viewRow.spacing) / viewTabs.tabs.length
                   height: parent.height
                   readonly property bool active: viewTabs.current === view
-                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus)
+                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus || spriteBench.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
                   LightKey {
                     anchors.fill: parent
@@ -575,6 +584,14 @@ ShellRoot {
                     'v:lua.require("cockpit").dashboard_action(' + JSON.stringify(actionId) + ')'])
                 }
               }
+            }
+            SpriteBench {
+              id: spriteBench
+              anchors.fill: parent
+              visible: win.spritesActive
+              enabled: visible
+              project: win.spriteSession ? rail.selectedCwd : ""
+              onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
             }
             Canvas {
               id: terminalCorner

@@ -43,7 +43,7 @@ Item {
   property bool _tabAwaiting: false
   onReportedTabChanged: {
     if (reportedTab === workspaceTab) { _tabAwaiting = false; tabConfirm.stop() }
-    else if (!_tabAwaiting) workspaceTab = reportedTab
+    else if (!_tabAwaiting && workspaceTab !== "sprites") workspaceTab = reportedTab
   }
   Timer { id: tabConfirm; interval: 3000; onTriggered: { rail._tabAwaiting = false; rail.workspaceTab = rail.reportedTab } }
   function _requestTab(view) {
@@ -1382,6 +1382,13 @@ Item {
     return 'require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) && socket !== remoteNvimSock ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'
   }
   function showWorkspace(view, keepFocus) {
+    if (view === "sprites") {
+      workspaceTab = view
+      _tabAwaiting = false
+      tabConfirm.stop()
+      if (!keepFocus) focusNvim()
+      return
+    }
     landNvim(selectedRaw, view, view === "vault" ? localNvimSock : "")
     if (!keepFocus) focusNvim()
   }
