@@ -4,30 +4,45 @@ import Quickshell.Io
 Item {
   id: crew
   property string profile: ""
+  property string name: ""
   property string activity: "idle"
   property bool running: true
-  readonly property string role: ({"lovable-orchestrator": "orchestrator", "lovable-reviewer": "reviewer", "lovable-watcher": "watcher"})[profile] || "worker"
-  readonly property var tags: sheet.adapter.tags
-  // Tool names without their own animation (e.g. "web_search") read as thinking.
-  readonly property var range: tags[activity] || tags.thinking || [0, 0]
-  property int frame: range[0]
-  onRangeChanged: frame = range[0]
+  readonly property int seed: { var h = 7; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 9973; return h }
+  readonly property string role: ({ nixos: "orchestrator" })[name]
+    || ({"lovable-orchestrator": "orchestrator", "lovable-reviewer": "reviewer", "lovable-watcher": "watcher"})[profile]
+    || ["worker", "mopper", "watcher"][Math.floor(seed / 7) % 3]
+  readonly property var loops: (manifest.adapter.loops || {})[role] || {}
+  // Tool activities share the working loop; anything without a drawn loop (e.g. "web_search") reads as thinking.
+  readonly property string pose: activity === "subagents" && loops.subagents ? "subagents"
+    : ({ coding: "working", bash: "working", subagents: "working", stopping: "idle" })[activity] || activity
+  readonly property real pace: 0.85 + (seed % 31) / 100
+  readonly property var loop: loops[pose] || loops.thinking || { frames: ["a"], ms: [1000] }
+  property int frame: 0
+  onLoopChanged: frame = 0
 
   FileView {
-    id: sheet
-    path: Qt.resolvedUrl("crew/" + crew.role + ".json").toString().replace(/^file:\/\//, "")
-    adapter: JsonAdapter { property var tags: ({}) }
+    id: manifest
+    path: Qt.resolvedUrl("crew/card/loops.json").toString().replace(/^file:\/\//, "")
+    adapter: JsonAdapter { property var loops }
   }
   Timer {
-    running: crew.running && crew.visible && crew.range[1] > crew.range[0]
-    interval: (crew.activity === "idle" ? 1600 : 1000) / (crew.range[1] - crew.range[0] + 1)
+    running: crew.running && crew.visible && crew.loop.frames.length > 1
+    interval: crew.loop.ms[crew.frame % crew.loop.ms.length] * crew.pace
     repeat: true
-    onTriggered: crew.frame = crew.frame >= crew.range[1] ? crew.range[0] : crew.frame + 1
+    onTriggered: crew.frame = (crew.frame + 1) % crew.loop.frames.length
   }
-  Image {
-    anchors.fill: parent
-    source: Qt.resolvedUrl("crew/" + crew.role + ".png")
-    sourceClipRect: Qt.rect(crew.frame * 64, 0, 64, 64)
-    smooth: false
+  // All frames of the current loop stay decoded and only swap visibility.
+  Repeater {
+    model: crew.loop.frames
+    Image {
+      required property int index
+      required property string modelData
+      objectName: "crewFigure"
+      anchors.fill: parent
+      visible: crew.frame === index
+      source: "crew/card/" + crew.role + "-" + modelData + ".jpg"
+      fillMode: Image.PreserveAspectCrop
+      verticalAlignment: Image.AlignBottom
+    }
   }
 }

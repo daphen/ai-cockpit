@@ -47,8 +47,9 @@ FocusScope {
     : personalHome
     ? sessions.filter(s => s.scope === "personal" && !s.offline && !s.parent)
         .sort((a, b) => a.name.localeCompare(b.name))
-    : sessions.filter(s => s.scope === "work" && !s.offline && s.profile === "lovable-worker" && !s.parent)
-        .sort((a, b) => b.name.localeCompare(a.name))
+    : sessions.filter(s => s.scope === "work" && !s.offline && !s.parent
+        && (s.profile === "lovable-worker" || s.profile === "lovable-orchestrator"))
+        .sort((a, b) => (b.profile === "lovable-orchestrator") - (a.profile === "lovable-orchestrator") || b.name.localeCompare(a.name))
   readonly property string workerNames: workers.map(s => s.name).join("\n")
   readonly property var workerGroups: workers.map(s => groupOf(s))
   readonly property var tabs: sessionHome ? ["sessions", homeOtherTab] : personalPage ? ["sessions"].concat(pageTabs) : project ? [] : (model.tabs || [])
@@ -524,7 +525,7 @@ FocusScope {
             Behavior on reveal { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
             onHeightChanged: if (expanded) Qt.callLater(root.revealCard)
             width: (sessionCards.width - sessionCards.spacing * (sessionCards.columns - 1)) / sessionCards.columns
-            height: Math.max(width * 1.35, 350) + Math.max(0, ticketBadges.height - 54)
+            height: Math.max(width * 1.6, 420) + Math.max(0, ticketBadges.height - 54)
             radius: 18
             readonly property bool lightFace: Theme.mode === "light"
             readonly property color faceMid: lightFace ? "#F8F8F9" : Qt.lighter(Theme.surface0, 1.2)
@@ -603,10 +604,9 @@ FocusScope {
               layer.effect: MultiEffect { blurEnabled: true; blur: sessionCard.veil; blurMax: 64; autoPaddingEnabled: false }
               Item { id: insetBox; x: sessionInset.x; y: sessionInset.y; width: sessionInset.width; height: sessionInset.height }
               Rectangle {
-                id: meshMask
+                id: crewMask
                 width: meshPanel.width; height: meshPanel.height
                 radius: sessionInset.radius
-                color: "white"
                 visible: false
                 layer.enabled: true
               }
@@ -614,30 +614,12 @@ FocusScope {
                 id: meshPanel
                 objectName: "sessionStatus"
                 anchors { left: insetBox.left; right: insetBox.right; top: insetBox.top; bottom: sessionDetails.top; bottomMargin: 16 }
-                clip: true
                 layer.enabled: true
-                layer.effect: MultiEffect { maskEnabled: true; maskSource: meshMask }
-                readonly property int pixel: Math.max(1, Math.floor(height * 0.8 / 64))
-                Rectangle {
-                  anchors.fill: parent
-                  gradient: Gradient {
-                    GradientStop { position: 0; color: "#262b44" }
-                    GradientStop { position: 1; color: "#3a4466" }
-                  }
-                }
-                Rectangle {
-                  id: deck
-                  anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
-                  height: Math.round(parent.height * 0.2)
-                  color: "#733e39"
-                  Rectangle { width: parent.width; height: meshPanel.pixel * 2; color: "#3e2731" }
-                }
+                layer.effect: MultiEffect { maskEnabled: true; maskSource: crewMask }
                 CrewSprite {
-                  id: sessionCrew
                   objectName: "sessionCrew"
-                  width: 64 * meshPanel.pixel; height: width
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  y: deck.y - 61 * meshPanel.pixel
+                  anchors.fill: parent
+                  name: sessionCard.modelData
                   profile: sessionCard.session.profile || ""
                   activity: sessionCard.ask ? "asking" : root.activityLabelFor(sessionCard.modelData)
                   running: sessionCards.visible
@@ -649,7 +631,7 @@ FocusScope {
                 anchors { left: meshPanel.left; bottom: meshPanel.bottom; margins: 12 }
                 width: Math.min(meshPanel.width - 24, badgeText.implicitWidth + 24)
                 height: 26; radius: 6
-                color: Qt.rgba(0, 0, 0, 0.2)
+                color: Qt.rgba(0, 0, 0, 0.45)
                 border { width: 1; color: Qt.rgba(1, 1, 1, 0.38) }
                 Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                 Text {
@@ -698,7 +680,7 @@ FocusScope {
                     required property var modelData
                     objectName: "subagent:" + modelData.name
                     width: 26; height: 26; radius: 13
-                    color: Qt.rgba(0, 0, 0, 0.16)
+                    color: Qt.rgba(0, 0, 0, 0.45)
                     border { width: 1; color: Qt.rgba(1, 1, 1, 0.24) }
                     Icon {
                       anchors.centerIn: parent

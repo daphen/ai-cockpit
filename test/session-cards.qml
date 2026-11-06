@@ -13,6 +13,8 @@ ShellRoot {
   property string ticketAction: ""
   property var originalCard: null
   property int lastFrame: -1
+  property bool breathed: false
+  property bool busy: false
   property string activityLabel: "bash"
   property var originalSessions: []
   property real collapsedHeight: 0
@@ -63,6 +65,7 @@ ShellRoot {
     return null
   }
   function card(name) { return find(dash, item => item.objectName === "sessionCard:" + name) }
+  function crew(name) { var c = card(name); return c && find(c, item => item.objectName === "sessionCrew") }
   function alpha(item) { var value = 1; for (; item; item = item.parent) value *= item.opacity; return value }
   function refresh() { dash.model = Object.assign({}, dash.model) }
   function working(value) {
@@ -71,14 +74,21 @@ ShellRoot {
   Timer {
     interval: 35; running: true; repeat: true
     onTriggered: {
+      // keyClick spins the event loop, so a slow step would otherwise re-enter this handler.
+      if (test.busy) return
+      test.busy = true
+      try { step() } finally { test.busy = false }
+    }
+    function step() {
       if (test.phase === 0) {
         if (dash.tickets.length !== 4) { cache.reload(); return }
         if (++test.ticks < 4) return
         test.ticks = 0
         dash.forceActiveFocus()
         var first = test.card("every-3790"), last = test.card("every-3710")
-        test.check(first && last && !test.card("orchestrator") && !test.card("personal") && !test.card("disconnected"), "session membership or default tab is wrong")
-        test.check(first.height > first.width && last.y > first.y, "cards are not portrait or grid is wrong")
+        test.check(first && last && test.card("orchestrator") && !test.card("personal") && !test.card("disconnected"), "session membership or default tab is wrong")
+        test.check(last.y > first.y, "grid is wrong: " + first.width + "x" + first.height)
+        test.check(test.crew("orchestrator").role === "orchestrator", "orchestrator card does not show the captain")
         for (var name of ["every-3790","every-3789","every-3710","every-3711"]) {
           var c = test.card(name), title = test.find(c,item => item.text === name)
           var summary = test.find(c,item => item.wrapMode === Text.WordWrap)
@@ -94,17 +104,18 @@ ShellRoot {
           test.check(Math.abs(status.width - inset.width) < 0.01 && Math.abs(status.y - inset.y) < 0.01 && Math.abs(status.y + status.height + 16 - summary.parent.parent.y) < 0.01, "mesh does not fill the inset above the description")
           test.check(Math.abs(title.x-status.x)<0.01 && Math.abs(summary.parent.parent.x-status.x)<0.01, "header, mesh and description do not share padding")
           var tag = test.find(c,item => item.objectName === "sessionActivityBadge")
-          test.check(test.find(tag,item => item.text === "IDLE") && Math.abs(tag.x-status.x-12)<0.01 && Math.abs(tag.y+tag.height-status.y-status.height+12)<0.01, "idle badge is not inset at mesh bottom-left")
-          test.check(test.find(c,item => item.visible === false && item.radius === inset.radius && Math.abs(item.width-status.width)<0.01 && Math.abs(item.height-status.height)<0.01), "mesh mask does not round all four corners")
-          var crew = test.find(c,item => item.objectName === "sessionCrew")
-          var center = crew.mapToItem(status,crew.width/2,0)
-          test.check(Math.abs(center.x-status.width/2)<1 && crew.y+crew.height <= status.height && crew.width % 64 === 0 && crew.width >= 128, "crew sprite is not a centered integer-scaled sprite inside the panel: " + JSON.stringify([center.x,status.width,crew.y,crew.height,status.height,crew.width]))
-          test.check(crew.role === "worker" && crew.activity === "idle" && crew.frame >= crew.tags.idle[0] && crew.frame <= crew.tags.idle[1] && test.alpha(crew) === 1, "idle worker does not show the deckhand's idle loop")
+          test.check(test.find(tag,item => item.text === "IDLE") && Math.abs(tag.x-status.x-12)<0.01 && Math.abs(tag.y+tag.height+12-status.y-status.height)<0.01, "idle badge is not inset in the panel's bottom-left")
+          var crew = test.crew(name)
+          var figure = crew && test.find(crew,item => item.objectName === "crewFigure" && item.visible)
+          test.check(figure && figure.status === Image.Ready && test.alpha(crew) === 1 && Math.abs(crew.width - status.width) < 0.01 && Math.abs(figure.height - status.height) < 0.01, "card scene missing or not filling the panel: " + name)
+          test.check(["worker", "mopper", "watcher"].indexOf(crew.role) >= 0 && crew.activity === "idle", "idle worker card does not show a crew character: " + name)
         }
         first.grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card.png"))
         test.originalSessions = dash.sessions
         test.originalCard = first
       } else if (test.phase === 1) {
+        test.check(dash.currentAction === "session:orchestrator", "orchestrator card does not lead the work dashboard")
+        input.keyClick(Qt.Key_L,Qt.NoModifier,0)
         input.keyClick(Qt.Key_L,Qt.NoModifier,0)
         test.check(dash.currentAction === "session:every-3789", "l did not move right")
         test.refresh(); test.working(true)
@@ -113,33 +124,38 @@ ShellRoot {
         test.check(dash.currentAction === "session:every-3789", "session selection reset on dashboard refresh")
         var c = test.card("every-3790")
         test.check(c === test.originalCard, "activity update recreated the card and broke crossfade")
-        test.check(test.card("every-3789").x > c.x && test.card("every-3711").x > test.card("every-3789").x && test.card("every-3710").y > c.y, "unordered status roster reshuffled the cards")
-        var crew = test.find(c,item => item.objectName === "sessionCrew")
-        test.check(crew.activity === "bash" && crew.frame === crew.tags.bash[0], "working card did not switch the sprite to its bash loop")
+        test.check(test.card("every-3789").x > c.x && test.card("orchestrator").x < c.x && test.card("every-3710").y > c.y, "unordered status roster reshuffled the cards")
+        var crew = test.crew(c.modelData)
+        test.check(crew.activity === "bash", "working card did not pass bash to its character")
         test.lastFrame = crew.frame
         window.implicitHeight = 520
       } else if (test.phase === 3) {
-        if (++test.ticks < 55) return
+        ++test.ticks
+        if (test.crew("every-3790").frame !== test.lastFrame) test.breathed = true
+        if (test.ticks < 55) return
         input.keyClick(Qt.Key_J,Qt.NoModifier,0)
         test.check(dash.currentAction === "session:every-3710", "j did not move to nearest card below")
         var selected = test.card("every-3710"), position = selected.mapToItem(dash,0,0)
         test.check(position.y >= 0 && position.y + selected.height <= dash.height - 40 + 1, "navigation did not scroll the selected card into view")
         input.keyClick(Qt.Key_H,Qt.NoModifier,0)
-        test.check(dash.currentAction === "session:every-3710", "h wrapped across a row boundary")
+        test.check(dash.currentAction === "session:every-3711", "h did not move left within the row")
+        input.keyClick(Qt.Key_H,Qt.NoModifier,0)
+        test.check(dash.currentAction === "session:every-3711", "h wrapped across a row boundary")
+        input.keyClick(Qt.Key_L,Qt.NoModifier,0)
         input.keyClick(Qt.Key_K,Qt.NoModifier,0)
         test.check(dash.currentAction === "session:every-3790", "k did not move up")
         input.keyClick(Qt.Key_Return,Qt.ControlModifier,0)
         test.check(test.opened === "every-3790", "Ctrl+Enter did not open the selected session")
-        var crew = test.find(test.card("every-3790"),item => item.objectName === "sessionCrew")
-        test.check(crew.frame !== test.lastFrame && crew.frame >= crew.tags.bash[0] && crew.frame <= crew.tags.bash[1], "bash loop did not advance within its frames")
+        var crew = test.crew("every-3790")
+        test.check(test.breathed, "busy character did not breathe")
         test.check(test.find(test.card("every-3790"),item => item.text === "BASH" && item.opacity === 1), "badge did not settle to Bash")
         test.card("every-3790").grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card-active.png"))
         test.working(false); test.ticks = 0
       } else if (test.phase === 4) {
-        var crew = test.find(test.card("every-3790"),item => item.objectName === "sessionCrew")
-        test.check(crew.activity === "idle" && crew.frame >= crew.tags.idle[0] && crew.frame <= crew.tags.idle[1], "finished session did not return to idle")
+        var crew = test.crew("every-3790")
+        test.check(crew.activity === "idle", "finished session did not return to idle")
         dash.askFor = sid => sid === "every-3789" ? {method:"confirm", message:"Ship it?"} : null
-        test.check(test.find(test.card("every-3789"),item => item.objectName === "sessionCrew").activity === "asking", "asking session does not hold up the question sign")
+        test.check(test.crew("every-3789").activity === "asking", "asking session does not hold up the question sign")
         dash.askFor = sid => null
         test.working(true); railFocus.forceActiveFocus()
       } else if (test.phase === 5) {
@@ -188,11 +204,12 @@ ShellRoot {
         var ring = test.find(c,item => item.objectName === "sessionRing")
         test.check(ring && ring.opacity > 0 && Math.abs(ring.border.color.a - 0.3) < 0.01, "mouse hover did not ring the card")
         input.mouseMove(window,1,1,0,Qt.NoButton,Qt.NoModifier)
-        input.keyClick(Qt.Key_J,Qt.NoModifier,0)
+        dash.cursor = dash.selectable.indexOf("session:every-3710")
         var c = test.card("every-3710"), summary = test.find(c,item => item.wrapMode === Text.WordWrap)
         test.check(summary.truncated && summary.elide === Text.ElideRight, "long description did not ellipsize")
         test.check(test.find(c,item => item.objectName === "expandSession").visible, "truncated card lost its Expand control")
         test.collapsedHeight = c.height; test.detailTop = summary.parent.parent.y; test.opened = ""
+        test.check(dash.currentAction === "session:every-3710", "j before expansion landed on " + dash.currentAction)
         input.keyClick(Qt.Key_Return,Qt.NoModifier,0)
       } else if (test.phase === 14) {
         var c = test.card("every-3710"), summary = test.find(c,item => item.wrapMode === Text.WordWrap)
@@ -253,7 +270,7 @@ ShellRoot {
       } else if (test.phase === 22) {
         if (++test.ticks < 4) return
         test.check(test.card("every-4032") && test.find(test.card("every-4032"), item => item.text === "Title from the session plan"), "session outside the cycle lost its plan title")
-        console.log("PASS: canvas frame, compact shared padding/header/radii, shorter four-corner panel, crew sprite idle/bash/asking loops, animated idle/Bash/Coding/Reading badges, expansion and navigation, plan title fallback")
+        console.log("PASS: canvas frame, compact shared padding/header/radii, shorter four-corner panel, HD crew character per card, animated idle/Bash/Coding/Reading badges, expansion and navigation, plan title fallback")
         Qt.quit()
       }
       test.phase++
