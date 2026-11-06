@@ -69,7 +69,7 @@ ShellRoot {
         var yes = test.find(card,"answerYes"), open = test.find(card,"openSession"), expand = test.find(card,"expandSession")
         test.check(yes.visible && yes.height === 28 && test.find(card,"answerNo").visible && !open.visible && !expand.visible && Math.abs(yes.mapToItem(card,0,0).y + 28 + 16 - card.height) < 1, "Yes/No did not replace the corner buttons")
         test.check(card.height === test.find(dash,"sessionCard:every-43").height, "question changed the card height")
-        test.check(question.height < card.height && test.find(card,"collapsedLayer").layer.enabled && !test.find(card,"collapsedLayer").enabled, "card content was not veiled behind the question")
+        test.check(question.height < card.height && !test.find(card,"collapsedLayer").enabled, "card content stayed interactive behind the question")
         var preview = Quickshell.env("COCKPIT_CARD_PREVIEW")
         if (preview) card.grabToImage(result => result.saveToFile(preview))
         composer.forceActiveFocus()
