@@ -62,15 +62,11 @@
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-2",
-     "thinking-1",
-     "thinking-3"
+     "thinking-1"
     ],
     "ms": [
      1100,
-     450,
-     1100,
-     700
+     1100
     ]
    },
    "working": {
