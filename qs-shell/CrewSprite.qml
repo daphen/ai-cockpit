@@ -42,7 +42,7 @@ Item {
       visible: crew.frame === index
       source: "crew/card/" + crew.role + "-" + modelData + ".jpg"
       fillMode: Image.PreserveAspectCrop
-      verticalAlignment: Image.AlignBottom
+      verticalAlignment: Image.AlignVCenter
     }
   }
 }
