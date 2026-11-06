@@ -121,6 +121,7 @@
             mirror="$HOME/.local/state/cockpit/private-shell-pkg"
             mkdir -p "$mirror"; rm -f "$mirror"/*.qml "$mirror"/*.qsb
             for f in "$shell"/*.qml "$shell"/*.qsb; do ln -sf "$f" "$mirror/$(basename "$f")"; done
+            for d in "$shell"/*/; do ln -sfn "''${d%/}" "$mirror/$(basename "$d")"; done
             shell="$mirror"
           else
             export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · lovable}"
