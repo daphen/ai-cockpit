@@ -179,14 +179,16 @@
    },
    "working": {
     "frames": [
-     "a",
      "working-0",
-     "working-1"
+     "working-3",
+     "working-1",
+     "working-3"
     ],
     "ms": [
-     260,
      300,
-     160
+     200,
+     300,
+     200
     ]
    }
   },
@@ -237,14 +239,16 @@
    },
    "working": {
     "frames": [
-     "a",
      "working-0",
-     "working-1"
+     "working-2",
+     "working-1",
+     "working-3"
     ],
     "ms": [
-     260,
-     300,
-     160
+     350,
+     350,
+     350,
+     450
     ]
    }
   },
@@ -295,14 +299,16 @@
    },
    "working": {
     "frames": [
-     "a",
      "working-0",
-     "working-1"
+     "working-2",
+     "working-1",
+     "working-3"
     ],
     "ms": [
-     260,
+     400,
      300,
-     160
+     400,
+     300
     ]
    }
   }
