@@ -4982,9 +4982,11 @@ Item {
               }
             }
             Row {
+              id: childStrip
               anchors.verticalCenter: parent.verticalCenter
               visible: pill.children_.length > 0
               leftPadding: 6; spacing: 2
+              Icon { anchors.verticalCenter: parent.verticalCenter; name: "chevron-right--outline--12"; width: 12; height: 12; color: chin.muted }
             Repeater {
               model: pill.children_
               delegate: Rectangle {
@@ -5002,8 +5004,6 @@ Item {
                   id: childRow
                   x: 4; anchors.verticalCenter: parent.verticalCenter
                   spacing: 4
-                  Text { anchors.verticalCenter: parent.verticalCenter; text: "›"; color: chin.muted
-                    font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
                   SessionDot { anchors.verticalCenter: parent.verticalCenter; sid: childChip.sid; status: childChip.modelData.status || ""; size: 14 }
                   Text {
                     anchors.verticalCenter: parent.verticalCenter
@@ -5014,7 +5014,6 @@ Item {
                   }
                 }
                 HoverHandler { id: childHover; cursorShape: Qt.PointingHandCursor }
-                TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: rail.jumpToSession(childChip.sid) }
               }
             }
             }
@@ -5028,7 +5027,15 @@ Item {
               else if (rail.pillTipFor === pill) rail.pillTipFor = null
             }
           }
-          TapHandler { onTapped: rail.clickAt(index) }
+          // One handler for the whole pill: a nested chip handler also let the parent tab steal the tap.
+          TapHandler {
+            onTapped: eventPoint => {
+              var p = pill.mapToItem(childStrip, eventPoint.position.x, eventPoint.position.y)
+              var chip = childStrip.visible ? childStrip.childAt(p.x, p.y) : null
+              if (chip && chip.objectName === "sessionChildTab") rail.jumpToSession(chip.sid)
+              else rail.clickAt(index)
+            }
+          }
         }
         }
         }
