@@ -4,13 +4,11 @@
    "asking": {
     "frames": [
      "asking-0",
-     "asking-2",
-     "asking-1"
+     "asking-2"
     ],
     "ms": [
-     650,
-     450,
-     650
+     700,
+     700
     ]
    },
    "idle": {
@@ -35,28 +33,22 @@
     "frames": [
      "reading-0",
      "reading-2",
-     "reading-1",
      "reading-3"
     ],
     "ms": [
      1000,
      450,
-     1000,
-     700
+     1000
     ]
    },
    "subagents": {
     "frames": [
-     "subagents-0",
      "subagents-2",
-     "subagents-1",
      "subagents-3"
     ],
     "ms": [
      600,
-     450,
-     600,
-     700
+     600
     ]
    },
    "thinking": {
@@ -89,22 +81,18 @@
     "frames": [
      "asking-0",
      "asking-2",
-     "asking-1",
      "asking-3"
     ],
     "ms": [
-     700,
+     650,
      450,
-     700,
-     700
+     650
     ]
    },
    "idle": {
     "frames": [
      "a",
      "idle-0",
-     "a",
-     "idle-2",
      "a",
      "idle-1",
      "a",
@@ -113,8 +101,6 @@
     "ms": [
      1600,
      140,
-     1200,
-     900,
      1400,
      900,
      1200,
@@ -170,13 +156,11 @@
    "asking": {
     "frames": [
      "asking-2",
-     "asking-1",
      "asking-3"
     ],
     "ms": [
-     650,
-     450,
-     650
+     700,
+     700
     ]
    },
    "idle": {
@@ -205,14 +189,12 @@
     "frames": [
      "reading-0",
      "reading-2",
-     "reading-1",
      "reading-3"
     ],
     "ms": [
      1000,
      450,
-     1000,
-     700
+     1000
     ]
    },
    "thinking": {
@@ -370,15 +352,11 @@
    "thinking": {
     "frames": [
      "thinking-0",
-     "thinking-2",
-     "thinking-1",
-     "thinking-3"
+     "thinking-1"
     ],
     "ms": [
      1100,
-     450,
-     1100,
-     700
+     1100
     ]
    },
    "working": {
