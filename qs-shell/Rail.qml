@@ -232,6 +232,12 @@ Item {
   // re-sort once the tab list loses focus.
   property var tabRecency: []
   readonly property bool tabsFocused: rosterExpanded && focused && !insert && cur < rSize
+  // Enter on a tab with sub-sessions scopes h/l to [parent, ...children]; childCur indexes that list.
+  property string childScope: ""
+  property int childCur: 0
+  readonly property var childScopeList: childScope
+    ? [childScope].concat(liveSessions.filter(s => s.parent === childScope).map(s => s.name)) : []
+  onRosterExpandedChanged: childScope = ""
   function syncTabRecency() { if (!tabsFocused) tabRecency = recentSelections }
   onRecentSelectionsChanged: syncTabRecency()
   onTabsFocusedChanged: syncTabRecency()
@@ -2657,6 +2663,29 @@ Item {
       return true
     }
     if (!ctrl && e.key === Qt.Key_Up) { moveUp(); return true }
+    if (onTabs && childScope && !ctrl) {
+      if (e.key === Qt.Key_H || e.key === Qt.Key_L) {
+        childCur = Math.max(0, Math.min(childScopeList.length - 1, childCur + (e.key === Qt.Key_L ? 1 : -1)))
+        return true
+      }
+      if (e.key === Qt.Key_Return || e.key === Qt.Key_Enter) {
+        var target = childScopeList[childCur]
+        childScope = ""
+        jumpToSession(target)
+        Qt.callLater(rail.enterInsert)
+        return true
+      }
+      if (e.key === Qt.Key_Escape) { childScope = ""; return true }
+      childScope = ""
+    }
+    if (onTabs && !ctrl && (e.key === Qt.Key_Return || e.key === Qt.Key_Enter)) {
+      var row = rosterList[cur], rowSid = row ? (row.rawName || row.name) : ""
+      if (rowSid && liveSessions.some(s => s.parent === rowSid)) {
+        childScope = rowSid
+        childCur = Math.max(0, childScopeList.indexOf(selectedRaw))
+        return true
+      }
+    }
     if (onTabs && !ctrl && (e.key === Qt.Key_H || e.key === Qt.Key_L)) {
       cur = (cur + (e.key === Qt.Key_L ? 1 : -1) + rSize) % rSize
       return true
@@ -2741,6 +2770,7 @@ Item {
 
   // Cursor moves report to FeedScroll, which reveals the row (or re-pins on the last).
   onCurChanged: {
+    childScope = ""
     if (fileSelectOpen) closeFileSelection()
     if (itemMode) exitItemMode()
     if (hinting) cancelHints("cur-move")   // any cursor move invalidates the labeled row
@@ -4922,7 +4952,8 @@ Item {
           readonly property string sid: md.rawName || md.name
           readonly property bool selected: sid === rail.selectedRaw || sid === rail.selectedParent
           readonly property bool offline: md.offline === true || md.status === "offline"
-          readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index
+          readonly property bool scoped: rail.childScope === sid && rail.tabsFocused && rail.cur === index
+          readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index && !(scoped && rail.childCur > 0)
           height: 28; radius: 14
           width: Math.round(inlineRow.implicitWidth) + 2 + 12
           onWidthChanged: if (selected || cursor) Qt.callLater(inlineList.reveal)
@@ -4992,14 +5023,16 @@ Item {
               delegate: Rectangle {
                 id: childChip
                 required property var modelData
+                required property int index
                 readonly property bool current: modelData.name === rail.selectedRaw
+                readonly property bool cursor: pill.scoped && rail.childCur === index + 1
                 objectName: "sessionChildTab"
                 property string sid: modelData.name
                 anchors.verticalCenter: parent.verticalCenter
                 height: 22; radius: 11
                 width: childRow.implicitWidth + 10
                 color: current ? chin.itemSelected : childHover.hovered ? chin.itemHover : "transparent"
-                border.width: current ? 1 : 0; border.color: chin.hairline
+                border.width: cursor ? 1.5 : current ? 1 : 0; border.color: cursor ? rail.activeRing : chin.hairline
                 Row {
                   id: childRow
                   x: 4; anchors.verticalCenter: parent.verticalCenter
