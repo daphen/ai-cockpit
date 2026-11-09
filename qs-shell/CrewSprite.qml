@@ -39,7 +39,7 @@ Item {
       required property string modelData
       objectName: "crewFigure"
       anchors.fill: parent
-      visible: crew.frame === index
+      visible: crew.frame % crew.loop.frames.length === index
       source: "crew/card/" + crew.role + "-" + modelData + ".jpg"
       fillMode: Image.PreserveAspectCrop
       verticalAlignment: Image.AlignVCenter
