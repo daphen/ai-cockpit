@@ -23,7 +23,7 @@ Item {
   FileView {
     id: manifest
     path: Qt.resolvedUrl("crew/card/loops.json").toString().replace(/^file:\/\//, "")
-    adapter: JsonAdapter { property var loops }
+    adapter: JsonAdapter { property var loops; property int version: 0 }
   }
   Timer {
     running: crew.running && crew.visible && crew.loop.frames.length > 1
@@ -31,20 +31,15 @@ Item {
     repeat: true
     onTriggered: crew.frame = (crew.frame + 1) % crew.loop.frames.length
   }
-  // All frames of the current loop stay decoded and only swap visibility.
-  Repeater {
-    model: crew.loop.frames
-    Image {
-      required property int index
-      required property string modelData
-      objectName: "crewFigure"
-      anchors.fill: parent
-      visible: crew.frame % crew.loop.frames.length === index
-      source: "crew/card/" + crew.role + "-" + modelData + ".jpg"
-      fillMode: Image.PreserveAspectCrop
-      // Card art is replaced on disk while the Cockpit runs; a cached half-written decode would stay blank.
-      cache: false
-      verticalAlignment: Image.AlignVCenter
-    }
+  // One image swapping between cached files: a synchronous swap keeps the old frame up until the new one is
+  // decoded, so a rapidly flipping activity can never show an empty panel.
+  Image {
+    objectName: "crewFigure"
+    anchors.fill: parent
+    asynchronous: false
+    // The build stamps a version so a rebuilt frame never reuses an old cached decode.
+    source: Qt.resolvedUrl("crew/card/" + crew.role + "-" + crew.loop.frames[crew.frame % crew.loop.frames.length] + ".jpg") + "?v=" + manifest.adapter.version
+    fillMode: Image.PreserveAspectCrop
+    verticalAlignment: Image.AlignVCenter
   }
 }
