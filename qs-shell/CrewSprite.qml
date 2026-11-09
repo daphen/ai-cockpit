@@ -42,6 +42,8 @@ Item {
       visible: crew.frame % crew.loop.frames.length === index
       source: "crew/card/" + crew.role + "-" + modelData + ".jpg"
       fillMode: Image.PreserveAspectCrop
+      // Card art is replaced on disk while the Cockpit runs; a cached half-written decode would stay blank.
+      cache: false
       verticalAlignment: Image.AlignVCenter
     }
   }
