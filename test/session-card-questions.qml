@@ -64,6 +64,7 @@ ShellRoot {
         test.check(question.visible && question.height > 0 && card.ask.message === test.questionText, "question was not rendered inline")
         test.check(Math.abs(indicators.y + 26 - badge.y - badge.height) < 0.01, "subagent indicators are not aligned with the activity badge")
         test.check(test.find(card,"subagent:watch-pr-42") && test.find(card,"subagent:helper"), "child indicators missing")
+        test.check(test.find(card,"subagent:helper").children.some(child => child.text === "helper"), "child indicator does not name the subagent")
         var body = test.find(card,"questionBody")
         test.check(body.text === test.questionText && !body.truncated && body.wrapMode === Text.Wrap && body.lineHeight === 1.25, "question lost content or readable wrapping")
         var yes = test.find(card,"answerYes"), open = test.find(card,"openSession"), expand = test.find(card,"expandSession")

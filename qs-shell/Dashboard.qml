@@ -681,15 +681,23 @@ FocusScope {
                     id: subagentIndicator
                     required property var modelData
                     objectName: "subagent:" + modelData.name
-                    width: 26; height: 26; radius: 13
+                    width: Math.min(160, subagentName.implicitWidth + 36); height: 26; radius: 6
                     color: Qt.rgba(0, 0, 0, 0.45)
-                    border { width: 1; color: Qt.rgba(1, 1, 1, 0.24) }
+                    border { width: 1; color: Qt.rgba(1, 1, 1, subagentHover.hovered ? 0.5 : 0.38) }
                     Icon {
-                      anchors.centerIn: parent
+                      x: 8; anchors.verticalCenter: parent.verticalCenter
                       name: modelData.profile === "lovable-watcher" ? "binoculars" : "users"
                       width: 14; height: 14
                       color: modelData.ask ? Theme.orange : (modelData.status === "streaming" ? Theme.green : "white")
                       Behavior on color { ColorAnimation { duration: 220 } }
+                    }
+                    Text {
+                      id: subagentName
+                      x: 28; width: parent.width - 36; anchors.verticalCenter: parent.verticalCenter
+                      text: modelData.name
+                      elide: Text.ElideRight
+                      color: "white"
+                      font.family: Theme.fontFamily; font.pixelSize: 12
                     }
                     HoverHandler { id: subagentHover; cursorShape: Qt.PointingHandCursor }
                     HoverTip {

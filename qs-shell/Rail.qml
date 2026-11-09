@@ -4981,15 +4981,45 @@ Item {
                 color: rail.skyAccent
               }
             }
-            Text {
+            Row {
               anchors.verticalCenter: parent.verticalCenter
-              leftPadding: 6
-              visible: pill.selected && rail.selectedParent === pill.sid
-              text: "› " + rail.shortName(rail.selectedRaw)
-              color: chin.fg
-              font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: 600
+              visible: pill.children_.length > 0
+              leftPadding: 6; spacing: 2
+            Repeater {
+              model: pill.children_
+              delegate: Rectangle {
+                id: childChip
+                required property var modelData
+                readonly property bool current: modelData.name === rail.selectedRaw
+                objectName: "sessionChildTab"
+                property string sid: modelData.name
+                anchors.verticalCenter: parent.verticalCenter
+                height: 22; radius: 11
+                width: childRow.implicitWidth + 10
+                color: current ? chin.itemSelected : childHover.hovered ? chin.itemHover : "transparent"
+                border.width: current ? 1 : 0; border.color: chin.hairline
+                Row {
+                  id: childRow
+                  x: 4; anchors.verticalCenter: parent.verticalCenter
+                  spacing: 4
+                  Text { anchors.verticalCenter: parent.verticalCenter; text: "›"; color: chin.muted
+                    font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta }
+                  SessionDot { anchors.verticalCenter: parent.verticalCenter; sid: childChip.sid; status: childChip.modelData.status || ""; size: 14 }
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: rail.shortName(childChip.sid)
+                    color: childChip.current || childHover.hovered ? chin.fg : chin.muted
+                    font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
+                    font.weight: childChip.current ? 600 : 400
+                  }
+                }
+                HoverHandler { id: childHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { gesturePolicy: TapHandler.WithinBounds; onTapped: rail.jumpToSession(childChip.sid) }
+              }
+            }
             }
           }
+          readonly property var children_: rail.liveSessions.filter(s => s.parent === sid)
           readonly property string tip: sid === rail.selectedRaw ? (rail.activeTask || rail.selectedPlan) : String(md.plan || "")
           HoverHandler {
             id: inlineHover; cursorShape: Qt.PointingHandCursor
