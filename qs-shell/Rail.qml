@@ -43,7 +43,7 @@ Item {
   property bool _tabAwaiting: false
   onReportedTabChanged: {
     if (reportedTab === workspaceTab) { _tabAwaiting = false; tabConfirm.stop() }
-    else if (!_tabAwaiting && workspaceTab !== "sprites") workspaceTab = reportedTab
+    else if (!_tabAwaiting && workspaceTab !== "studio") workspaceTab = reportedTab
   }
   Timer { id: tabConfirm; interval: 3000; onTriggered: { rail._tabAwaiting = false; rail.workspaceTab = rail.reportedTab } }
   function _requestTab(view) {
@@ -1388,7 +1388,7 @@ Item {
     return 'require("cockpit").workspace(' + [scopeMode, sid, localCwd, plan, view || "", latest, String(ss.profile || ""), String(ss.scope || ""), rail._isRemote(cwd) && socket !== remoteNvimSock ? cwd : ""].map(function(value) { return JSON.stringify(value) }).join(",") + ')'
   }
   function showWorkspace(view, keepFocus) {
-    if (view === "sprites") {
+    if (view === "studio") {
       workspaceTab = view
       _tabAwaiting = false
       tabConfirm.stop()
