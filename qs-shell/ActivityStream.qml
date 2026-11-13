@@ -87,7 +87,7 @@ FocusScope {
       if (r.kind !== "edit") continue
       if (!g) {
         var p = prompt[r.sid]
-        g = { key: r.key, sid: r.sid, task: task[r.sid] || "", prompt: p ? p.text : "", from: p ? p.from : "", start: r.at, end: r.at, files: [], byPath: {}, summary: "", done: false }
+        g = { key: r.key, sid: r.sid, task: task[r.sid] || "", prompt: p ? p.text : "", from: p ? p.from : "", asked: p ? p.at : r.at, start: r.at, end: r.at, files: [], byPath: {}, summary: "", done: false }
         open[r.sid] = g
         all.push(g)
       }
@@ -109,7 +109,7 @@ FocusScope {
     for (var g of groups) {
       var label = dayLabel(g.end)
       if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
-      out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, latest: g.latest, end: g.end, count: g.files.length })
+      out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, latest: g.latest, end: g.end, asked: g.asked, count: g.files.length })
       if (g.summary) out.push({ kind: "result", key: "result:" + g.key, sid: g.sid, text: g.summary })
       for (var f of g.files)
         out.push({ kind: "file", key: "file:" + g.key + ":" + f.path, sid: g.sid, path: f.path, add: f.add, del: f.del,
@@ -271,7 +271,7 @@ FocusScope {
           id: headTime
           anchors { right: parent.right; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
           readonly property bool live: row.entry.latest === true && root.busy(row.entry.sid)
-          text: live ? root.activityLabelFor(row.entry.sid || "") : root.clock(row.entry.end || 0)
+          text: live ? root.activityLabelFor(row.entry.sid || "") : root.clock(row.entry.asked || row.entry.end || 0)
           color: live ? Theme.orange : root.metaColor
           font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
         }
