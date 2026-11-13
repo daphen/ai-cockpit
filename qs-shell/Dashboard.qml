@@ -10,8 +10,6 @@ FocusScope {
   // Light fg_muted is 2.6:1 on the canvas; pull it toward fg_secondary to clear 4.5:1.
   readonly property color muted: Theme.mode === "light" ? Qt.rgba(Theme.fg_muted.r * 0.4 + Theme.fg_secondary.r * 0.6, Theme.fg_muted.g * 0.4 + Theme.fg_secondary.g * 0.6, Theme.fg_muted.b * 0.4 + Theme.fg_secondary.b * 0.6, 1) : Theme.fg_muted
   property var model: ({})
-  property var agentd: null
-  property var rail: null
   property var sessions: []
   property bool compact: Quickshell.env("COCKPIT_DECK") === "1"
   property var tickets: []
@@ -36,10 +34,8 @@ FocusScope {
   readonly property string homeOtherTab: personalHome ? "plans" : "tickets"
   readonly property bool personalPage: !project && personalHome && model.kind === "session"
   readonly property var pageTabs: personalPage ? ["changes", "tests"].filter(t => (model.tabs || []).indexOf(t) >= 0) : []
-  readonly property bool showActivity: (sessionHome || personalPage) && homeTab === "activity"
-  onShowActivityChanged: if (showActivity && agentd) agentd.loadActivityHistory()
-  readonly property bool showSessions: !!project || (sessionHome && homeTab !== homeOtherTab && !showActivity)
-    || (personalPage && !showActivity && !(pageTabs.indexOf(homeTab) >= 0 && model.activeTab === homeTab))
+  readonly property bool showSessions: !!project || (sessionHome && homeTab !== homeOtherTab)
+    || (personalPage && !(pageTabs.indexOf(homeTab) >= 0 && model.activeTab === homeTab))
   readonly property var groupNames: ["NEEDS YOU", "WORKING", "READY"]
   function groupOf(s) {
     if (!project) return -1
@@ -57,11 +53,9 @@ FocusScope {
         .sort((a, b) => (b.profile === "lovable-orchestrator") - (a.profile === "lovable-orchestrator") || b.name.localeCompare(a.name))
   readonly property string workerNames: workers.map(s => s.name).join("\n")
   readonly property var workerGroups: workers.map(s => groupOf(s))
-  readonly property var tabs: sessionHome ? ["sessions", homeOtherTab, "activity"] : personalPage ? ["sessions"].concat(pageTabs, ["activity"]) : project ? [] : (model.tabs || [])
-  readonly property string activeTab: showActivity ? "activity" : sessionHome ? (showSessions ? "sessions" : homeOtherTab) : personalPage ? (showSessions ? "sessions" : homeTab) : (model.activeTab || "")
-  readonly property var visibleActions: showActivity
-    ? [{ key: "Enter", label: "open session", id: "activity-open" }, { key: "Tab", label: tabs[(tabs.indexOf(activeTab) + 1) % tabs.length], id: "tab" }]
-    : showSessions
+  readonly property var tabs: sessionHome ? ["sessions", homeOtherTab] : personalPage ? ["sessions"].concat(pageTabs) : project ? [] : (model.tabs || [])
+  readonly property string activeTab: sessionHome ? (showSessions ? "sessions" : homeOtherTab) : personalPage ? (showSessions ? "sessions" : homeTab) : (model.activeTab || "")
+  readonly property var visibleActions: showSessions
     ? [{ key: "Enter", label: "expand / collapse", id: "expand-card" }, { key: "Ctrl+Enter", label: "open session", id: currentAction }]
         .concat(sessionHome ? [{ key: "Tab", label: homeOtherTab, id: "tab:" + homeOtherTab }]
           : personalPage && pageTabs.length ? [{ key: "Tab", label: pageTabs[0], id: "tab:" + pageTabs[0] }] : [])
@@ -75,7 +69,6 @@ FocusScope {
 
   readonly property var selectable: {
     var out = []
-    if (showActivity) return out
     if (showSessions) return workers.map(s => "session:" + s.name)
     var cards = model.cards || []
     for (var i = 0; i < cards.length; i++) {
@@ -114,20 +107,18 @@ FocusScope {
     cursor = row * columns + Math.max(0, Math.min(lastColumn, column + horizontal))
   }
   function move(delta) {
-    if (showActivity) { activityStream.move(delta); return }
     if (showSessions) { moveCard(0, delta); return }
     if (!selectable.length) return
     cursor = (Math.min(cursor, selectable.length - 1) + delta + selectable.length) % selectable.length
   }
   function dispatch(id) {
-    if (id === "activity-open") activityStream.open()
-    else if (sessionHome && (id === "tab" || id.indexOf("tab:") === 0)) {
-      homeTab = id === "tab" ? tabs[(tabs.indexOf(activeTab) + 1) % tabs.length] : id.slice(4)
+    if (sessionHome && (id === "tab" || id.indexOf("tab:") === 0)) {
+      homeTab = id === "tab" ? (showSessions ? homeOtherTab : "sessions") : id.slice(4)
       cursor = 0
     } else if (personalPage && (id === "tab" || id.indexOf("tab:") === 0)) {
       homeTab = id === "tab" ? tabs[(tabs.indexOf(activeTab) + 1) % tabs.length] : id.slice(4)
       cursor = 0
-      if (homeTab !== "sessions" && homeTab !== "activity") actionRequested("tab:" + homeTab)
+      if (homeTab !== "sessions") actionRequested("tab:" + homeTab)
     } else if (showSessions && id === "expand-card") activate(false)
     else if (showSessions && id.indexOf("session:") === 0) sessionRequested(id.slice(8))
     else if (id) actionRequested(id)
@@ -279,7 +270,6 @@ FocusScope {
     else if (card && card.canExpand) expandedSession = expandedSession === sid ? "" : sid
   }
   function activate(openSession) {
-    if (showActivity) { activityStream.open(); return }
     if (showSessions && !openSession && currentAction) toggleCard(currentAction.slice(8))
     else dispatch(currentAction)
   }
@@ -324,7 +314,6 @@ FocusScope {
     anchors { fill: parent; bottomMargin: hints.height }
     contentWidth: width
     contentHeight: content.implicitHeight + 56
-    interactive: !root.showActivity
     clip: true
     boundsBehavior: Flickable.StopAtBounds
 
@@ -1090,22 +1079,8 @@ FocusScope {
         font { family: Theme.fontFamily; pixelSize: 16 }
       }
 
-      ActivityStream {
-        id: activityStream
-        visible: root.showActivity
-        width: content.width
-        height: Math.max(200, view.height - content.y - y - 24)
-        agentd: root.agentd
-        sessions: root.sessions
-        muted: root.muted
-        focused: root.activeFocus
-        rail: root.rail
-        activityLabelFor: root.activityLabelFor
-        onSessionRequested: sid => root.sessionRequested(sid)
-      }
-
       Repeater {
-        model: root.showSessions || root.showActivity ? [] : (root.model.cards || [])
+        model: root.showSessions ? [] : (root.model.cards || [])
         delegate: Card {
           id: card
           required property var modelData

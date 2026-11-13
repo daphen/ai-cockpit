@@ -25,7 +25,11 @@ ShellRoot {
         rail.showWorkspace("plan"); test.expect("plan", "unconfirmed press")
       } else if (test.phase === 15) {
         test.expect("dashboard", "unconfirmed press falls back to the editor's view")
-        console.log("PASS: tab presses lead, late reports are ignored, editor-side changes are adopted")
+        rail.showWorkspace("activity", true); test.expect("activity", "activity press")
+        rail.jumpToSession("one"); rail.landNvim("one")
+        rail.reportedTab = "code"; test.expect("activity", "switching sessions keeps the activity tab")
+        rail.showWorkspace("code", true); test.expect("code", "leaving activity")
+        console.log("PASS: tab presses lead, late reports are ignored, editor-side changes are adopted, activity stays put across session switches")
         Qt.quit()
       }
       test.phase++

@@ -127,8 +127,10 @@ ShellRoot {
     property real railReveal: 1
     readonly property bool dashboardActive: !!(chin.st.dashboard && chin.st.dashboard.active)
     readonly property bool studioActive: viewTabs.current === "studio"
+    readonly property bool activityActive: viewTabs.current === "activity"
     function focusLeftPane() {
-      if (studioActive) studioPanel.forceActiveFocus()
+      if (activityActive) activityPage.forceActiveFocus()
+      else if (studioActive) studioPanel.forceActiveFocus()
       else if (dashboardActive) dashboard.forceActiveFocus()
       else term.forceActiveFocus()
     }
@@ -213,7 +215,7 @@ ShellRoot {
     FocusCache { nvimSocket: term.localNvimSocket }
     FocusCache { id: remoteFocus; nvimSocket: win.remoteEditorSocket }
 
-    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || rail.activeFocus
+    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus || rail.activeFocus
     NotificationFocus {
       active: win.modeReady && win.windowFocused && !win.railCollapsed
       session: rail.selectedRaw
@@ -235,7 +237,7 @@ ShellRoot {
       // Heal a pane/focus desync first: a QML hot-reload rebuilds the window tree and
       // can leave `pane` claiming the rail while the keyboard truly sits in the
       // terminal — the cross then answers "passed" and Ctrl+l goes dead. Reality wins.
-      if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
+      if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
       else if (rail.activeFocus && win.pane !== "rail") win.pane = "rail"
       if (dir === "right") {
         if (win.railCollapsed) return "passed"
@@ -253,6 +255,7 @@ ShellRoot {
     }
     onDashboardActiveChanged: if (win.pane === "nvim") Qt.callLater(win.focusLeftPane)
     onStudioActiveChanged: if (win.pane === "nvim") Qt.callLater(win.focusLeftPane)
+    onActivityActiveChanged: if (win.pane === "nvim") Qt.callLater(win.focusLeftPane)
 
     IpcHandler {
       target: "cockpit"
@@ -262,7 +265,7 @@ ShellRoot {
         // Report reality, not the cached property: hot-reloads leave win.pane stale
         // ("rail" while the keyboard truly sits in the terminal), and Super+T's
         // "already on the rail?" check then hopped cockpits straight from the terminal.
-        if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
+        if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
         return win.pane
       }
       function title(): string      { return win.title }   // cockpit-ipc instance routing
@@ -407,7 +410,7 @@ ShellRoot {
               : chin.st.view === "plan" && rail.selectedPlan ? "plan"
               : /\/notes\/storage$/.test(String(chin.st.cwd || "")) ? "vault" : "code"
             readonly property string current: rail.workspaceTab === "plan" && !rail.selectedPlan ? "code" : rail.workspaceTab
-            readonly property var tabs: [{ view: "code", label: "Code", icon: "terminal" }, { view: "dashboard", label: "Dashboard", icon: "status-pulse" }, { view: "vault", label: "Vault", icon: "vault-3" }]
+            readonly property var tabs: [{ view: "code", label: "Code", icon: "terminal" }, { view: "dashboard", label: "Dashboard", icon: "status-pulse" }, { view: "activity", label: "Activity", icon: "clock" }, { view: "vault", label: "Vault", icon: "vault-3" }]
               .concat(rail.selectedPlan ? [{ view: "plan", label: "Plan", icon: "clipboard-check" }] : [])
               .concat(win.studioRoot ? [{ view: "studio", label: "Studio", icon: "paintbrush" }] : [])
             readonly property var views: tabs.map(function(tab) { return tab.view })
@@ -434,7 +437,7 @@ ShellRoot {
                   width: (viewRow.width - (viewTabs.tabs.length - 1) * viewRow.spacing) / viewTabs.tabs.length
                   height: parent.height
                   readonly property bool active: viewTabs.current === view
-                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus)
+                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
                   LightKey {
                     anchors.fill: parent
@@ -545,8 +548,6 @@ ShellRoot {
                   restoreMode: Binding.RestoreNone
                 }
                 sessions: win.agentd.sessions
-                agentd: win.agentd
-                rail: rail
                 focusedSession: rail.selectedRaw
                 tickets: ticketCache.adapter.tickets.concat(ticketCache.adapter.session_tickets)
                 ticketStates: ticketStatuses.states
@@ -591,6 +592,20 @@ ShellRoot {
               active: !!win.studioRoot
               source: win.studioRoot ? "file://" + win.studioRoot + "/cockpit/StudioPanel.qml" : ""
               onLoaded: { item.root = Qt.binding(() => win.studioRoot); item.focus = true }
+              onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+            }
+            ActivityStream {
+              id: activityPage
+              anchors.fill: parent
+              visible: win.activityActive
+              enabled: visible
+              color: win.ground
+              agentd: win.agentd
+              rail: rail
+              sessions: win.agentd.sessions
+              activityLabelFor: dashboard.activityLabelFor
+              onSessionRequested: sid => { win.pane = "rail"; rail.jumpToSession(sid) }
+              onFocusRequested: direction => win.tryFocus(direction)
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
             }
             Canvas {

@@ -1,4 +1,5 @@
 import QtQuick
+import QtTest
 import Quickshell
 import QsLib
 import "."
@@ -15,19 +16,21 @@ ShellRoot {
     if (item.contentItem && item.contentItem !== item) return find(item.contentItem, pred)
     return null
   }
-  function visibleText(text) { return !!find(dash, item => item.visible && String(item.text || "") === text) }
+  function visibleText(text) { return !!find(page, item => item.visible && String(item.text || "") === text) }
   AgentdState { id: state; function send(message) { test.sent.push(message); return true } }
   FloatingWindow {
     visible: true; implicitWidth: 1100; implicitHeight: 900
-    Dashboard {
-      id: dash
+    TestEvent { id: input }
+    ActivityStream {
+      id: page
       anchors.fill: parent
+      visible: false
       agentd: state
       sessions: state.sessions
-      model: ({ kind: "home", scope: "personal", cards: [{ title: "PLANS", rows: [{ text: "A plan", action: "plan:p" }] }] })
       onSessionRequested: sid => test.opened.push(sid)
     }
   }
+  function key(k, mods) { input.keyClick(k, mods || Qt.NoModifier, 0) }
   readonly property double t0: Date.parse("2026-11-12T09:00:00Z")
   Timer {
     property int stage: 0
@@ -36,10 +39,8 @@ ShellRoot {
       if (stage === 0) {
         test.event({ type: "roster", sessions: [{ id: "alpha", name: "alpha", cwd: "/tmp/a", status: "idle" },
                                                { id: "beta", name: "beta", cwd: "/tmp/b", status: "streaming" }] })
-        if (String(dash.tabs) !== "sessions,plans,activity") test.fail("tabs were " + dash.tabs)
-        dash.dispatch("tab"); dash.dispatch("tab")
-        if (!dash.showActivity || dash.showSessions || dash.activeTab !== "activity") test.fail("Tab did not reach the activity page")
-        if (test.visibleText("A plan")) test.fail("activity page still shows the plan cards")
+        if (test.sent.some(m => m.type === "get_entries")) test.fail("history loaded before the page was shown")
+        page.visible = true
       } else if (stage === 2) {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta") test.fail("history was requested for " + asked)
@@ -58,7 +59,7 @@ ShellRoot {
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
       } else if (stage === 3) {
-        var kinds = dash.agentd.activity.map(r => r.kind).sort().join(",")
+        var kinds = state.activity.map(r => r.kind).sort().join(",")
         if (kinds !== "edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
@@ -74,14 +75,14 @@ ShellRoot {
       } else if (stage === 4) {
         if (!test.visibleText("\u27e2 Beta shipped.")) test.fail("live summary not shown")
         if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
-        if (!test.find(dash, item => item.visible && /^beta  /.test(String(item.text || "")))) test.fail("working session missing from the now strip")
-        dash.forceActiveFocus()
-        dash.activate(false)
+        if (!test.find(page, item => item.visible && /^beta  /.test(String(item.text || "")))) test.fail("working session missing from the now strip")
+        page.forceActiveFocus()
+        test.key(Qt.Key_Return)
         if (String(test.opened) !== "beta") test.fail("Enter on the newest row opened " + test.opened)
-        dash.move(1); dash.move(1)
-        dash.activate(true)
+        test.key(Qt.Key_J); test.key(Qt.Key_J)
+        test.key(Qt.Key_Return)
         if (String(test.opened) !== "beta,alpha") test.fail("moving down then opening went to " + test.opened)
-        console.log("PASS: activity page replaces the cards, backfills every session's transcript once without duplicates, groups each turn as asked, task, result and files, appends live events, and Enter opens the row's session")
+        console.log("PASS: activity page backfills every session's transcript once without duplicates, groups each turn as asked, task, result and files, appends live events, and Enter opens the row's session")
         Qt.quit()
       }
       stage++

@@ -26,7 +26,7 @@ ShellRoot {
     interval: 200; repeat: true; running: true
     onTriggered: {
       if (stage === 0) {
-        if (String(dash.tabs) !== "sessions,changes,tests,activity") test.fail("tabs were " + dash.tabs)
+        if (String(dash.tabs) !== "sessions,changes,tests") test.fail("tabs were " + dash.tabs)
         if (!dash.showSessions || dash.workers.length !== 3) test.fail("selected private session did not show every session card, including another machine's personal scope")
         if (dash.ticketState("nixos").label !== "~/nixos") test.fail("private card status was " + dash.ticketState("nixos").label)
         dash.dispatch("tab:changes")
@@ -38,7 +38,7 @@ ShellRoot {
         dash.dispatch("tab:sessions")
         if (!dash.showSessions || dash.activeTab !== "sessions") test.fail("sessions tab did not bring the cards back")
         dash.model = { scope: "personal", kind: "session", tabs: ["plan"], activeTab: "plan", cards: [] }
-        if (String(dash.tabs) !== "sessions,activity") test.fail("a session without changes or tests still offered them")
+        if (String(dash.tabs) !== "sessions") test.fail("a session without changes or tests still offered them")
         console.log("PASS: private dashboard shows session cards with Changes/Tests tabs")
         Qt.quit()
       }

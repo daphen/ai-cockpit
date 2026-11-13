@@ -1,16 +1,33 @@
 import QtQuick
 import QsLib
 
-Item {
+FocusScope {
   id: root
+  property color color: Theme.bg
   property var agentd: null
   property var rail: null
   property var sessions: []
   property color muted: Theme.fg_muted
   property var activityLabelFor: sid => "idle"
   property string cursorKey: ""
-  property bool focused: false
+  readonly property bool focused: activeFocus
   signal sessionRequested(string sid)
+  signal focusRequested(string direction)
+  onVisibleChanged: if (visible && agentd) agentd.loadActivityHistory()
+
+  Keys.onPressed: event => {
+    var ctrl = event.modifiers & Qt.ControlModifier
+    if (ctrl && event.key === Qt.Key_L) focusRequested("right")
+    else if (ctrl && event.key === Qt.Key_H) focusRequested("left")
+    else if (event.key === Qt.Key_J || event.key === Qt.Key_Down) move(1)
+    else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) move(-1)
+    else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
+    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
+    else return
+    event.accepted = true
+  }
+  Rectangle { anchors.fill: parent; color: root.color }
+  TapHandler { onTapped: root.forceActiveFocus() }
 
   readonly property bool light: Theme.mode === "light"
   readonly property string bodyFont: rail ? rail.messageFontFamily : "Geist"
@@ -84,9 +101,16 @@ Item {
   }
   readonly property string currentSession: cursor >= 0 ? rows[cursor].sid : ""
 
+  function select(i) { cursorKey = rows[i].key; list.positionViewAtIndex(i, ListView.Contain) }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (rows[i].kind !== "day") { cursorKey = rows[i].key; list.positionViewAtIndex(i, ListView.Contain); return }
+      if (rows[i].kind !== "day") { select(i); return }
+  }
+  function edge(last) {
+    for (var n = 0; n < rows.length; n++) {
+      var i = last ? rows.length - 1 - n : n
+      if (rows[i].kind !== "day") { select(i); return }
+    }
   }
   function open() { if (currentSession) sessionRequested(currentSession) }
 
@@ -118,9 +142,10 @@ Item {
 
   ListView {
     id: list
-    width: Math.min(parent.width, 760)
+    width: Math.min(parent.width - 64, 1400)
     height: parent.height
     anchors.horizontalCenter: parent.horizontalCenter
+    topMargin: 20; bottomMargin: 24
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: root.rows

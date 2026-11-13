@@ -55,7 +55,7 @@ ShellRoot {
           "sessions outside the project, or the coordinator itself, became cards")
         dash.focusedSession = "every-42"
       } else if (test.phase === 3) {
-        test.check(dash.sessionHome && dash.tabs.join(",") === "sessions,tickets,activity", "Lovable home lost its tabs")
+        test.check(dash.sessionHome && dash.tabs.join(",") === "sessions,tickets", "Lovable home lost its tabs")
         test.check(dash.workers.map(s => s.name).join(",") === "every-42", "Lovable home changed its worker selection")
         test.check(!test.find(dash, "groupHeader:READY") || !test.find(dash, "groupHeader:READY").visible, "Lovable home shows project headers")
         console.log("PASS: project coordinator overview groups its sessions into needs you, working and ready; Lovable home unchanged")
