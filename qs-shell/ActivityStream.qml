@@ -13,7 +13,8 @@ FocusScope {
   readonly property bool focused: activeFocus
   signal sessionRequested(string sid)
   signal focusRequested(string direction)
-  onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); Qt.callLater(list.positionViewAtEnd) }
+  onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); scroller.toEnd() }
+  FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
   Keys.onPressed: event => {
     var ctrl = event.modifiers & Qt.ControlModifier
@@ -92,6 +93,18 @@ FocusScope {
     }
     return out
   }
+  // Updated in place so the view keeps its scroll position when rows arrive.
+  onRowsChanged: {
+    for (var i = 0; i < rows.length; i++) {
+      var at = -1
+      for (var j = i; j < rowModel.count; j++) if (rowModel.get(j).key === rows[i].key) { at = j; break }
+      if (at < 0) rowModel.insert(i, { key: rows[i].key })
+      else if (at > i) rowModel.move(at, i, 1)
+    }
+    if (rowModel.count > rows.length) rowModel.remove(rows.length, rowModel.count - rows.length)
+    scroller.synced()
+  }
+  Component.onCompleted: rowsChanged()
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
     if (i >= 0) return i
@@ -102,8 +115,7 @@ FocusScope {
 
   function select(i) {
     cursorKey = rows[i].key
-    list.pinned = i === rows.length - 1
-    list.positionViewAtIndex(i, ListView.Contain)
+    scroller.cursorMoved(i, i === rows.length - 1)
   }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
@@ -148,19 +160,19 @@ FocusScope {
     width: Math.min(parent.width - 64, 1400)
     height: parent.height
     anchors.horizontalCenter: parent.horizontalCenter
-    topMargin: 20; bottomMargin: 24
+    header: Item { height: 20 }
     clip: true
     boundsBehavior: Flickable.StopAtBounds
-    model: root.rows
-    ScrollFeel { flick: list }
-    property bool pinned: true
-    onMovementEnded: pinned = atYEnd
-    onContentHeightChanged: if (pinned) Qt.callLater(positionViewAtEnd)
+    model: ListModel { id: rowModel }
+    cacheBuffer: 1000000
+    ScrollFeel { flick: list; onScrolled: up => scroller.userScrolled(up) }
+    onDraggingChanged: dragging ? scroller.gestureStarted() : scroller.gestureEnded()
 
     footer: Flow {
       width: list.width
       spacing: 8
       topPadding: root.working.length ? 14 : 0
+      bottomPadding: 24
       Repeater {
         model: root.working
         delegate: PillSurface {
@@ -190,9 +202,9 @@ FocusScope {
 
     delegate: Item {
       id: row
-      required property var modelData
+      required property string key
       required property int index
-      readonly property var turn: modelData
+      readonly property var turn: root.rows[index] || ({ kind: "day", prompts: [], files: [], asks: [] })
       readonly property bool day: turn.kind === "day"
       readonly property bool current: index === root.cursor && root.focused
       readonly property bool live: !day && turn.latest === true && !turn.summary && root.busy(turn.sid)
@@ -218,7 +230,7 @@ FocusScope {
           x: 18; width: parent.width - 36; height: 1; y: 6
           color: Qt.alpha(Theme.fg, 0.07)
         }
-        Orb { id: headOrb; sid: row.turn.sid || ""; running: true; x: 18; y: 22; width: 26; height: 26 }
+        Orb { id: headOrb; sid: row.turn.sid || ""; running: root.busy(row.turn.sid); x: 18; y: 22; width: 26; height: 26 }
         Column {
           anchors { left: headOrb.right; leftMargin: 12; right: headState.left; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
           spacing: 1
