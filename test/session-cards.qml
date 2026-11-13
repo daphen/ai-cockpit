@@ -172,7 +172,7 @@ ShellRoot {
         test.check(dash.currentAction === "ticket:EVERY-3789", "ticket selection reset on recurring model update")
         input.keyClick(Qt.Key_Return,Qt.NoModifier,0)
         test.check(test.ticketAction === "ticket:EVERY-3789", "existing ticket action was not forwarded")
-        input.keyClick(Qt.Key_Tab,Qt.NoModifier,0)
+        input.keyClick(Qt.Key_Tab,Qt.NoModifier,0); test.check(dash.showActivity, "Tab from tickets did not reach activity"); input.keyClick(Qt.Key_Tab,Qt.NoModifier,0)
         window.implicitWidth = 740
       } else if (test.phase === 8) {
         input.keyClick(Qt.Key_L,Qt.NoModifier,0); input.keyClick(Qt.Key_J,Qt.NoModifier,0)

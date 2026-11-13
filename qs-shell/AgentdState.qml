@@ -725,6 +725,87 @@ Item {
     return files.filter(f => f.path && f.path !== "/dev/null")
   }
 
+  // Cross-session activity digest. Keys dedupe the transcript backfill against live events.
+  property var activity: []
+  property int activityGen: 0
+  property var _activityKeys: new Map()
+  property var _activityQueue: []
+  property var _activityRequested: new Map()
+  function _closingLine(text) {
+    var lines = String(text || "").split("\n")
+    for (var i = lines.length - 1; i >= 0; i--)
+      if (/^\s*⟢/.test(lines[i])) return lines[i].replace(/^\s*⟢\s*/, "").trim()
+    return ""
+  }
+  function _promptActivity(sid, message, at) {
+    var s = _contentText(message.content), from = "you", relay = s.match(/^⇄ ([^\n]+)\n/)
+    if (relay) { from = relay[1].replace(/\s*\(.*\)\s*$/, "").trim(); s = s.slice(relay[0].length) }
+    var line = s.split("\n").map(l => l.trim()).find(l => l.length) || ""
+    return line ? { key: "prompt:" + sid + ":" + (message.timestamp || line), sid: sid, at: at, kind: "prompt", from: from, text: line } : null
+  }
+  function _summaryActivity(sid, message, at) {
+    var line = _closingLine(_contentText(message.content))
+    return line ? { key: "summary:" + sid + ":" + (message.timestamp || line), sid: sid, at: at, kind: "summary", text: line } : null
+  }
+  function _taskActivity(sid, action, title, at) {
+    return { key: "task:" + sid + ":" + action + ":" + title, sid: sid, at: at, kind: "task", action: action, text: title }
+  }
+  function _noteActivity(rows) {
+    var list = activity, added = false
+    for (var row of rows) {
+      if (!row || _activityKeys.has(row.key)) continue
+      _activityKeys.set(row.key, true)
+      list.push(row)
+      added = true
+    }
+    if (!added) return
+    if (list.length > 3000) list = list.sort((a, b) => a.at - b.at).slice(list.length - 3000)
+    activity = list
+    activityGen++
+  }
+  function _activityFromEntries(sid, entries) {
+    var rows = [], edits = {}
+    for (var e of entries) {
+      var msg = e.message || {}
+      var at = Number(msg.timestamp) || Date.parse(e.timestamp || "") || 0
+      if (e.type === "custom" && e.customType === "cockpit-session-task" && e.data
+          && (e.data.action === "switch" || e.data.action === "finish") && String(e.data.title || "").trim())
+        rows.push(_taskActivity(sid, e.data.action, String(e.data.title).trim(), at))
+      if (e.type !== "message") continue
+      if (msg.role === "user") rows.push(_promptActivity(sid, msg, at))
+      else if (msg.role === "assistant") {
+        rows.push(_summaryActivity(sid, msg, at))
+        for (var b of msg.content || []) {
+          if (b.type !== "toolCall") continue
+          var a = b.arguments || {}
+          if (b.name === "ask_user") rows.push({ key: "ask:" + b.id, sid: sid, at: at, kind: "ask", text: _askQuestion(a) })
+          else if (["edit", "write", "create", "str_replace"].indexOf(b.name) >= 0 && _isCodeEdit(String(a.path || "")))
+            edits[b.id] = { path: String(a.path), written: (b.name === "write" || b.name === "create") && a.content ? String(a.content).split("\n").length : 0 }
+        }
+      } else if (msg.role === "toolResult" && !msg.isError && edits[msg.toolCallId]) {
+        var diff = (msg.details || {}).diff, counts = diff ? _countDiff(diff) : [edits[msg.toolCallId].written, 0]
+        rows.push({ key: "edit:" + msg.toolCallId, sid: sid, at: at, kind: "edit", path: edits[msg.toolCallId].path, add: counts[0], del: counts[1] })
+      }
+    }
+    return rows
+  }
+  function loadActivityHistory() {
+    for (var s of sessions) {
+      if (_activityRequested.has(s.name)) continue
+      _activityRequested.set(s.name, true)
+      _activityQueue.push(s.name)
+    }
+    if (_activityQueue.length) activityPull.start()
+  }
+  Timer {
+    id: activityPull
+    interval: 350; repeat: true
+    onTriggered: {
+      var sid = root._activityQueue.shift()
+      if (sid) root.send({ type: "get_entries", session: sid })
+      else stop()
+    }
+  }
   function _push(sid, item) {
     var arr = feeds[sid] || []
     arr.push(item)
@@ -1122,6 +1203,7 @@ Item {
       return
     }
     if (t === "response" && m.command === "get_entries") {
+      if (m.success && m.session) _noteActivity(_activityFromEntries(m.session, (m.data || {}).entries || []))
       if (m.session === selectedSession) onEntries(m)
       return
     }
@@ -1213,6 +1295,8 @@ Item {
     // roster re-sorts on the daemon's own roster pushes, which land at exactly
     // the status boundaries where order should change.
     _lastAct.set(sid, Date.now())
+    if (t === "message_end" && m.message && m.message.role === "assistant") _noteActivity([_summaryActivity(sid, m.message, Date.now())])
+    if (t === "message_end" && m.message && m.message.role === "user") _noteActivity([_promptActivity(sid, m.message, Date.now())])
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "agent_end") root._confirmInterrupt(sid)
     if (t === "agent_end" || t === "error" || (t === "turn_end" && !isInterrupting(sid))) root._clearPending(sid)
@@ -1368,7 +1452,10 @@ Item {
       _curToolLive.set(sid, true)
       _curToolId.set(sid, m.toolCallId || "")
       curToolGen++
+      if (tn === "session_task" && (args.action === "switch" || args.action === "finish") && String(args.title || "").trim())
+        _noteActivity([_taskActivity(sid, args.action, String(args.title).trim(), Date.now())])
       if (tn === "ask_user") {
+        _noteActivity([{ key: "ask:" + m.toolCallId, sid: sid, at: Date.now(), kind: "ask", text: _askQuestion(args) }])
         _push(sid, { kind: "cmd", tool: "ask", text: "❯ " + _askQuestion(args), command: "", id: m.toolCallId,
                      argumentsText: _safeJson(args), result: "", detailsText: "", partial: true, failed: false })
       } else if (tn === "edit" || tn === "write" || tn === "create" || tn === "str_replace") {
@@ -1468,6 +1555,8 @@ Item {
         activity.del = ad[1]
         feedGen++
       }
+      if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || "")))
+        _noteActivity([{ key: "edit:" + m.toolCallId, sid: sid, at: Date.now(), kind: "edit", path: String(activity.path), add: activity.add || 0, del: activity.del || 0 }])
     } else if (t === "agent_end" && sid === selectedSession) {
       refreshEntries(sid)
       send({ type: "get_session_stats", session: sid })

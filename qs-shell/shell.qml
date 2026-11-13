@@ -545,6 +545,7 @@ ShellRoot {
                   restoreMode: Binding.RestoreNone
                 }
                 sessions: win.agentd.sessions
+                agentd: win.agentd
                 focusedSession: rail.selectedRaw
                 tickets: ticketCache.adapter.tickets.concat(ticketCache.adapter.session_tickets)
                 ticketStates: ticketStatuses.states
