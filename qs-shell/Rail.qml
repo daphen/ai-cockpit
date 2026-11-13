@@ -80,6 +80,14 @@ Item {
   // and clear the restore flag, or the next focus change would drop you back into it.
   // Jump straight to a session by name (Super+i on a live question): select it
   // and put the keyboard in the rail so the ask card's keys work immediately.
+  // A session switch lands the editor after its fade; the file rides on that landing.
+  property var _pendingFile: null
+  function openSessionFile(sid, path, line) {
+    if (sid === selectedRaw) { openInNvim(path, _sessionCwdOf(sid), line); return }
+    _pendingFile = { sid: sid, path: path, line: line }
+    activeRaw = sid
+    rosterOverride = false
+  }
   function jumpToSession(n) {
     if (!n) return
     activeRaw = n
@@ -2954,7 +2962,10 @@ Item {
     interval: Motion.slow + 20
     onTriggered: {
       if (rail.agentd && rail.selectedRaw) rail.agentd.select(rail.selectedRaw)
-      if (rail._landed && rail.selectedRaw) rail.landNvim(rail.selectedRaw)
+      var file = rail._pendingFile
+      rail._pendingFile = null
+      if (file && file.sid === rail.selectedRaw) rail.openInNvim(file.path, rail._sessionCwdOf(file.sid), file.line)
+      else if (rail._landed && rail.selectedRaw) rail.landNvim(rail.selectedRaw)
       rail._resyncFeed()
     }
   }

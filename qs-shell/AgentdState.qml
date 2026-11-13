@@ -729,8 +729,19 @@ Item {
   property var activity: []
   property int activityGen: 0
   property var _activityKeys: new Map()
+  property var _editWhy: ({})
   property var _activityQueue: []
   property var _activityRequested: new Map()
+  // The agent's note right before each tool call in one message: why that edit was made.
+  function _whyByCall(message) {
+    var out = {}, note = ""
+    for (var b of (message && message.content) || []) {
+      if (b.type === "text" && String(b.text || "").trim())
+        note = String(b.text).split(/\n\s*\n/).map(p => p.replace(/^\s*⟢.*$/gm, "").replace(/\s+/g, " ").trim()).filter(p => p).pop() || note
+      else if ((b.type === "toolCall" || b.type === "tool_use") && b.id) out[b.id] = note.length < 40 ? "" : note.length > 240 ? note.slice(0, 239) + "\u2026" : note
+    }
+    return out
+  }
   function _closingLine(text) {
     var lines = String(text || "").split("\n")
     for (var i = lines.length - 1; i >= 0; i--)
@@ -750,6 +761,20 @@ Item {
   function _taskActivity(sid, action, title, at) {
     return { key: "task:" + sid + ":" + action + ":" + title, sid: sid, at: at, kind: "task", action: action, text: title }
   }
+  // Keeps only the changed lines of a numbered diff ("+ 12 text"), capped, so rows stay small.
+  function _editActivity(sid, id, at, path, details, content, why) {
+    var diff = details && details.diff ? String(details.diff) : "", counts = diff ? _countDiff(diff) : [0, 0]
+    var changed = diff.split("\n").filter(l => /^[+-]\s*\d+ /.test(l))
+    if (!diff && content) {
+      var body = String(content).split("\n")
+      counts = [body.length, 0]
+      changed = body.slice(0, 12).map((l, i) => "+" + (i + 1) + " " + l)
+    }
+    var first = changed.length ? Number(changed[0].match(/^[+-]\s*(\d+)/)[1]) : 1
+    return { key: "edit:" + id, sid: sid, at: at, kind: "edit", path: String(path), add: counts[0], del: counts[1],
+             line: Number(details && details.firstChangedLine) || first, why: String(why || ""),
+             diff: changed.slice(0, 12).map(l => l.length > 200 ? l.slice(0, 200) : l) }
+  }
   function _noteActivity(rows) {
     var list = activity, added = false
     for (var row of rows) {
@@ -764,7 +789,7 @@ Item {
     activityGen++
   }
   function _activityFromEntries(sid, entries) {
-    var rows = [], edits = {}
+    var rows = [], edits = {}, why = {}
     for (var e of entries) {
       var msg = e.message || {}
       var at = Number(msg.timestamp) || Date.parse(e.timestamp || "") || 0
@@ -775,16 +800,16 @@ Item {
       if (msg.role === "user") rows.push(_promptActivity(sid, msg, at))
       else if (msg.role === "assistant") {
         rows.push(_summaryActivity(sid, msg, at))
+        Object.assign(why, _whyByCall(msg))
         for (var b of msg.content || []) {
           if (b.type !== "toolCall") continue
           var a = b.arguments || {}
           if (b.name === "ask_user") rows.push({ key: "ask:" + b.id, sid: sid, at: at, kind: "ask", text: _askQuestion(a) })
           else if (["edit", "write", "create", "str_replace"].indexOf(b.name) >= 0 && _isCodeEdit(String(a.path || "")))
-            edits[b.id] = { path: String(a.path), written: (b.name === "write" || b.name === "create") && a.content ? String(a.content).split("\n").length : 0 }
+            edits[b.id] = { path: String(a.path), content: (b.name === "write" || b.name === "create") && a.content ? String(a.content) : "" }
         }
       } else if (msg.role === "toolResult" && !msg.isError && edits[msg.toolCallId]) {
-        var diff = (msg.details || {}).diff, counts = diff ? _countDiff(diff) : [edits[msg.toolCallId].written, 0]
-        rows.push({ key: "edit:" + msg.toolCallId, sid: sid, at: at, kind: "edit", path: edits[msg.toolCallId].path, add: counts[0], del: counts[1] })
+        rows.push(_editActivity(sid, msg.toolCallId, at, edits[msg.toolCallId].path, msg.details, edits[msg.toolCallId].content, why[msg.toolCallId]))
       }
     }
     return rows
@@ -1295,7 +1320,10 @@ Item {
     // roster re-sorts on the daemon's own roster pushes, which land at exactly
     // the status boundaries where order should change.
     _lastAct.set(sid, Date.now())
-    if (t === "message_end" && m.message && m.message.role === "assistant") _noteActivity([_summaryActivity(sid, m.message, Date.now())])
+    if (t === "message_end" && m.message && m.message.role === "assistant") {
+      _editWhy = Object.assign({}, _editWhy, _whyByCall(m.message))
+      _noteActivity([_summaryActivity(sid, m.message, Date.now())])
+    }
     if (t === "message_end" && m.message && m.message.role === "user") _noteActivity([_promptActivity(sid, m.message, Date.now())])
     // The daemon is talking about this session, so its real status is authoritative now.
     if (t === "agent_end") root._confirmInterrupt(sid)
@@ -1556,7 +1584,10 @@ Item {
         feedGen++
       }
       if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || "")))
-        _noteActivity([{ key: "edit:" + m.toolCallId, sid: sid, at: Date.now(), kind: "edit", path: String(activity.path), add: activity.add || 0, del: activity.del || 0 }])
+        var editRow = _editActivity(sid, m.toolCallId, Date.now(), activity.path, det, "", _editWhy[m.toolCallId])
+        var whys = _editWhy; delete whys[m.toolCallId]
+        if (!editRow.add && !editRow.del) { editRow.add = activity.add || 0; editRow.del = activity.del || 0 }
+        _noteActivity([editRow])
     } else if (t === "agent_end" && sid === selectedSession) {
       refreshEntries(sid)
       send({ type: "get_session_stats", session: sid })

@@ -7,16 +7,17 @@ FocusScope {
   property var agentd: null
   property var rail: null
   property var sessions: []
-  property color muted: Theme.fg_muted
   property var activityLabelFor: sid => "idle"
   property string cursorKey: ""
+  property bool caretHeld: false
   readonly property bool focused: activeFocus
   signal sessionRequested(string sid)
+  signal fileRequested(string sid, string path, int line)
   signal focusRequested(string direction)
-  property bool caretHeld: false
+
   function cursorPoint() {
     var item = cursor >= 0 ? list.itemAtIndex(cursor) : null
-    return item ? item.mapToItem(root, 10, item.dotY) : null
+    return item ? item.mapToItem(root, 28, item.dotY) : null
   }
   readonly property var restPoint: { list.contentY; list.contentHeight; cursor; width; return activeFocus ? cursorPoint() : null }
   onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
@@ -29,6 +30,7 @@ FocusScope {
     else if (event.key === Qt.Key_J || event.key === Qt.Key_Down) move(1)
     else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) move(-1)
     else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
+    else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
     else return
     event.accepted = true
@@ -41,13 +43,9 @@ FocusScope {
   readonly property int fsBody: rail ? rail.fsBody : Theme.fontSize + 3
   readonly property int fsName: rail ? rail.fsName : Theme.fontSize + 4
   readonly property int fsMeta: rail ? rail.fsMeta : Theme.fontSize + 2
-  readonly property color lavender: rail ? rail.lavenderAccent : "#C4B5FD"
-  readonly property color ring: rail ? rail.cardRing : Qt.alpha(Theme.fg, 0.18)
   readonly property color contentColor: light ? "#23272B" : "#FAFAFA"
-  readonly property color bodyColor: light ? "#343A3F" : "#EDEDED"
   readonly property color metaColor: light ? "#747D84" : "#909090"
 
-  function base(path) { var s = String(path || ""); return s.slice(s.lastIndexOf("/") + 1) }
   function clock(at) { var d = new Date(at); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) }
   function dayLabel(at) {
     var d = new Date(at), today = new Date()
@@ -60,42 +58,56 @@ FocusScope {
     agentd.gen; agentd.pendingGen; agentd.curToolGen
     return agentd.isBusy(sid)
   }
+  function relPath(sid, path) {
+    var cwd = String((sessions.find(s => s.name === sid) || {}).cwd || "")
+    var p = String(path || "")
+    if (cwd && p.indexOf(cwd + "/") === 0) return p.slice(cwd.length + 1)
+    return p.replace(/^\/home\/[^/]+/, "~")
+  }
 
   readonly property var working: sessions.filter(s => busy(s.name)).map(s => s.name)
-  // A turn opens at a prompt once the previous turn has a result, and closes at its summary.
-  readonly property var turns: {
+  // Only work that changed code is shown: one group per session task, one row per file.
+  readonly property var groups: {
     if (!agentd) return []
     agentd.activityGen
     var src = agentd.activity.slice().sort((a, b) => a.at - b.at)
-    var list = [], open = {}
+    var all = [], open = {}, task = {}, prompt = {}
+    function close(sid) { delete open[sid] }
     for (var r of src) {
-      var t = open[r.sid]
-      if (!t || (r.kind === "prompt" && t.summary) || (r.kind === "summary" && t.summary)) {
-        t = { key: "turn:" + r.key, sid: r.sid, end: r.at, prompts: [], task: "", taskDone: false,
-              summary: "", files: [], add: 0, del: 0, asks: [] }
-        open[r.sid] = t
-        list.push(t)
+      var g = open[r.sid]
+      if (g && r.at - g.end > 3 * 3600000) { close(r.sid); g = null }
+      if (r.kind === "task") {
+        if (r.action === "switch") { close(r.sid); task[r.sid] = r.text }
+        else if (g && g.task === r.text) g.done = true
+        continue
       }
-      t.end = Math.max(t.end, r.at)
-      if (r.kind === "prompt") t.prompts.push(r)
-      else if (r.kind === "summary") t.summary = r.text
-      else if (r.kind === "task") { t.task = r.text; t.taskDone = r.action === "finish" }
-      else if (r.kind === "ask") t.asks.push(r.text)
-      else if (r.kind === "edit") {
-        if (t.files.indexOf(base(r.path)) < 0) t.files.push(base(r.path))
-        t.add += r.add || 0; t.del += r.del || 0
+      if (r.kind === "prompt") { if (g && g.summary && !g.task) close(r.sid); if (!open[r.sid]) prompt[r.sid] = r; continue }
+      if (r.kind === "summary") { if (g) { g.summary = r.text; g.end = Math.max(g.end, r.at) } continue }
+      if (r.kind !== "edit") continue
+      if (!g) {
+        var p = prompt[r.sid]
+        g = { key: r.key, sid: r.sid, task: task[r.sid] || "", prompt: p ? p.text : "", from: p ? p.from : "", start: r.at, end: r.at, files: [], byPath: {}, summary: "", done: false }
+        open[r.sid] = g
+        all.push(g)
       }
+      g.end = Math.max(g.end, r.at)
+      var f = g.byPath[r.path]
+      if (!f) { f = { path: r.path, add: 0, del: 0, edits: 0 }; g.byPath[r.path] = f; g.files.push(f) }
+      f.add += r.add || 0; f.del += r.del || 0; f.edits++
+      f.at = r.at; f.line = r.line || 1; f.diff = r.diff || []; if (r.why) f.why = r.why
     }
-    for (var sid in open) open[sid].latest = true
-    return list.sort((a, b) => a.end - b.end)
+    return all.sort((a, b) => a.end - b.end).slice(-150)
   }
   readonly property var rows: {
-    var out = [], day = "", prev = ""
-    for (var t of turns) {
-      var label = dayLabel(t.end)
-      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label, prompts: [], files: [], asks: [] }); day = label; prev = "" }
-      out.push(Object.assign({ kind: "turn", showSession: t.sid !== prev }, t))
-      prev = t.sid
+    var out = [], day = ""
+    for (var g of groups) {
+      var label = dayLabel(g.end)
+      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
+      out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, end: g.end, count: g.files.length })
+      for (var f of g.files)
+        out.push({ kind: "file", key: "file:" + g.key + ":" + f.path, sid: g.sid, path: f.path, add: f.add, del: f.del,
+                   edits: f.edits, at: f.at, line: f.line, diff: f.diff, why: f.why || "" })
+      if (g.summary) out.push({ kind: "result", key: "result:" + g.key, sid: g.sid, text: g.summary })
     }
     return out
   }
@@ -114,26 +126,28 @@ FocusScope {
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
     if (i >= 0) return i
-    for (i = rows.length - 1; i >= 0 && rows[i].kind === "day"; i--);
+    for (i = rows.length - 1; i >= 0 && rows[i].kind !== "file"; i--);
     return i
   }
-  readonly property string currentSession: cursor >= 0 ? rows[cursor].sid : ""
+  readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
 
   function select(i) {
     cursorKey = rows[i].key
-    scroller.cursorMoved(i, i === rows.length - 1)
+    var last = rows.length - 1
+    while (last > i && rows[last].kind !== "file") last--
+    scroller.cursorMoved(i, i === last)
   }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (rows[i].kind !== "day") { select(i); return }
+      if (rows[i].kind === "file") { select(i); return }
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {
       var i = last ? rows.length - 1 - n : n
-      if (rows[i].kind !== "day") { select(i); return }
+      if (rows[i].kind === "file") { select(i); return }
     }
   }
-  function open() { if (currentSession) sessionRequested(currentSession) }
+  function open() { if (currentRow) fileRequested(currentRow.sid, currentRow.path, currentRow.line || 1) }
 
   component Orb: ThinkingOrb {
     required property string sid
@@ -144,35 +158,19 @@ FocusScope {
     seedKey: sid
     idleBlur: 1
   }
-  component MetaLine: Row {
-    property string icon
-    property color iconColor: root.metaColor
-    property alias text: label.text
-    property color color: Theme.fg_secondary
-    spacing: 8
-    Icon { name: parent.icon; width: 14; height: 14; color: parent.iconColor; anchors.verticalCenter: parent.verticalCenter }
-    Text {
-      id: label
-      width: Math.min(implicitWidth, parent.width - 22)
-      elide: Text.ElideRight; textFormat: Text.PlainText
-      color: parent.color
-      font.family: root.bodyFont; font.pixelSize: root.fsMeta
-      anchors.verticalCenter: parent.verticalCenter
-    }
-  }
 
   ListView {
     id: list
     width: Math.min(parent.width - 64, 1400)
     height: parent.height
     anchors.horizontalCenter: parent.horizontalCenter
-    header: Item { height: 20 }
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }
     cacheBuffer: 1000000
     ScrollFeel { flick: list; onScrolled: up => scroller.userScrolled(up) }
     onDraggingChanged: dragging ? scroller.gestureStarted() : scroller.gestureEnded()
+    header: Item { height: 12 }
 
     footer: Flow {
       width: list.width
@@ -210,215 +208,178 @@ FocusScope {
       id: row
       required property string key
       required property int index
-      readonly property var turn: root.rows[index] || ({ kind: "day", prompts: [], files: [], asks: [] })
-      readonly property bool day: turn.kind === "day"
+      readonly property var entry: root.rows[index] || ({ kind: "day", diff: [] })
+      readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
-      readonly property bool live: !day && turn.latest === true && !turn.summary && root.busy(turn.sid)
-      readonly property var prompt: day ? null : turn.prompts[0] || null
-      readonly property bool handoff: !!prompt && prompt.from !== "you"
-      readonly property real dotY: frame.y + 12 + Math.round(root.fsBody * 0.7)
+      readonly property real dotY: kind === "file" ? fileHead.y + fileHead.height / 2 : height / 2
       width: list.width
-      height: day ? 56 : frame.height + (turn.showSession ? 64 : 8)
+      height: kind === "day" ? 52 : kind === "head" ? headCol.implicitHeight + 30 : kind === "result" ? resultText.implicitHeight + 18
+        : fileBox.height + 6
 
       CapLabel {
-        visible: row.day
-        anchors { bottom: parent.bottom; bottomMargin: 10; left: parent.left; leftMargin: 18 }
-        text: String(row.turn.text || "").toUpperCase()
+        visible: row.kind === "day"
+        anchors { bottom: parent.bottom; bottomMargin: 8; left: parent.left; leftMargin: 8 }
+        text: String(row.entry.text || "").toUpperCase()
       }
 
       Item {
-        id: head
-        visible: row.turn.showSession === true
-        width: parent.width; height: 60
-        readonly property var session: root.sessions.find(x => x.name === row.turn.sid) || ({})
-        readonly property string where: String(session.cwd || "").replace(/^\/home\/[^/]+/, "~")
-        Rectangle {
-          visible: index > 0 && root.rows[index - 1].kind !== "day"
-          x: 18; width: parent.width - 36; height: 1; y: 6
-          color: Qt.alpha(Theme.fg, 0.07)
-        }
-        Orb { id: headOrb; sid: row.turn.sid || ""; running: root.busy(row.turn.sid); x: 18; y: 22; width: 26; height: 26 }
+        visible: row.kind === "head"
+        anchors.fill: parent
+        Orb { id: headOrb; sid: row.entry.sid || ""; running: root.busy(row.entry.sid); x: 8; y: 24; width: 20; height: 20 }
         Column {
-          anchors { left: headOrb.right; leftMargin: 12; right: headState.left; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
-          spacing: 1
-          Text {
-            width: parent.width; elide: Text.ElideRight
-            text: row.turn.sid || ""; textFormat: Text.PlainText
-            color: root.contentColor
-            font.family: root.bodyFont; font.pixelSize: root.fsName + 1; font.weight: 600
+          id: headCol
+          anchors { left: headOrb.right; leftMargin: 12; right: headTime.left; rightMargin: 16 }
+          y: headOrb.y + headOrb.height / 2 - headName.implicitHeight / 2
+          spacing: 4
+          Row {
+            width: parent.width
+            spacing: 12
+            Text {
+              id: headName
+              text: row.entry.sid || ""; textFormat: Text.PlainText
+              color: root.contentColor
+              font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
+            }
+            Text {
+              width: parent.width - headName.width - 12
+              anchors.baseline: headName.baseline
+              text: (row.entry.done ? "\u2713 " : "") + (row.entry.task || row.entry.prompt || "")
+              textFormat: Text.PlainText
+              elide: Text.ElideRight
+              color: row.entry.done ? Theme.green : root.contentColor
+              font.family: root.bodyFont; font.pixelSize: root.fsBody
+            }
           }
           Text {
-            width: parent.width; elide: Text.ElideMiddle
-            text: [head.where, head.session.plan].filter(x => !!x).join("  \u00b7  ")
+            visible: !!row.entry.task && !!row.entry.prompt
+            width: parent.width
+            text: (row.entry.from && row.entry.from !== "you" ? row.entry.from : "You") + ": " + (row.entry.prompt || "")
             textFormat: Text.PlainText
+            elide: Text.ElideRight
             color: root.metaColor
-            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta
           }
         }
         Text {
-          id: headState
-          anchors { right: parent.right; rightMargin: 20; verticalCenter: headOrb.verticalCenter }
-          text: root.busy(row.turn.sid) ? root.activityLabelFor(row.turn.sid || "") : head.session.name ? "idle" : "closed"
-          color: root.busy(row.turn.sid) ? Theme.orange : root.metaColor
-          font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1; font.weight: 500
+          id: headTime
+          anchors { right: parent.right; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
+          text: root.busy(row.entry.sid) ? root.activityLabelFor(row.entry.sid || "") : root.clock(row.entry.end || 0)
+          color: root.busy(row.entry.sid) ? Theme.orange : root.metaColor
+          font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
         }
       }
 
       Rectangle {
-        id: frame
-        visible: !row.day
-        y: row.turn.showSession ? 64 : 4
-        width: parent.width
-        height: col.implicitHeight + 24
-        radius: 18
-        color: hover.hovered && !row.current ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        id: fileBox
+        visible: row.kind === "file"
+        x: 18
+        width: parent.width - 18
+        height: visible ? fileCol.implicitHeight + 16 : 0
+        radius: 12
+        color: row.current ? Qt.alpha(Theme.fg, 0.05) : fileHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
-        border.color: root.ring
-
+        border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
+        HoverHandler { id: fileHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
 
         Column {
-          id: col
-          x: 24; y: 12
-          width: parent.width - 48
-          spacing: 10
-
+          id: fileCol
+          x: 22; y: 8
+          width: parent.width - 34
+          spacing: 6
+          Item {
+            id: fileHead
+            width: parent.width
+            height: Math.max(pathText.implicitHeight, 20)
+            Icon { id: fileIcon; name: "file-content"; width: 14; height: 14; color: root.metaColor; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+              id: pathText
+              anchors { left: fileIcon.right; leftMargin: 10; right: fileMeta.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+              readonly property string rel: root.relPath(row.entry.sid, row.entry.path)
+              readonly property int cut: rel.lastIndexOf("/") + 1
+              textFormat: Text.StyledText
+              text: '<font color="' + root.metaColor + '">' + rel.slice(0, cut).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</font>'
+                + rel.slice(cut).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+                + (row.entry.line > 1 ? '<font color="' + root.metaColor + '">:' + row.entry.line + '</font>' : "")
+              elide: Text.ElideLeft
+              color: root.contentColor
+              font.family: Theme.fontFamily; font.pixelSize: root.fsMeta
+            }
+            Row {
+              id: fileMeta
+              anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+              spacing: 10
+              Text { text: "+" + (row.entry.add || 0); color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 1 }
+              Text { text: "-" + (row.entry.del || 0); color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 1 }
+              Text {
+                text: (row.entry.edits > 1 ? row.entry.edits + " edits  " : "") + root.clock(row.entry.at || 0)
+                color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+              }
+            }
+          }
           Text {
-            visible: !row.prompt
-            text: root.clock(row.turn.end || 0)
-            color: root.metaColor
-            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+            visible: !!row.entry.why
+            width: parent.width
+            leftPadding: 24
+            text: row.entry.why || ""
+            textFormat: Text.PlainText
+            color: Theme.fg_secondary
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta
+            lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
+            wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : 2; elide: Text.ElideRight
           }
-
-          Rectangle {
-            visible: !!row.prompt
-            width: col.width
-            height: promptCol.implicitHeight + 24
-            radius: 14
-            color: row.handoff ? Qt.rgba(root.lavender.r, root.lavender.g, root.lavender.b, 0.08) : "transparent"
-            border.width: row.handoff ? 1 : 0
-            border.color: Qt.rgba(root.lavender.r, root.lavender.g, root.lavender.b, 0.22)
-            ContrastCard {
-              visible: !row.handoff
-              anchors.fill: parent
-              cardRadius: parent.radius
-              bevelWidth: root.light ? 1 : 2
-              faceTop: root.light ? "#FDFDFD" : (root.rail ? root.rail.userCardTop : Theme.surface0)
-              faceUpper: faceTop
-              faceMid: root.light ? "#F8F8F9" : (root.rail ? root.rail.userCardBottom : Theme.surface0)
-              faceBottom: faceMid
-              rimBottom: root.light ? "#F3F3F4" : "#222222"
-              outlineColor: root.light ? Qt.alpha(Theme.fg, 0.11) : "#282828"
-            }
-            Column {
-              id: promptCol
-              x: 16; y: 12
-              width: parent.width - 32
-              spacing: 6
-              Item {
-              width: parent.width
-              height: promptHead.implicitHeight
-              Row {
-                id: promptHead
-                spacing: 8
-                Icon {
-                  name: row.handoff ? "sparkle-3" : "paper-plane-2"
-                  variantSize: row.handoff ? 0 : 12
-                  width: 14; height: 14; anchors.verticalCenter: parent.verticalCenter
-                  color: row.handoff ? root.lavender : Theme.orange
-                }
-                Text {
-                  text: !row.prompt ? "" : row.handoff ? "From " + row.prompt.from : "You"
-                  color: root.contentColor
-                  font.family: root.bodyFont; font.pixelSize: root.fsMeta; font.weight: 600
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                  visible: row.turn.prompts.length > 1
-                  text: "+" + (row.turn.prompts.length - 1) + " more"
-                  color: root.metaColor
-                  font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
-                  anchors.verticalCenter: parent.verticalCenter
-                }
-              }
-              Text {
-                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                text: root.clock(row.turn.end || 0)
-                color: root.metaColor
-                font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
-              }
-              }
-              Text {
+          Column {
+            width: parent.width
+            visible: (row.entry.diff || []).length > 0
+            Repeater {
+              model: (row.entry.diff || []).slice(0, row.current ? 12 : 3)
+              delegate: Rectangle {
+                required property string modelData
+                readonly property var parts: modelData.match(/^([+-])\s*(\d+) ?(.*)$/) || ["", " ", "", modelData]
                 width: parent.width
-                text: row.prompt ? row.prompt.text : ""
-                textFormat: Text.PlainText
-                color: root.bodyColor
-                font.family: root.bodyFont; font.pixelSize: root.fsBody
-                lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
-                wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+                height: 20
+                color: Qt.alpha(parts[1] === "+" ? Theme.green : Theme.red, 0.07)
+                Text {
+                  id: lineNo
+                  width: 44; x: 4
+                  anchors.verticalCenter: parent.verticalCenter
+                  horizontalAlignment: Text.AlignRight
+                  text: parts[2]
+                  color: root.metaColor
+                  font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                }
+                Text {
+                  anchors { left: lineNo.right; leftMargin: 10; right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+                  text: parts[1] + " " + parts[3]
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  color: parts[1] === "+" ? Theme.green : Theme.red
+                  font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                }
               }
             }
-          }
-
-          MetaLine {
-            visible: !!row.turn.task
-            width: col.width
-            icon: row.turn.taskDone ? "check" : "bookmark"
-            iconColor: row.turn.taskDone ? Theme.green : root.metaColor
-            text: row.turn.task || ""
-          }
-          Row {
-            visible: !!row.turn.summary || row.live
-            width: col.width
-            spacing: 8
-            Text {
-              text: row.turn.summary ? "\u27e2" : "\u2026"
-              color: root.metaColor
-              font.family: root.bodyFont; font.pixelSize: root.fsBody
-              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
-            }
-            Text {
-              width: parent.width - 24
-              text: row.turn.summary || "Working \u00b7 " + root.activityLabelFor(row.turn.sid || "")
-              textFormat: Text.PlainText
-              color: row.turn.summary ? root.contentColor : root.metaColor
-              font.family: root.bodyFont; font.pixelSize: root.fsBody
-              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
-              wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
-            }
-          }
-          MetaLine {
-            visible: row.turn.asks.length > 0
-            width: col.width
-            icon: "msg-bubble-user"
-            iconColor: Theme.orange
-            text: row.turn.asks.length ? row.turn.asks[row.turn.asks.length - 1] : ""
-          }
-          Row {
-            visible: row.turn.files.length > 0
-            width: col.width
-            spacing: 8
-            Icon { name: "square-plus"; width: 14; height: 14; color: root.metaColor; anchors.verticalCenter: parent.verticalCenter }
-            Text {
-              width: Math.min(implicitWidth, col.width - 120)
-              elide: Text.ElideRight; textFormat: Text.PlainText
-              text: row.turn.files.join(", ")
-              color: Theme.fg_secondary
-              font.family: root.bodyFont; font.pixelSize: root.fsMeta
-              anchors.verticalCenter: parent.verticalCenter
-            }
-            Text { text: "+" + row.turn.add; color: Theme.green; font.family: root.bodyFont; font.pixelSize: root.fsMeta; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "-" + row.turn.del; color: Theme.red; font.family: root.bodyFont; font.pixelSize: root.fsMeta; anchors.verticalCenter: parent.verticalCenter }
           }
         }
       }
-      HoverHandler { id: hover; enabled: !row.day; cursorShape: Qt.PointingHandCursor }
-      TapHandler { enabled: !row.day; onTapped: { root.cursorKey = row.turn.key; root.open() } }
+
+      Text {
+        id: resultText
+        visible: row.kind === "result"
+        x: 40; y: 4
+        width: parent.width - 52
+        text: "\u27e2 " + (row.entry.text || "")
+        textFormat: Text.PlainText
+        color: Theme.fg_secondary
+        font.family: root.bodyFont; font.pixelSize: root.fsMeta
+        lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
+        wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+      }
     }
 
     Text {
       visible: !root.rows.length && !root.working.length
       anchors.centerIn: parent
-      text: "No activity yet"
+      text: "No code changes yet"
       color: root.metaColor
       font.family: root.bodyFont; font.pixelSize: root.fsBody
     }

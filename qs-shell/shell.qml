@@ -605,6 +605,7 @@ ShellRoot {
               sessions: win.agentd.sessions
               activityLabelFor: dashboard.activityLabelFor
               onSessionRequested: sid => { win.pane = "rail"; rail.jumpToSession(sid) }
+              onFileRequested: (sid, path, line) => { rail.openSessionFile(sid, path, line); win.pane = "nvim" }
               onFocusRequested: direction => win.tryFocus(direction)
               caretHeld: glideCaret.holding
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
