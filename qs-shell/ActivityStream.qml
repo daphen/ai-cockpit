@@ -31,12 +31,9 @@ FocusScope {
 
   readonly property bool light: Theme.mode === "light"
   readonly property string bodyFont: rail ? rail.messageFontFamily : "Geist"
-  readonly property string labelFont: rail ? rail.labelFontFamily : Theme.fontFamily
-  function labelStyle(weight) { return rail ? rail.labelFontStyle(weight) : "" }
   readonly property int fsBody: rail ? rail.fsBody : Theme.fontSize + 3
   readonly property int fsName: rail ? rail.fsName : Theme.fontSize + 4
   readonly property int fsMeta: rail ? rail.fsMeta : Theme.fontSize + 2
-  readonly property color sky: rail ? rail.skyAccent : Theme.sky
   readonly property color lavender: rail ? rail.lavenderAccent : "#C4B5FD"
   readonly property color ring: rail ? rail.cardRing : Qt.alpha(Theme.fg, 0.18)
   readonly property color contentColor: light ? "#23272B" : "#FAFAFA"
@@ -174,7 +171,7 @@ FocusScope {
               text: pill.modelData + "  " + root.activityLabelFor(pill.modelData)
               textFormat: Text.PlainText
               color: root.contentColor
-              font.family: root.labelFont; font.styleName: root.labelStyle(500); font.pixelSize: root.fsMeta; font.weight: 500
+              font.family: root.bodyFont; font.pixelSize: root.fsMeta; font.weight: 500
               anchors.verticalCenter: parent.verticalCenter
             }
           }
@@ -193,7 +190,7 @@ FocusScope {
       readonly property var prompt: day ? null : turn.prompts[0] || null
       readonly property bool handoff: !!prompt && prompt.from !== "you"
       width: list.width
-      height: day ? 56 : frame.height + (turn.showSession ? 44 : 10)
+      height: day ? 56 : frame.height + (turn.showSession ? 64 : 8)
 
       CapLabel {
         visible: row.day
@@ -201,23 +198,48 @@ FocusScope {
         text: String(row.turn.text || "").toUpperCase()
       }
 
-      Row {
+      Item {
+        id: head
         visible: row.turn.showSession === true
-        x: 18; y: 14
-        spacing: 10
-        Orb { sid: row.turn.sid || ""; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
+        width: parent.width; height: 60
+        readonly property var session: root.sessions.find(x => x.name === row.turn.sid) || ({})
+        readonly property string where: String(session.cwd || "").replace(/^\/home\/[^/]+/, "~")
+        Rectangle {
+          visible: index > 0 && root.rows[index - 1].kind !== "day"
+          x: 18; width: parent.width - 36; height: 1; y: 6
+          color: Qt.alpha(Theme.fg, 0.07)
+        }
+        Orb { id: headOrb; sid: row.turn.sid || ""; running: true; x: 18; y: 22; width: 26; height: 26 }
+        Column {
+          anchors { left: headOrb.right; leftMargin: 12; right: headState.left; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
+          spacing: 1
+          Text {
+            width: parent.width; elide: Text.ElideRight
+            text: row.turn.sid || ""; textFormat: Text.PlainText
+            color: root.contentColor
+            font.family: root.bodyFont; font.pixelSize: root.fsName + 1; font.weight: 600
+          }
+          Text {
+            width: parent.width; elide: Text.ElideMiddle
+            text: [head.where, head.session.plan].filter(x => !!x).join("  \u00b7  ")
+            textFormat: Text.PlainText
+            color: root.metaColor
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+          }
+        }
         Text {
-          text: row.turn.sid || ""; textFormat: Text.PlainText
-          color: root.contentColor
-          font.family: root.labelFont; font.styleName: root.labelStyle(600); font.pixelSize: root.fsName; font.weight: 600
-          anchors.verticalCenter: parent.verticalCenter
+          id: headState
+          anchors { right: parent.right; rightMargin: 20; verticalCenter: headOrb.verticalCenter }
+          text: root.busy(row.turn.sid) ? root.activityLabelFor(row.turn.sid || "") : head.session.name ? "idle" : "closed"
+          color: root.busy(row.turn.sid) ? Theme.orange : root.metaColor
+          font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1; font.weight: 500
         }
       }
 
       Rectangle {
         id: frame
         visible: !row.day
-        y: row.turn.showSession ? 44 : 4
+        y: row.turn.showSession ? 64 : 4
         width: parent.width
         height: col.implicitHeight + 24
         radius: 18
@@ -231,18 +253,19 @@ FocusScope {
           color: Theme.cursor
           visible: row.current
         }
-        Text {
-          anchors { right: parent.right; rightMargin: 18; top: parent.top; topMargin: 14 }
-          text: root.clock(row.turn.end || 0)
-          color: root.metaColor
-          font.family: root.labelFont; font.pixelSize: root.fsMeta - 1
-        }
 
         Column {
           id: col
           x: 24; y: 12
-          width: parent.width - 48 - 44
+          width: parent.width - 48
           spacing: 10
+
+          Text {
+            visible: !row.prompt
+            text: root.clock(row.turn.end || 0)
+            color: root.metaColor
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+          }
 
           Rectangle {
             visible: !!row.prompt
@@ -269,7 +292,11 @@ FocusScope {
               x: 16; y: 12
               width: parent.width - 32
               spacing: 6
+              Item {
+              width: parent.width
+              height: promptHead.implicitHeight
               Row {
+                id: promptHead
                 spacing: 8
                 Icon {
                   name: row.handoff ? "sparkle-3" : "paper-plane-2"
@@ -280,16 +307,23 @@ FocusScope {
                 Text {
                   text: !row.prompt ? "" : row.handoff ? "From " + row.prompt.from : "You"
                   color: root.contentColor
-                  font.family: root.labelFont; font.styleName: root.labelStyle(600); font.pixelSize: root.fsMeta; font.weight: 600
+                  font.family: root.bodyFont; font.pixelSize: root.fsMeta; font.weight: 600
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Text {
                   visible: row.turn.prompts.length > 1
                   text: "+" + (row.turn.prompts.length - 1) + " more"
                   color: root.metaColor
-                  font.family: root.labelFont; font.pixelSize: root.fsMeta - 1
+                  font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
                   anchors.verticalCenter: parent.verticalCenter
                 }
+              }
+              Text {
+                anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                text: root.clock(row.turn.end || 0)
+                color: root.metaColor
+                font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+              }
               }
               Text {
                 width: parent.width
@@ -310,15 +344,25 @@ FocusScope {
             iconColor: row.turn.taskDone ? Theme.green : root.metaColor
             text: row.turn.task || ""
           }
-          Text {
+          Row {
             visible: !!row.turn.summary || row.live
             width: col.width
-            text: row.turn.summary ? "\u27e2 " + row.turn.summary : "Working \u00b7 " + root.activityLabelFor(row.turn.sid || "")
-            textFormat: Text.PlainText
-            color: row.turn.summary ? root.sky : root.metaColor
-            font.family: root.bodyFont; font.pixelSize: root.fsBody
-            lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
-            wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
+            spacing: 8
+            Text {
+              text: row.turn.summary ? "\u27e2" : "\u2026"
+              color: root.metaColor
+              font.family: root.bodyFont; font.pixelSize: root.fsBody
+              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
+            }
+            Text {
+              width: parent.width - 24
+              text: row.turn.summary || "Working \u00b7 " + root.activityLabelFor(row.turn.sid || "")
+              textFormat: Text.PlainText
+              color: row.turn.summary ? root.contentColor : root.metaColor
+              font.family: root.bodyFont; font.pixelSize: root.fsBody
+              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
+              wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
+            }
           }
           MetaLine {
             visible: row.turn.asks.length > 0

@@ -63,7 +63,7 @@ ShellRoot {
         if (kinds !== "edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
-        if (!test.visibleText("\u27e2 Activity view renders history.")) test.fail("summary not shown")
+        if (!test.visibleText("Activity view renders history.")) test.fail("summary not shown")
         if (!test.visibleText("Build the activity view") || !test.visibleText("From nixos")) test.fail("prompt and its sender not shown")
         if (!test.visibleText("Activity view")) test.fail("task title not shown")
         if (!test.visibleText("Rail.qml, New.qml")) test.fail("edits in one turn did not fold into one line")
@@ -73,7 +73,7 @@ ShellRoot {
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped." }] } })
       } else if (stage === 4) {
-        if (!test.visibleText("\u27e2 Beta shipped.")) test.fail("live summary not shown")
+        if (!test.visibleText("Beta shipped.")) test.fail("live summary not shown")
         if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
         if (!test.find(page, item => item.visible && /^beta  /.test(String(item.text || "")))) test.fail("working session missing from the now strip")
         page.forceActiveFocus()
