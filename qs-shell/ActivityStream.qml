@@ -13,7 +13,7 @@ FocusScope {
   readonly property bool focused: activeFocus
   signal sessionRequested(string sid)
   signal focusRequested(string direction)
-  onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); scroller.toEnd() }
+  onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
   Keys.onPressed: event => {
