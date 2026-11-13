@@ -20,7 +20,9 @@ FocusScope {
     return item ? item.mapToItem(root, 28, item.dotY) : null
   }
   readonly property var restPoint: { list.contentY; list.contentHeight; cursor; width; return activeFocus ? cursorPoint() : null }
-  onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
+  function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
+  onVisibleChanged: if (visible) reveal()
+  onSessionsChanged: if (visible && agentd) agentd.loadActivityHistory()
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
   Keys.onPressed: event => {

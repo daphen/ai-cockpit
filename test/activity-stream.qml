@@ -43,9 +43,11 @@ ShellRoot {
                                                { id: "beta", name: "beta", cwd: "/tmp/b", status: "streaming" }] })
         if (test.sent.some(m => m.type === "get_entries")) test.fail("history loaded before the page was shown")
         page.visible = true
+      } else if (stage === 1) {
+        test.event({ type: "roster", sessions: [{ id: "alpha", name: "alpha", cwd: "/r", status: "idle" },
+                                               { id: "beta", name: "beta", cwd: "/tmp/b", status: "streaming" },
+                                               { id: "gamma", name: "gamma", cwd: "/tmp/g", status: "idle" }] })
       } else if (stage === 2) {
-        var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
-        if (asked !== "alpha,beta") test.fail("history was requested for " + asked)
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a0", message: { role: "assistant", timestamp: test.t0 - 5 * 3600000, content: [
             { type: "toolCall", id: "e0", name: "edit", arguments: { path: "/r/Old.qml", edits: [] } }] } },
@@ -65,6 +67,8 @@ ShellRoot {
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
       } else if (stage === 3) {
+        var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
+        if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
         if (kinds !== "edit,edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
@@ -104,7 +108,7 @@ ShellRoot {
         if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("moving up then opening went to " + test.opened)
         test.key(Qt.Key_S)
         if (test.opened[2] !== "alpha") test.fail("s did not open the change's session: " + test.opened)
-        console.log("PASS: activity page backfills transcripts once, shows only code changes grouped by session task with the prompt behind it, each change with the reason the agent gave, per-file counts, changed-line previews and the task result, follows live edits, marks only each busy session's newest group as working, and Enter opens the changed file at its line in that session")
+        console.log("PASS: activity page backfills transcripts once, including sessions that appear while the page is open, shows only code changes grouped by session task with the prompt behind it, each change with the reason the agent gave, per-file counts, changed-line previews and the task result, follows live edits, marks only each busy session's newest group as working, and Enter opens the changed file at its line in that session")
         Qt.quit()
       }
       stage++
