@@ -58,6 +58,7 @@ FocusScope {
     agentd.gen; agentd.pendingGen; agentd.curToolGen
     return agentd.isBusy(sid)
   }
+  function esc(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
   function relPath(sid, path) {
     var cwd = String((sessions.find(s => s.name === sid) || {}).cwd || "")
     var p = String(path || "")
@@ -291,30 +292,44 @@ FocusScope {
           Item {
             id: fileHead
             width: parent.width
-            height: Math.max(pathText.implicitHeight, 20)
-            Icon { id: fileIcon; name: "file-content"; width: 14; height: 14; color: root.metaColor; anchors.verticalCenter: parent.verticalCenter }
-            Text {
-              id: pathText
-              anchors { left: fileIcon.right; leftMargin: 10; right: fileMeta.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-              readonly property string rel: root.relPath(row.entry.sid, row.entry.path)
-              readonly property int cut: rel.lastIndexOf("/") + 1
-              textFormat: Text.StyledText
-              text: '<font color="' + root.metaColor + '">' + rel.slice(0, cut).replace(/&/g, "&amp;").replace(/</g, "&lt;") + '</font>'
-                + rel.slice(cut).replace(/&/g, "&amp;").replace(/</g, "&lt;")
-                + (row.entry.line > 1 ? '<font color="' + root.metaColor + '">:' + row.entry.line + '</font>' : "")
-              elide: Text.ElideLeft
-              color: root.contentColor
-              font.family: Theme.fontFamily; font.pixelSize: root.fsMeta
+            height: 28
+            PillSurface {
+              id: filePill
+              width: Math.min(pathText.implicitWidth + 34, parent.width - fileMeta.width - 16)
+              height: 26
+              radius: height / 2
+              anchors.verticalCenter: parent.verticalCenter
+              Row {
+                id: filePillRow
+                x: 8
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 6
+                Icon { id: fileIcon; name: "file-content"; width: 12; height: 12; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                  id: pathText
+                  readonly property string rel: root.relPath(row.entry.sid, row.entry.path)
+                  readonly property int cut: rel.lastIndexOf("/") + 1
+                  width: filePill.width - 34
+                  textFormat: Text.StyledText
+                  text: '<font color="' + root.metaColor + '">' + root.esc(rel.slice(0, cut)) + '</font>' + root.esc(rel.slice(cut))
+                    + (row.entry.line > 1 ? '<font color="' + root.metaColor + '">:' + row.entry.line + '</font>' : "")
+                  elide: Text.ElideLeft
+                  color: filePill.contentColor
+                  font.family: Theme.fontFamily; font.pixelSize: root.fsMeta; font.weight: 500
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
             }
             Row {
               id: fileMeta
               anchors { right: parent.right; verticalCenter: parent.verticalCenter }
               spacing: 10
-              Text { text: "+" + (row.entry.add || 0); color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 1 }
-              Text { text: "-" + (row.entry.del || 0); color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 1 }
+              Text { text: "+" + (row.entry.add || 0); color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
+              Text { text: "-" + (row.entry.del || 0); color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
               Text {
                 text: (row.entry.edits > 1 ? row.entry.edits + " edits  " : "") + root.clock(row.entry.at || 0)
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+                anchors.verticalCenter: parent.verticalCenter
               }
             }
           }
@@ -329,33 +344,39 @@ FocusScope {
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
             wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : 2; elide: Text.ElideRight
           }
-          Column {
-            width: parent.width
+          Rectangle {
+            id: diffPanel
+            readonly property string language: root.rail ? root.rail.codeLanguage(row.entry.path) : ""
             visible: (row.entry.diff || []).length > 0
-            Repeater {
-              model: (row.entry.diff || []).slice(0, row.current ? 12 : 3)
-              delegate: Rectangle {
-                required property string modelData
-                readonly property var parts: modelData.match(/^([+-])\s*(\d+) ?(.*)$/) || ["", " ", "", modelData]
-                width: parent.width
-                height: 20
-                color: Qt.alpha(parts[1] === "+" ? Theme.green : Theme.red, 0.07)
-                Text {
-                  id: lineNo
-                  width: 44; x: 4
-                  anchors.verticalCenter: parent.verticalCenter
-                  horizontalAlignment: Text.AlignRight
-                  text: parts[2]
-                  color: root.metaColor
-                  font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
-                }
-                Text {
-                  anchors { left: lineNo.right; leftMargin: 10; right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-                  text: parts[1] + " " + parts[3]
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                  color: parts[1] === "+" ? Theme.green : Theme.red
-                  font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+            width: parent.width
+            height: visible ? diffCol.implicitHeight + 12 : 0
+            radius: 12
+            color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
+            clip: true
+            Column {
+              id: diffCol
+              anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 6 }
+              Repeater {
+                model: (row.entry.diff || []).slice(0, row.current ? 12 : 3)
+                delegate: Rectangle {
+                  required property string modelData
+                  readonly property var parts: modelData.match(/^([+-])\s*(\d+) ?(.*)$/) || ["", " ", "", modelData]
+                  readonly property color tone: parts[1] === "+" ? Theme.green : Theme.red
+                  width: diffCol.width
+                  height: diffLine.implicitHeight + 3
+                  color: parts[1] === "+" ? Theme.diffAddedBg : Theme.diffRemovedBg
+                  Rectangle { width: 2; height: parent.height; color: parent.tone }
+                  Text {
+                    id: diffLine
+                    x: 10; width: parent.width - 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.StyledText
+                    text: '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + parts[2]).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
+                      + (root.rail ? root.rail.highlightCode(parts[3], diffPanel.language) : root.esc(parts[3]))
+                    color: Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                    wrapMode: Text.NoWrap; elide: Text.ElideRight; maximumLineCount: 1
+                  }
                 }
               }
             }

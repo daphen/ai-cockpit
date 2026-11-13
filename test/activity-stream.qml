@@ -72,7 +72,7 @@ ShellRoot {
         if (!test.visibleText("Activity view")) test.fail("task title not shown")
         if (!test.hasText("Rail.qml") || !test.hasText("New.qml")) test.fail("changed files not shown")
         if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-file counts wrong")
-        if (!test.visibleText("+ x") || test.hasText("ctx")) test.fail("diff preview should show only the changed lines")
+        if (!test.hasText("&nbsp;&nbsp;</font>x") || test.hasText("ctx")) test.fail("diff preview should show only the changed lines")
         state.sendPrompt("beta", "keep going")
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
