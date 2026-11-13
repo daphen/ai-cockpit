@@ -245,7 +245,8 @@ FocusScope {
               anchors.baseline: headName.baseline
               text: (row.entry.done ? "\u2713 " : "") + (row.entry.task || row.entry.prompt || "")
               textFormat: Text.PlainText
-              elide: Text.ElideRight
+              wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
+              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
               color: row.entry.done ? Theme.green : root.contentColor
               font.family: root.bodyFont; font.pixelSize: root.fsBody
             }
@@ -255,7 +256,7 @@ FocusScope {
             width: parent.width
             text: (row.entry.from && row.entry.from !== "you" ? row.entry.from : "You") + ": " + (row.entry.prompt || "")
             textFormat: Text.PlainText
-            elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
             color: root.metaColor
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
           }
