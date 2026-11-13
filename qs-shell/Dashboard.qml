@@ -11,6 +11,7 @@ FocusScope {
   readonly property color muted: Theme.mode === "light" ? Qt.rgba(Theme.fg_muted.r * 0.4 + Theme.fg_secondary.r * 0.6, Theme.fg_muted.g * 0.4 + Theme.fg_secondary.g * 0.6, Theme.fg_muted.b * 0.4 + Theme.fg_secondary.b * 0.6, 1) : Theme.fg_muted
   property var model: ({})
   property var agentd: null
+  property var rail: null
   property var sessions: []
   property bool compact: Quickshell.env("COCKPIT_DECK") === "1"
   property var tickets: []
@@ -1098,8 +1099,8 @@ FocusScope {
         sessions: root.sessions
         muted: root.muted
         focused: root.activeFocus
+        rail: root.rail
         activityLabelFor: root.activityLabelFor
-        taskFor: root.taskFor
         onSessionRequested: sid => root.sessionRequested(sid)
       }
 

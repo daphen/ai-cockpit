@@ -4,51 +4,77 @@ import QsLib
 Item {
   id: root
   property var agentd: null
+  property var rail: null
   property var sessions: []
   property color muted: Theme.fg_muted
   property var activityLabelFor: sid => "idle"
-  property var taskFor: sid => ""
   property string cursorKey: ""
   property bool focused: false
   signal sessionRequested(string sid)
+
+  readonly property bool light: Theme.mode === "light"
+  readonly property string bodyFont: rail ? rail.messageFontFamily : "Geist"
+  readonly property string labelFont: rail ? rail.labelFontFamily : Theme.fontFamily
+  function labelStyle(weight) { return rail ? rail.labelFontStyle(weight) : "" }
+  readonly property int fsBody: rail ? rail.fsBody : Theme.fontSize + 3
+  readonly property int fsName: rail ? rail.fsName : Theme.fontSize + 4
+  readonly property int fsMeta: rail ? rail.fsMeta : Theme.fontSize + 2
+  readonly property color sky: rail ? rail.skyAccent : Theme.sky
+  readonly property color lavender: rail ? rail.lavenderAccent : "#C4B5FD"
+  readonly property color ring: rail ? rail.cardRing : Qt.alpha(Theme.fg, 0.18)
+  readonly property color contentColor: light ? "#23272B" : "#FAFAFA"
+  readonly property color bodyColor: light ? "#343A3F" : "#EDEDED"
+  readonly property color metaColor: light ? "#747D84" : "#909090"
 
   function base(path) { var s = String(path || ""); return s.slice(s.lastIndexOf("/") + 1) }
   function clock(at) { var d = new Date(at); return ("0" + d.getHours()).slice(-2) + ":" + ("0" + d.getMinutes()).slice(-2) }
   function dayLabel(at) {
     var d = new Date(at), today = new Date()
-    if (d.toDateString() === today.toDateString()) return "TODAY"
-    if (d.toDateString() === new Date(today.getTime() - 86400000).toDateString()) return "YESTERDAY"
-    return d.toLocaleDateString(Qt.locale(), "dddd d MMMM").toUpperCase()
+    if (d.toDateString() === today.toDateString()) return "Today"
+    if (d.toDateString() === new Date(today.getTime() - 86400000).toDateString()) return "Yesterday"
+    return d.toLocaleDateString(Qt.locale(), "dddd d MMMM")
+  }
+  function busy(sid) {
+    if (!agentd) return false
+    agentd.gen; agentd.pendingGen; agentd.curToolGen
+    return agentd.isBusy(sid)
   }
 
-  readonly property var working: {
-    if (!agentd) return []
-    agentd.gen; agentd.pendingGen; agentd.curToolGen
-    return sessions.filter(s => !s.offline && agentd.isBusy(s.name)).map(s => s.name)
-  }
-  // Edits fold per session until that session's next prompt, summary, task or ask.
-  readonly property var rows: {
+  readonly property var working: sessions.filter(s => busy(s.name)).map(s => s.name)
+  // A turn opens at a prompt once the previous turn has a result, and closes at its summary.
+  readonly property var turns: {
     if (!agentd) return []
     agentd.activityGen
-    var src = agentd.activity.slice().sort((a, b) => b.at - a.at)
-    var out = [], day = "", open = {}
+    var src = agentd.activity.slice().sort((a, b) => a.at - b.at)
+    var list = [], open = {}
     for (var r of src) {
-      var label = dayLabel(r.at)
-      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label; open = {} }
-      if (r.kind === "edit") {
-        var fold = open[r.sid]
-        if (fold) {
-          if (fold.files.indexOf(base(r.path)) < 0) fold.files.push(base(r.path))
-          fold.add += r.add; fold.del += r.del
-          continue
-        }
-        fold = Object.assign({}, r, { files: [base(r.path)] })
-        open[r.sid] = fold
-        out.push(fold)
-        continue
+      var t = open[r.sid]
+      if (!t || (r.kind === "prompt" && t.summary) || (r.kind === "summary" && t.summary)) {
+        t = { key: "turn:" + r.key, sid: r.sid, end: r.at, prompts: [], task: "", taskDone: false,
+              summary: "", files: [], add: 0, del: 0, asks: [] }
+        open[r.sid] = t
+        list.push(t)
       }
-      delete open[r.sid]
-      out.push(r)
+      t.end = Math.max(t.end, r.at)
+      if (r.kind === "prompt") t.prompts.push(r)
+      else if (r.kind === "summary") t.summary = r.text
+      else if (r.kind === "task") { t.task = r.text; t.taskDone = r.action === "finish" }
+      else if (r.kind === "ask") t.asks.push(r.text)
+      else if (r.kind === "edit") {
+        if (t.files.indexOf(base(r.path)) < 0) t.files.push(base(r.path))
+        t.add += r.add || 0; t.del += r.del || 0
+      }
+    }
+    for (var sid in open) open[sid].latest = true
+    return list.sort((a, b) => b.end - a.end)
+  }
+  readonly property var rows: {
+    var out = [], day = "", prev = ""
+    for (var t of turns) {
+      var label = dayLabel(t.end)
+      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label, prompts: [], files: [], asks: [] }); day = label; prev = "" }
+      out.push(Object.assign({ kind: "turn", showSession: t.sid !== prev }, t))
+      prev = t.sid
     }
     return out
   }
@@ -64,48 +90,68 @@ Item {
   }
   function open() { if (currentSession) sessionRequested(currentSession) }
 
+  component Orb: ThinkingOrb {
+    required property string sid
+    readonly property var colors: root.rail ? root.rail.fleetActivityColors(sid) : []
+    running: false
+    activityColors: colors
+    glow: colors.length ? colors[0] : "#999999"
+    seedKey: sid
+    idleBlur: 1
+  }
+  component MetaLine: Row {
+    property string icon
+    property color iconColor: root.metaColor
+    property alias text: label.text
+    property color color: Theme.fg_secondary
+    spacing: 8
+    Icon { name: parent.icon; width: 14; height: 14; color: parent.iconColor; anchors.verticalCenter: parent.verticalCenter }
+    Text {
+      id: label
+      width: Math.min(implicitWidth, parent.width - 22)
+      elide: Text.ElideRight; textFormat: Text.PlainText
+      color: parent.color
+      font.family: root.bodyFont; font.pixelSize: root.fsMeta
+      anchors.verticalCenter: parent.verticalCenter
+    }
+  }
+
   ListView {
     id: list
-    anchors.fill: parent
+    width: Math.min(parent.width, 760)
+    height: parent.height
+    anchors.horizontalCenter: parent.horizontalCenter
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: root.rows
-    spacing: 2
     ScrollFeel { flick: list }
 
-    header: Column {
+    header: Flow {
       width: list.width
-      bottomPadding: root.working.length ? 18 : 0
-      spacing: 4
-      Text {
-        visible: root.working.length > 0
-        text: "NOW \u00b7 " + root.working.length
-        color: root.muted
-        font { family: Theme.fontFamily; pixelSize: 13; weight: 600; letterSpacing: 1 }
-        bottomPadding: 4
-      }
+      spacing: 8
+      bottomPadding: root.working.length ? 6 : 0
       Repeater {
         model: root.working
-        delegate: Row {
+        delegate: PillSurface {
+          id: pill
           required property string modelData
-          spacing: 12
-          Text {
-            width: 170; elide: Text.ElideRight
-            text: modelData; textFormat: Text.PlainText
-            color: Theme.fg
-            font { family: Theme.fontFamily; pixelSize: 15; weight: 600 }
-          }
-          Text {
-            width: list.width - 182; elide: Text.ElideRight
-            text: {
-              root.agentd.curToolGen
-              var edit = root.agentd.lastEditFor(modelData)
-              return root.activityLabelFor(modelData) + (edit ? " \u00b7 " + root.base(edit) : "")
-                + (root.taskFor(modelData) ? " \u00b7 " + root.taskFor(modelData) : "")
+          height: 30
+          width: nowRow.implicitWidth + 24
+          hovered: pillHover.hovered
+          HoverHandler { id: pillHover; cursorShape: Qt.PointingHandCursor }
+          TapHandler { onTapped: root.sessionRequested(pill.modelData) }
+          Row {
+            id: nowRow
+            anchors.centerIn: parent
+            spacing: 8
+            Orb { sid: pill.modelData; running: true; idleBlur: 0; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+              text: pill.modelData + "  " + root.activityLabelFor(pill.modelData)
+              textFormat: Text.PlainText
+              color: root.contentColor
+              font.family: root.labelFont; font.styleName: root.labelStyle(500); font.pixelSize: root.fsMeta; font.weight: 500
+              anchors.verticalCenter: parent.verticalCenter
             }
-            textFormat: Text.PlainText
-            color: Theme.electric
-            font { family: Theme.fontFamily; pixelSize: 15 }
           }
         }
       }
@@ -115,87 +161,175 @@ Item {
       id: row
       required property var modelData
       required property int index
-      readonly property bool day: modelData.kind === "day"
+      readonly property var turn: modelData
+      readonly property bool day: turn.kind === "day"
       readonly property bool current: index === root.cursor && root.focused
+      readonly property bool live: !day && turn.latest === true && !turn.summary && root.busy(turn.sid)
+      readonly property var prompt: day ? null : turn.prompts[0] || null
+      readonly property bool handoff: !!prompt && prompt.from !== "you"
       width: list.width
-      height: day ? 40 : Math.max(26, body.implicitHeight + 8)
+      height: day ? 56 : frame.height + (turn.showSession ? 44 : 10)
 
-      Text {
+      CapLabel {
         visible: row.day
-        anchors.bottom: parent.bottom; anchors.bottomMargin: 6
-        text: row.modelData.text || ""
-        color: root.muted
-        font { family: Theme.fontFamily; pixelSize: 13; weight: 600; letterSpacing: 1 }
+        anchors { bottom: parent.bottom; bottomMargin: 10; left: parent.left; leftMargin: 18 }
+        text: String(row.turn.text || "").toUpperCase()
       }
-      Rectangle {
-        visible: !row.day
-        anchors.fill: parent
-        radius: 6
-        color: row.current ? Theme.itemSelected : hover.hovered ? Theme.itemHover : "transparent"
-      }
+
       Row {
+        visible: row.turn.showSession === true
+        x: 18; y: 14
+        spacing: 10
+        Orb { sid: row.turn.sid || ""; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
+        Text {
+          text: row.turn.sid || ""; textFormat: Text.PlainText
+          color: root.contentColor
+          font.family: root.labelFont; font.styleName: root.labelStyle(600); font.pixelSize: root.fsName; font.weight: 600
+          anchors.verticalCenter: parent.verticalCenter
+        }
+      }
+
+      Rectangle {
+        id: frame
         visible: !row.day
-        x: 8; y: 4
-        spacing: 12
-        Text {
-          width: 44
-          text: root.clock(row.modelData.at)
-          color: root.muted
-          font { family: Theme.fontFamily; pixelSize: 14 }
+        y: row.turn.showSession ? 44 : 4
+        width: parent.width
+        height: col.implicitHeight + 24
+        radius: 18
+        color: hover.hovered && !row.current ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        border.width: row.current ? 1 : 0
+        border.color: root.ring
+
+        Rectangle {
+          x: 10 - width / 2; y: 12 + Math.round(root.fsBody * 0.7) - height / 2
+          width: 8; height: 8; radius: 4
+          color: Theme.cursor
+          visible: row.current
         }
         Text {
-          width: 160; elide: Text.ElideRight
-          text: row.modelData.sid || ""; textFormat: Text.PlainText
-          color: Theme.fg_secondary
-          font { family: Theme.fontFamily; pixelSize: 14; weight: 600 }
+          anchors { right: parent.right; rightMargin: 18; top: parent.top; topMargin: 14 }
+          text: root.clock(row.turn.end || 0)
+          color: root.metaColor
+          font.family: root.labelFont; font.pixelSize: root.fsMeta - 1
         }
-        Item {
-          id: body
-          width: row.width - 248
-          implicitHeight: row.modelData.kind === "edit" ? editLine.implicitHeight : line.implicitHeight
-          Text {
-            id: line
-            visible: row.modelData.kind !== "edit"
-            width: parent.width
-            wrapMode: Text.Wrap; maximumLineCount: row.modelData.kind === "summary" ? 4 : 2; elide: Text.ElideRight
-            textFormat: Text.PlainText
-            text: {
-              var r = row.modelData
-              if (r.kind === "summary") return "\u27e2 " + r.text
-              if (r.kind === "prompt") return "\u2192 " + (r.from === "you" ? "you" : "\u21c4 " + r.from) + ": " + r.text
-              if (r.kind === "task") return (r.action === "finish" ? "\u2713 finished " : "\u25b8 ") + r.text
-              if (r.kind === "ask") return "? " + r.text
-              return ""
+
+        Column {
+          id: col
+          x: 24; y: 12
+          width: parent.width - 48 - 44
+          spacing: 10
+
+          Rectangle {
+            visible: !!row.prompt
+            width: col.width
+            height: promptCol.implicitHeight + 24
+            radius: 14
+            color: row.handoff ? Qt.rgba(root.lavender.r, root.lavender.g, root.lavender.b, 0.08) : "transparent"
+            border.width: row.handoff ? 1 : 0
+            border.color: Qt.rgba(root.lavender.r, root.lavender.g, root.lavender.b, 0.22)
+            ContrastCard {
+              visible: !row.handoff
+              anchors.fill: parent
+              cardRadius: parent.radius
+              bevelWidth: root.light ? 1 : 2
+              faceTop: root.light ? "#FDFDFD" : (root.rail ? root.rail.userCardTop : Theme.surface0)
+              faceUpper: faceTop
+              faceMid: root.light ? "#F8F8F9" : (root.rail ? root.rail.userCardBottom : Theme.surface0)
+              faceBottom: faceMid
+              rimBottom: root.light ? "#F3F3F4" : "#222222"
+              outlineColor: root.light ? Qt.alpha(Theme.fg, 0.11) : "#282828"
             }
-            color: row.modelData.kind === "summary" ? Theme.fg : row.modelData.kind === "ask" ? Theme.orange
-              : row.modelData.kind === "task" ? Theme.sky : root.muted
-            font { family: Theme.fontFamily; pixelSize: 15; weight: row.modelData.kind === "task" ? 600 : 400 }
+            Column {
+              id: promptCol
+              x: 16; y: 12
+              width: parent.width - 32
+              spacing: 6
+              Row {
+                spacing: 8
+                Icon {
+                  name: row.handoff ? "sparkle-3" : "paper-plane-2"
+                  variantSize: row.handoff ? 0 : 12
+                  width: 14; height: 14; anchors.verticalCenter: parent.verticalCenter
+                  color: row.handoff ? root.lavender : Theme.orange
+                }
+                Text {
+                  text: !row.prompt ? "" : row.handoff ? "From " + row.prompt.from : "You"
+                  color: root.contentColor
+                  font.family: root.labelFont; font.styleName: root.labelStyle(600); font.pixelSize: root.fsMeta; font.weight: 600
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                  visible: row.turn.prompts.length > 1
+                  text: "+" + (row.turn.prompts.length - 1) + " more"
+                  color: root.metaColor
+                  font.family: root.labelFont; font.pixelSize: root.fsMeta - 1
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+              }
+              Text {
+                width: parent.width
+                text: row.prompt ? row.prompt.text : ""
+                textFormat: Text.PlainText
+                color: root.bodyColor
+                font.family: root.bodyFont; font.pixelSize: root.fsBody
+                lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
+                wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+              }
+            }
+          }
+
+          MetaLine {
+            visible: !!row.turn.task
+            width: col.width
+            icon: row.turn.taskDone ? "check" : "bookmark"
+            iconColor: row.turn.taskDone ? Theme.green : root.metaColor
+            text: row.turn.task || ""
+          }
+          Text {
+            visible: !!row.turn.summary || row.live
+            width: col.width
+            text: row.turn.summary ? "\u27e2 " + row.turn.summary : "Working \u00b7 " + root.activityLabelFor(row.turn.sid || "")
+            textFormat: Text.PlainText
+            color: row.turn.summary ? root.sky : root.metaColor
+            font.family: root.bodyFont; font.pixelSize: root.fsBody
+            lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.5
+            wrapMode: Text.Wrap; maximumLineCount: 4; elide: Text.ElideRight
+          }
+          MetaLine {
+            visible: row.turn.asks.length > 0
+            width: col.width
+            icon: "msg-bubble-user"
+            iconColor: Theme.orange
+            text: row.turn.asks.length ? row.turn.asks[row.turn.asks.length - 1] : ""
           }
           Row {
-            id: editLine
-            visible: row.modelData.kind === "edit"
+            visible: row.turn.files.length > 0
+            width: col.width
             spacing: 8
+            Icon { name: "square-plus"; width: 14; height: 14; color: root.metaColor; anchors.verticalCenter: parent.verticalCenter }
             Text {
-              width: Math.min(implicitWidth, body.width - 110); elide: Text.ElideRight
-              text: "\u270e " + (row.modelData.files || []).join(", "); textFormat: Text.PlainText
+              width: Math.min(implicitWidth, col.width - 120)
+              elide: Text.ElideRight; textFormat: Text.PlainText
+              text: row.turn.files.join(", ")
               color: Theme.fg_secondary
-              font { family: Theme.fontFamily; pixelSize: 15 }
+              font.family: root.bodyFont; font.pixelSize: root.fsMeta
+              anchors.verticalCenter: parent.verticalCenter
             }
-            Text { text: "+" + (row.modelData.add || 0); color: Theme.green; font { family: Theme.fontFamily; pixelSize: 15 } }
-            Text { text: "\u2212" + (row.modelData.del || 0); color: Theme.red; font { family: Theme.fontFamily; pixelSize: 15 } }
+            Text { text: "+" + row.turn.add; color: Theme.green; font.family: root.bodyFont; font.pixelSize: root.fsMeta; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "-" + row.turn.del; color: Theme.red; font.family: root.bodyFont; font.pixelSize: root.fsMeta; anchors.verticalCenter: parent.verticalCenter }
           }
         }
       }
       HoverHandler { id: hover; enabled: !row.day; cursorShape: Qt.PointingHandCursor }
-      TapHandler { enabled: !row.day; onTapped: { root.cursorKey = row.modelData.key; root.open() } }
+      TapHandler { enabled: !row.day; onTapped: { root.cursorKey = row.turn.key; root.open() } }
     }
 
     Text {
       visible: !root.rows.length && !root.working.length
       anchors.centerIn: parent
       text: "No activity yet"
-      color: root.muted
-      font { family: Theme.fontFamily; pixelSize: 16 }
+      color: root.metaColor
+      font.family: root.bodyFont; font.pixelSize: root.fsBody
     }
   }
 }

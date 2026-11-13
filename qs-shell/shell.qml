@@ -546,6 +546,7 @@ ShellRoot {
                 }
                 sessions: win.agentd.sessions
                 agentd: win.agentd
+                rail: rail
                 focusedSession: rail.selectedRaw
                 tickets: ticketCache.adapter.tickets.concat(ticketCache.adapter.session_tickets)
                 ticketStates: ticketStatuses.states
