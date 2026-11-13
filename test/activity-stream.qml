@@ -20,15 +20,18 @@ ShellRoot {
   function hasText(part) { return !!find(page, item => item.visible && String(item.text || "").indexOf(part) >= 0) }
   function visibleText(text) { return !!find(page, item => item.visible && String(item.text || "") === text) }
   AgentdState { id: state; function send(message) { test.sent.push(message); return true } }
+  AgentdState { id: railState; function send(message) { return true } }
   FloatingWindow {
     visible: true; implicitWidth: 1100; implicitHeight: 900
     TestEvent { id: input }
+    Rail { id: rail; visible: false; width: 400; height: 400; agentd: railState; scopeMode: "personal"; instanceName: "activity-stream-test" }
     ActivityStream {
       id: page
       anchors.fill: parent
       visible: false
       agentd: state
       sessions: state.sessions
+      rail: rail
       onSessionRequested: sid => test.opened.push(sid)
       onFileRequested: (sid, path, line) => test.opened.push(sid + ":" + path + ":" + line)
     }
@@ -69,7 +72,7 @@ ShellRoot {
             { type: "text", text: "Looking around.\n\nThe rail needs a hook so the page can open files." },
             { type: "toolCall", id: "e1", name: "edit", arguments: { path: "/r/Rail.qml", edits: [] } },
             { type: "toolCall", id: "e2", name: "write", arguments: { path: "/r/New.qml", content: "a\nb" } }] } },
-          { type: "message", id: "r1", message: { role: "toolResult", toolCallId: "e1", timestamp: test.t0 + 3000, details: { diff: "  9 ctx\n+10 x\n+11 y\n-12 z", firstChangedLine: 10 } } },
+          { type: "message", id: "r1", message: { role: "toolResult", toolCallId: "e1", timestamp: test.t0 + 3000, details: { diff: "  9 ctx\n+10 x = 1 // set\n+11 y\n-12 z", firstChangedLine: 10 } } },
           { type: "message", id: "r2", message: { role: "toolResult", toolCallId: "e2", timestamp: test.t0 + 4000 } },
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "Done.\n\u27e2 Activity view renders history." }] } }
         ] } })
@@ -94,6 +97,8 @@ ShellRoot {
         if (!test.visibleText("Wrote the whole file \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
         if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-change counts wrong")
         if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("diff preview should show the change with its context")
+        if (!test.hasText('</font>x&nbsp;<font color="' + Theme.syntaxOperator + '">=</font>&nbsp;<font color="' + Theme.syntaxNumber + '">1</font>&nbsp;<i><font color="' + Theme.syntaxComment + '">//&nbsp;set</font></i>'))
+          test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
         if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
         if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
         state.sendPrompt("beta", "keep going")

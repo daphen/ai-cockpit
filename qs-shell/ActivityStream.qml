@@ -412,7 +412,7 @@ FocusScope {
                       : '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + parts[2]).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
                         + (root.rail ? root.rail.highlightCode(parts[3], language) : root.esc(parts[3]))
                           .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
-                    color: fileHeader || modelData === "\u22ef" ? root.metaColor : sign === " " ? Theme.fg_secondary : Theme.fg
+                    color: fileHeader || modelData === "\u22ef" ? root.metaColor : Theme.fg
                     font.family: fileHeader ? root.bodyFont : Theme.fontFamily
                     font.pixelSize: root.fsMeta - 2
                     wrapMode: Text.NoWrap; elide: Text.ElideRight; maximumLineCount: 1

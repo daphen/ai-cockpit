@@ -850,18 +850,22 @@ Item {
   function _styledText(text) {
     return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\t/g, "   ").replace(/ /g, "&nbsp;")
   }
-  // One line of code as StyledText: comments, strings, numbers and keywords. Deliberately lexical, not a parser.
+  // One line of code as StyledText in the Neovim theme's Comment/String/Number/Boolean/Keyword/Function/Operator colors. Deliberately lexical, not a parser.
   function highlightCode(text, language) {
     text = String(text || "")
     if (!language) return _styledText(text)
     var comment = language === "lua" ? "--.*" : ["nix", "sh", "py"].indexOf(language) >= 0 ? "#.*" : "//.*"
-    var token = new RegExp("(" + comment + ")|(\"(?:[^\"\\\\]|\\\\.)*\"?|'(?:[^'\\\\]|\\\\.)*'?|`[^`]*`?)|\\b(\\d[\\w.]*)|\\b(true|false|null|nil|None|True|False|undefined|nullptr)\\b|\\b(" + codeKeywords[language].split(" ").join("|") + ")\\b", "g")
+    var token = new RegExp("(" + comment + ")|(\"(?:[^\"\\\\]|\\\\.)*\"?|'(?:[^'\\\\]|\\\\.)*'?|`[^`]*`?)|\\b(\\d[\\w.]*)|\\b(true|false|null|nil|None|True|False|undefined|nullptr)\\b"
+      + "|\\b(function|def|func|fn)(\\s+)([A-Za-z_$][\\w$]*)|\\b(" + codeKeywords[language].split(" ").join("|") + ")\\b"
+      + (language === "sh" ? "" : "|([=+\\-*/%<>!&|^~]+)"), "g")
     var out = "", last = 0, match
     while ((match = token.exec(text)) !== null) {
       if (!match[0].length) { token.lastIndex++; continue }
-      var color = match[1] ? Theme.syntaxComment : match[2] ? Theme.syntaxString : match[3] ? Theme.syntaxNumber
-                : match[4] ? Theme.syntaxBoolean : Theme.syntaxKeyword
-      var piece = "<font color=\"" + color + "\">" + _styledText(match[0]) + "</font>"
+      var piece
+      if (match[5]) piece = "<font color=\"" + Theme.syntaxKeyword + "\">" + match[5] + "</font>" + _styledText(match[6])
+        + "<font color=\"" + Theme.syntaxFunction + "\">" + _styledText(match[7]) + "</font>"
+      else piece = "<font color=\"" + (match[1] ? Theme.syntaxComment : match[2] ? Theme.syntaxString : match[3] ? Theme.syntaxNumber
+        : match[4] ? Theme.syntaxBoolean : match[9] ? Theme.syntaxOperator : Theme.syntaxKeyword) + "\">" + _styledText(match[0]) + "</font>"
       out += _styledText(text.slice(last, match.index)) + (match[1] ? "<i>" + piece + "</i>" : piece)
       last = token.lastIndex
     }
