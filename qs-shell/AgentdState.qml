@@ -762,18 +762,16 @@ Item {
     return { key: "task:" + sid + ":" + action + ":" + title, sid: sid, at: at, kind: "task", action: action, text: title }
   }
   // Keeps only the changed lines of a numbered diff ("+ 12 text"), capped, so rows stay small.
+  // Keeps the numbered diff with its context lines ("+ 12 text"), capped, so rows stay small.
   function _editActivity(sid, id, at, path, details, content, why) {
     var diff = details && details.diff ? String(details.diff) : "", counts = diff ? _countDiff(diff) : [0, 0]
-    var changed = diff.split("\n").filter(l => /^[+-]\s*\d+ /.test(l))
-    if (!diff && content) {
-      var body = String(content).split("\n")
-      counts = [body.length, 0]
-      changed = body.slice(0, 12).map((l, i) => "+" + (i + 1) + " " + l)
-    }
-    var first = changed.length ? Number(changed[0].match(/^[+-]\s*(\d+)/)[1]) : 1
+    var lines = diff.split("\n").filter(l => l.length)
+    if (!diff && content) counts = [String(content).split("\n").length, 0]
+    var changed = lines.find(l => /^[+-]\s*\d+ /.test(l))
+    var first = changed ? Number(changed.match(/^[+-]\s*(\d+)/)[1]) : 1
     return { key: "edit:" + id, sid: sid, at: at, kind: "edit", path: String(path), add: counts[0], del: counts[1],
-             line: Number(details && details.firstChangedLine) || first, why: String(why || ""),
-             diff: changed.slice(0, 12).map(l => l.length > 200 ? l.slice(0, 200) : l) }
+             line: Number(details && details.firstChangedLine) || first, why: String(why || ""), lines: lines.length, whole: !diff && !!content,
+             diff: lines.slice(0, 40).map(l => l.length > 200 ? l.slice(0, 200) : l) }
   }
   function _noteActivity(rows) {
     var list = activity, added = false

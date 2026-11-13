@@ -47,6 +47,9 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta") test.fail("history was requested for " + asked)
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
+          { type: "message", id: "a0", message: { role: "assistant", timestamp: test.t0 - 5 * 3600000, content: [
+            { type: "toolCall", id: "e0", name: "edit", arguments: { path: "/r/Old.qml", edits: [] } }] } },
+          { type: "message", id: "r0", message: { role: "toolResult", toolCallId: "e0", timestamp: test.t0 - 5 * 3600000, details: { diff: "+ 1 old" } } },
           { type: "message", id: "u1", timestamp: new Date(test.t0).toISOString(), message: { role: "user", timestamp: test.t0,
             content: [{ type: "text", text: "\u21c4 nixos (user-approved)\nBuild the activity view" }] } },
           { type: "custom", id: "t1", customType: "cockpit-session-task", timestamp: new Date(test.t0 + 1000).toISOString(), data: { action: "switch", title: "Activity view" } },
@@ -63,7 +66,7 @@ ShellRoot {
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
       } else if (stage === 3) {
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
+        if (kinds !== "edit,edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
         if (!test.visibleText("\u27e2 Activity view renders history.")) test.fail("task result not shown")
@@ -71,8 +74,9 @@ ShellRoot {
         if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown")
         if (!test.visibleText("Activity view")) test.fail("task title not shown")
         if (!test.hasText("Rail.qml") || !test.hasText("New.qml")) test.fail("changed files not shown")
+        if (!test.visibleText("Wrote the whole file \u00b7 2 lines \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
         if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-file counts wrong")
-        if (!test.hasText("&nbsp;&nbsp;</font>x") || test.hasText("ctx")) test.fail("diff preview should show only the changed lines")
+        if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("diff preview should show the change with its context")
         state.sendPrompt("beta", "keep going")
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
@@ -83,6 +87,11 @@ ShellRoot {
         if (!test.visibleText("\u27e2 Beta shipped.")) test.fail("live result not shown")
         if (!test.hasText("Live.qml")) test.fail("live edit not shown")
         if (!test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("live edit lost its reason")
+        state.sendPrompt("alpha", "more")
+        var live = []
+        test.find(page, item => { if (item.visible && item.live === true) live.push(item); return false })
+        live = [...new Set(live)].filter(item => typeof item.text === "string").map(item => item.parent.parent.key)
+        if (live.sort().join(",") !== "head:edit:e1,head:edit:live1") test.fail("busy status should show once per busy session, on its newest group; got " + live.join(","))
         if (!test.find(page, item => item.visible && /^beta  /.test(String(item.text || "")))) test.fail("working session missing from the now strip")
         page.forceActiveFocus()
         test.key(Qt.Key_Return)
@@ -95,7 +104,7 @@ ShellRoot {
         if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("moving up then opening went to " + test.opened)
         test.key(Qt.Key_S)
         if (test.opened[2] !== "alpha") test.fail("s did not open the change's session: " + test.opened)
-        console.log("PASS: activity page backfills transcripts once, shows only code changes grouped by session task with the prompt behind it, each change with the reason the agent gave, per-file counts, changed-line previews and the task result, follows live edits, and Enter opens the changed file at its line in that session")
+        console.log("PASS: activity page backfills transcripts once, shows only code changes grouped by session task with the prompt behind it, each change with the reason the agent gave, per-file counts, changed-line previews and the task result, follows live edits, marks only each busy session's newest group as working, and Enter opens the changed file at its line in that session")
         Qt.quit()
       }
       stage++

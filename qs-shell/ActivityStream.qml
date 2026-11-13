@@ -95,8 +95,13 @@ FocusScope {
       var f = g.byPath[r.path]
       if (!f) { f = { path: r.path, add: 0, del: 0, edits: 0 }; g.byPath[r.path] = f; g.files.push(f) }
       f.add += r.add || 0; f.del += r.del || 0; f.edits++
-      f.at = r.at; f.line = r.line || 1; f.diff = r.diff || []; if (r.why) f.why = r.why
+      f.at = r.at; f.line = r.line || 1; if (r.why) f.why = r.why; if (r.whole) f.whole = true
+      f.diff = (f.diff && f.diff.length ? f.diff.concat(["\u22ef"]) : []).concat(r.diff || []).slice(0, 80)
+      f.lines = (f.lines || 0) + (r.lines || (r.diff || []).length)
     }
+    var newest = {}
+    for (var x of all) if (!newest[x.sid] || x.end >= newest[x.sid].end) newest[x.sid] = x
+    for (var y of all) y.latest = newest[y.sid] === y
     return all.sort((a, b) => a.end - b.end).slice(-150)
   }
   readonly property var rows: {
@@ -104,11 +109,11 @@ FocusScope {
     for (var g of groups) {
       var label = dayLabel(g.end)
       if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
-      out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, end: g.end, count: g.files.length })
+      out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, latest: g.latest, end: g.end, count: g.files.length })
+      if (g.summary) out.push({ kind: "result", key: "result:" + g.key, sid: g.sid, text: g.summary })
       for (var f of g.files)
         out.push({ kind: "file", key: "file:" + g.key + ":" + f.path, sid: g.sid, path: f.path, add: f.add, del: f.del,
-                   edits: f.edits, at: f.at, line: f.line, diff: f.diff, why: f.why || "" })
-      if (g.summary) out.push({ kind: "result", key: "result:" + g.key, sid: g.sid, text: g.summary })
+                   edits: f.edits, at: f.at, line: f.line, diff: f.whole ? [] : f.diff, lines: f.lines, whole: !!f.whole, why: f.why || "" })
     }
     return out
   }
@@ -214,7 +219,7 @@ FocusScope {
       readonly property bool current: index === root.cursor && root.focused
       readonly property real dotY: kind === "file" ? fileHead.y + fileHead.height / 2 : height / 2
       width: list.width
-      height: kind === "day" ? 52 : kind === "head" ? headCol.implicitHeight + 30 : kind === "result" ? resultText.implicitHeight + 18
+      height: kind === "day" ? 52 : kind === "head" ? headCol.implicitHeight + 30 : kind === "result" ? resultText.implicitHeight + 12
         : fileBox.height + 6
 
       CapLabel {
@@ -226,7 +231,7 @@ FocusScope {
       Item {
         visible: row.kind === "head"
         anchors.fill: parent
-        Orb { id: headOrb; sid: row.entry.sid || ""; running: root.busy(row.entry.sid); x: 8; y: 24; width: 20; height: 20 }
+        Orb { id: headOrb; sid: row.entry.sid || ""; running: row.entry.latest === true && root.busy(row.entry.sid); x: 8; y: 24; width: 20; height: 20 }
         Column {
           id: headCol
           anchors { left: headOrb.right; leftMargin: 12; right: headTime.left; rightMargin: 16 }
@@ -265,8 +270,9 @@ FocusScope {
         Text {
           id: headTime
           anchors { right: parent.right; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
-          text: root.busy(row.entry.sid) ? root.activityLabelFor(row.entry.sid || "") : root.clock(row.entry.end || 0)
-          color: root.busy(row.entry.sid) ? Theme.orange : root.metaColor
+          readonly property bool live: row.entry.latest === true && root.busy(row.entry.sid)
+          text: live ? root.activityLabelFor(row.entry.sid || "") : root.clock(row.entry.end || 0)
+          color: live ? Theme.orange : root.metaColor
           font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
         }
       }
@@ -344,6 +350,13 @@ FocusScope {
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
             wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : 2; elide: Text.ElideRight
           }
+          Text {
+            visible: row.entry.whole === true
+            leftPadding: 24
+            text: (row.entry.edits > 1 ? "Rewrote the whole file" : "Wrote the whole file") + " \u00b7 " + (row.entry.add || 0) + " lines \u00b7 Enter opens it"
+            color: root.metaColor
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+          }
           Rectangle {
             id: diffPanel
             readonly property string language: root.rail ? root.rail.codeLanguage(row.entry.path) : ""
@@ -357,15 +370,15 @@ FocusScope {
               id: diffCol
               anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 6 }
               Repeater {
-                model: (row.entry.diff || []).slice(0, row.current ? 12 : 3)
+                model: (row.entry.diff || []).slice(0, row.current ? 40 : 14)
                 delegate: Rectangle {
                   required property string modelData
-                  readonly property var parts: modelData.match(/^([+-])\s*(\d+) ?(.*)$/) || ["", " ", "", modelData]
-                  readonly property color tone: parts[1] === "+" ? Theme.green : Theme.red
+                  readonly property var parts: modelData.match(/^([+\- ])\s*(\d*)\s?(.*)$/) || ["", " ", "", modelData]
+                  readonly property string sign: parts[1]
                   width: diffCol.width
                   height: diffLine.implicitHeight + 3
-                  color: parts[1] === "+" ? Theme.diffAddedBg : Theme.diffRemovedBg
-                  Rectangle { width: 2; height: parent.height; color: parent.tone }
+                  color: sign === "+" ? Theme.diffAddedBg : sign === "-" ? Theme.diffRemovedBg : "transparent"
+                  Rectangle { width: 2; height: parent.height; visible: parent.sign !== " "; color: parent.sign === "+" ? Theme.green : Theme.red }
                   Text {
                     id: diffLine
                     x: 10; width: parent.width - 16
@@ -373,11 +386,19 @@ FocusScope {
                     textFormat: Text.StyledText
                     text: '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + parts[2]).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
                       + (root.rail ? root.rail.highlightCode(parts[3], diffPanel.language) : root.esc(parts[3]))
-                    color: Theme.fg
+                        .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
+                    color: sign === " " ? Theme.fg_secondary : Theme.fg
                     font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
                     wrapMode: Text.NoWrap; elide: Text.ElideRight; maximumLineCount: 1
                   }
                 }
+              }
+              Text {
+                readonly property int hidden: (row.entry.lines || 0) + (row.entry.edits || 1) - 1 - Math.min((row.entry.diff || []).length, row.current ? 40 : 14)
+                visible: hidden > 0
+                x: 10; topPadding: 4
+                text: "\u2026 " + hidden + " more lines \u00b7 Enter opens the file"
+                color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }
           }
@@ -387,14 +408,14 @@ FocusScope {
       Text {
         id: resultText
         visible: row.kind === "result"
-        x: 40; y: 4
+        x: 40; y: 0
         width: parent.width - 52
         text: "\u27e2 " + (row.entry.text || "")
         textFormat: Text.PlainText
         color: Theme.fg_secondary
         font.family: root.bodyFont; font.pixelSize: root.fsMeta
         lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-        wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+        wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
       }
     }
 
