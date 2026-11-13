@@ -45,6 +45,14 @@ Item {
     if (reportedTab === workspaceTab) { _tabAwaiting = false; tabConfirm.stop() }
     else if (!_tabAwaiting && workspaceTab !== "studio" && workspaceTab !== "activity") workspaceTab = reportedTab
   }
+  // Activity and Studio are not editor views, so after a hot reload the editor's report would replace them.
+  PersistentProperties {
+    id: keptTab
+    reloadableId: "rail-workspace-tab"
+    property string tab: ""
+    onReloaded: if (tab === "activity" || tab === "studio") rail.workspaceTab = tab
+  }
+  onWorkspaceTabChanged: keptTab.tab = workspaceTab
   Timer { id: tabConfirm; interval: 3000; onTriggered: { rail._tabAwaiting = false; rail.workspaceTab = rail.reportedTab } }
   function _requestTab(view) {
     var tab = view === "diff" ? "code" : view
