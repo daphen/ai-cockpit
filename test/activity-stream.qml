@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import Quickshell
+import Quickshell.Io
 import QsLib
 import "."
 
@@ -33,9 +34,18 @@ ShellRoot {
     }
   }
   function key(k, mods) { input.keyClick(k, mods || Qt.NoModifier, 0) }
-  readonly property double t0: Date.parse("2026-11-12T09:00:00Z")
+  readonly property double t0: Math.floor(Date.now() / 1000) * 1000 - 2 * 3600000
+  readonly property string repo: Quickshell.env("XDG_RUNTIME_DIR") + "/repo"
+  Process {
+    running: true
+    command: ["sh", "-c", 'mkdir -p "$1" && cd "$1" && git init -q && git config user.email t@t && git config user.name t'
+      + ' && printf "a\\nb\\nc\\n" > f.txt && git add . && GIT_AUTHOR_DATE=@$2 GIT_COMMITTER_DATE=@$2 git commit -qm init'
+      + ' && printf "a\\nB\\nc\\n" > f.txt && GIT_AUTHOR_DATE=@$3 GIT_COMMITTER_DATE=@$3 git commit -qam "Fix via shell"',
+      "sh", test.repo, String(test.t0 / 1000 - 3600), String(test.t0 / 1000 + 10)]
+  }
   Timer {
     property int stage: 0
+    property int waits: 0
     interval: 400; repeat: true; running: true
     onTriggered: {
       if (stage === 0) {
@@ -46,7 +56,7 @@ ShellRoot {
       } else if (stage === 1) {
         test.event({ type: "roster", sessions: [{ id: "alpha", name: "alpha", cwd: "/r", status: "idle" },
                                                { id: "beta", name: "beta", cwd: "/tmp/b", status: "streaming" },
-                                               { id: "gamma", name: "gamma", cwd: "/tmp/g", status: "idle" }] })
+                                               { id: "gamma", name: "gamma", cwd: test.repo, status: "idle" }] })
       } else if (stage === 2) {
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a0", message: { role: "assistant", timestamp: test.t0 - 5 * 3600000, content: [
@@ -67,20 +77,25 @@ ShellRoot {
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
       } else if (stage === 3) {
+        if (!test.visibleText("Committed: Fix via shell") && waits++ < 20) return
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
         if (kinds !== "edit,edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
-        if (!test.visibleText("\u27e2 Activity view renders history.")) test.fail("task result not shown")
-        if (!test.visibleText("nixos: Build the activity view")) test.fail("the prompt behind the task is not shown with its sender")
+        if (test.hasText("Activity view renders history.")) test.fail("outcomes are not changes and should not be listed")
+        if (test.find(page, item => item.visible && String(item.text || "") === "Activity view") === null) test.fail("the task behind the changes is not shown")
+        var asks = []
+        test.find(page, item => { if (item.visible && item.text === "Activity view") asks.push(item); return false })
+        if (new Set(asks).size !== 1) test.fail("the ask should appear once above consecutive changes, got " + new Set(asks).size)
         if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown")
-        if (!test.visibleText("Activity view")) test.fail("task title not shown")
         if (!test.hasText("Rail.qml") || !test.hasText("New.qml")) test.fail("changed files not shown")
-        if (!test.visibleText("Wrote the whole file \u00b7 2 lines \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
-        if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-file counts wrong")
+        if (!test.visibleText("Wrote the whole file \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
+        if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-change counts wrong")
         if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("diff preview should show the change with its context")
+        if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
+        if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
         state.sendPrompt("beta", "keep going")
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
@@ -88,15 +103,9 @@ ShellRoot {
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped." }] } })
       } else if (stage === 4) {
-        if (!test.visibleText("\u27e2 Beta shipped.")) test.fail("live result not shown")
         if (!test.hasText("Live.qml")) test.fail("live edit not shown")
         if (!test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("live edit lost its reason")
-        state.sendPrompt("alpha", "more")
-        var live = []
-        test.find(page, item => { if (item.visible && item.live === true) live.push(item); return false })
-        live = [...new Set(live)].filter(item => typeof item.text === "string").map(item => item.parent.parent.key)
-        if (live.sort().join(",") !== "head:edit:e1,head:edit:live1") test.fail("busy status should show once per busy session, on its newest group; got " + live.join(","))
-        if (!test.find(page, item => item.visible && /^beta  /.test(String(item.text || "")))) test.fail("working session missing from the now strip")
+        if (test.hasText("streaming") || test.hasText("thinking") || test.hasText("working")) test.fail("live status does not belong on the activity page")
         page.forceActiveFocus()
         test.key(Qt.Key_Return)
         if (String(test.opened) !== "beta:/r/Live.qml:1") test.fail("Enter on the newest change opened " + test.opened)
@@ -105,10 +114,14 @@ ShellRoot {
         test.key(Qt.Key_K); test.key(Qt.Key_K)
         if (!page.restPoint || page.restPoint.y >= before.y) test.fail("cursor dot did not move up with k")
         test.key(Qt.Key_Return)
-        if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("moving up then opening went to " + test.opened)
+        if (test.opened[1] !== "alpha:/r/New.qml:1") test.fail("moving up past the commit then opening went to " + test.opened)
+        test.key(Qt.Key_K); test.key(Qt.Key_Return)
+        if (test.opened[2] !== "alpha:/r/Rail.qml:10") test.fail("opening an edit went to " + test.opened)
+        test.key(Qt.Key_J); test.key(Qt.Key_J); test.key(Qt.Key_Return)
+        if (test.opened[3] !== "gamma:" + test.repo + "/f.txt:2") test.fail("opening a commit went to " + test.opened)
         test.key(Qt.Key_S)
-        if (test.opened[2] !== "alpha") test.fail("s did not open the change's session: " + test.opened)
-        console.log("PASS: activity page backfills transcripts once, including sessions that appear while the page is open, shows only code changes grouped by session task with the prompt behind it, each change with the reason the agent gave, per-file counts, changed-line previews and the task result, follows live edits, marks only each busy session's newest group as working, and Enter opens the changed file at its line in that session")
+        if (test.opened[4] !== "gamma") test.fail("s did not open the change's session: " + test.opened)
+        console.log("PASS: activity is one timeline of code changes: tool edits with their reason and diff, commits made outside the edit tool, the ask shown once per run of changes, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
       }
       stage++

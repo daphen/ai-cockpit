@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell.Io
 import QsLib
 
 FocusScope {
@@ -7,7 +8,6 @@ FocusScope {
   property var agentd: null
   property var rail: null
   property var sessions: []
-  property var activityLabelFor: sid => "idle"
   property string cursorKey: ""
   property bool caretHeld: false
   readonly property bool focused: activeFocus
@@ -17,12 +17,12 @@ FocusScope {
 
   function cursorPoint() {
     var item = cursor >= 0 ? list.itemAtIndex(cursor) : null
-    return item ? item.mapToItem(root, 28, item.dotY) : null
+    return item ? item.mapToItem(root, 4, item.dotY) : null
   }
   readonly property var restPoint: { list.contentY; list.contentHeight; cursor; width; return activeFocus ? cursorPoint() : null }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
-  onVisibleChanged: if (visible) reveal()
-  onSessionsChanged: if (visible && agentd) agentd.loadActivityHistory()
+  onVisibleChanged: if (visible) { reveal(); refreshGit() }
+  onSessionsChanged: if (visible && agentd) { agentd.loadActivityHistory(); gitAgain.restart() }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
   Keys.onPressed: event => {
@@ -55,11 +55,6 @@ FocusScope {
     if (d.toDateString() === new Date(today.getTime() - 86400000).toDateString()) return "Yesterday"
     return d.toLocaleDateString(Qt.locale(), "dddd d MMMM")
   }
-  function busy(sid) {
-    if (!agentd) return false
-    agentd.gen; agentd.pendingGen; agentd.curToolGen
-    return agentd.isBusy(sid)
-  }
   function esc(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
   function relPath(sid, path) {
     var cwd = String((sessions.find(s => s.name === sid) || {}).cwd || "")
@@ -68,56 +63,122 @@ FocusScope {
     return p.replace(/^\/home\/[^/]+/, "~")
   }
 
-  readonly property var working: sessions.filter(s => busy(s.name)).map(s => s.name)
-  // Only work that changed code is shown: one group per session task, one row per file.
-  readonly property var groups: {
+
+  // Commits fill in what the edit tool never saw (changes made through shell commands).
+  property var repos: ({})
+  property var _gitQueue: []
+  function refreshGit() {
+    if (gitRun.running) { gitAgain.restart(); return }
+    var seen = {}
+    _gitQueue = sessions.map(s => String(s.cwd || "")).filter(c => c && !seen[c] && (seen[c] = true))
+    gitNext()
+  }
+  function gitNext() {
+    if (!_gitQueue.length) return
+    gitRun.cwd = _gitQueue.shift()
+    gitRun.command = ["sh", "-c", 'top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) || exit 0; printf "%s\\n" "$top"; '
+      + 'git -C "$top" log --since=@"$2" --no-merges -p -U1 --no-color --no-ext-diff --format="%x1e%H%x1f%ct%x1f%s" | head -c 4000000',
+      "sh", gitRun.cwd, String(Math.floor(Date.now() / 1000) - 3 * 86400)]
+    gitRun.running = true
+  }
+  function parseLog(text) {
+    var chunks = String(text).split("\x1e"), top = chunks[0].trim(), commits = []
+    for (var c = 1; c < chunks.length; c++) {
+      var body = chunks[c].split("\n"), head = body[0].split("\x1f"), files = [], f = null, oldLn = 0, newLn = 0, hunk = false
+      for (var i = 1; i < body.length; i++) {
+        var l = body[i], m
+        if ((m = l.match(/^diff --git a\/.* b\/(.*)$/))) { f = { path: top + "/" + m[1], add: 0, del: 0, line: 0, diff: [] }; files.push(f); hunk = false }
+        else if (!f) continue
+        else if ((m = l.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/))) { oldLn = +m[1]; newLn = +m[2]; hunk = true; if (f.diff.length) f.diff.push("\u22ef") }
+        else if (!hunk) continue
+        else if (l[0] === "+") { f.add++; if (!f.line) f.line = newLn; if (f.diff.length < 60) f.diff.push("+" + newLn + " " + l.slice(1, 200)); newLn++ }
+        else if (l[0] === "-") { f.del++; if (!f.line) f.line = newLn; if (f.diff.length < 60) f.diff.push("-" + oldLn + " " + l.slice(1, 200)); oldLn++ }
+        else if (l[0] === " ") { if (f.diff.length < 60) f.diff.push(" " + newLn + " " + l.slice(1, 200)); oldLn++; newLn++ }
+      }
+      commits.push({ hash: head[0], at: Number(head[1]) * 1000, subject: head[2] || "", files: files.slice(0, 40) })
+    }
+    return { top: top, commits: commits }
+  }
+  Process {
+    id: gitRun
+    property string cwd
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var out = String(this.text || "")
+        if (out.trim()) { var r = root.parseLog(out), next = Object.assign({}, root.repos); next[gitRun.cwd] = r; root.repos = next }
+        root.gitNext()
+      }
+    }
+  }
+  Timer { id: gitAgain; interval: 3000; onTriggered: root.refreshGit() }
+  Connections { target: root.agentd; function onActivityGenChanged() { if (root.visible) gitAgain.restart() } }
+
+  // One flat timeline of changes; the session's ask is repeated only when it changes.
+  readonly property var changes: {
     if (!agentd) return []
     agentd.activityGen
     var src = agentd.activity.slice().sort((a, b) => a.at - b.at)
-    var all = [], open = {}, task = {}, prompt = {}
-    function close(sid) { delete open[sid] }
+    var ctx = {}, events = [], editsBy = {}, lastSeen = {}
     for (var r of src) {
-      var g = open[r.sid]
-      if (g && r.at - g.end > 3 * 3600000) { close(r.sid); g = null }
-      if (r.kind === "task") {
-        if (r.action === "switch") { close(r.sid); task[r.sid] = r.text }
-        else if (g && g.task === r.text) g.done = true
+      if (r.kind === "prompt" || r.kind === "edit") (lastSeen[r.sid] = lastSeen[r.sid] || []).push(r.at)
+      if (r.kind === "task" && r.action === "switch") ctx[r.sid] = { text: r.text, from: "task" }
+      else if (r.kind === "prompt") ctx[r.sid] = { text: r.text, from: r.from || "you" }
+      if (r.kind !== "edit") continue
+      ;(editsBy[r.sid] = editsBy[r.sid] || []).push(r)
+      events.push({ sid: r.sid, at: r.at, ctx: ctx[r.sid] || { text: "", from: "" }, why: r.why || "", whole: !!r.whole,
+                    files: [{ path: r.path, add: r.add || 0, del: r.del || 0, line: r.line || 1 }],
+                    diff: r.whole ? [] : (r.diff || []), lines: r.lines || 0, key: r.key })
+    }
+    var tops = {}
+    for (var cwd in repos) {
+      var repo = repos[cwd]
+      if (tops[repo.top]) continue
+      tops[repo.top] = true
+      var owners = sessions.filter(s => repos[s.cwd] && repos[s.cwd].top === repo.top).map(s => s.name)
+      var commits = repo.commits.slice().sort((a, b) => a.at - b.at)
+      for (var ci = 0; ci < commits.length; ci++) {
+        var cm = commits[ci], since = ci ? commits[ci - 1].at : 0
+        var owner = owners[0], best = -1
+        for (var o of owners) for (var t of (lastSeen[o] || [])) if (t <= cm.at + 60000 && t > best) { best = t; owner = o }
+        if (!owner) continue
+        var covered = (editsBy[owner] || []).filter(e => e.at > since && e.at <= cm.at + 60000).map(e => e.path)
+        var fresh = cm.files.filter(f => covered.indexOf(f.path) < 0)
+        var diff = []
+        for (var f of fresh) diff = diff.concat(cm.files.length > 1 ? ["\u0001" + f.path] : []).concat(f.diff)
+        var c = ctx[owner]
+        for (var q of src) if (q.sid === owner && q.at <= cm.at && (q.kind === "prompt" || (q.kind === "task" && q.action === "switch"))) c = { text: q.text, from: q.kind === "task" ? "task" : q.from || "you" }
+        events.push({ sid: owner, at: cm.at, ctx: c || { text: "", from: "" }, why: cm.subject, commit: true, whole: false,
+                      files: cm.files.map(f => ({ path: f.path, add: f.add, del: f.del, line: f.line || 1, covered: covered.indexOf(f.path) >= 0 })),
+                      diff: diff, lines: fresh.reduce((n, f) => n + f.add + f.del, 0), key: "commit:" + cm.hash })
+      }
+    }
+    events.sort((a, b) => a.at - b.at)
+    var out = []
+    for (var e of events) {
+      var prev = out[out.length - 1]
+      var sameAsk = prev && prev.sid === e.sid && prev.ctx.text === e.ctx.text && !prev.commit && !e.commit && e.at - prev.at < 300000
+      if (sameAsk && prev.whole && e.whole) { prev.files = prev.files.concat(e.files); prev.at = e.at; continue }
+      if (sameAsk && !prev.whole && !e.whole && prev.files.length === 1 && prev.files[0].path === e.files[0].path) {
+        var pf = prev.files[0]
+        pf.add += e.files[0].add; pf.del += e.files[0].del
+        prev.diff = prev.diff.concat(prev.diff.length && e.diff.length ? ["\u22ef"] : []).concat(e.diff).slice(0, 80)
+        prev.lines += e.lines; prev.edits = (prev.edits || 1) + 1; prev.at = e.at
+        if (!prev.why) prev.why = e.why
         continue
       }
-      if (r.kind === "prompt") { if (g && g.summary && !g.task) close(r.sid); if (!open[r.sid]) prompt[r.sid] = r; continue }
-      if (r.kind === "summary") { if (g) { g.summary = r.text; g.end = Math.max(g.end, r.at) } continue }
-      if (r.kind !== "edit") continue
-      if (!g) {
-        var p = prompt[r.sid]
-        g = { key: r.key, sid: r.sid, task: task[r.sid] || "", prompt: p ? p.text : "", from: p ? p.from : "", asked: p ? p.at : r.at, start: r.at, end: r.at, files: [], byPath: {}, summary: "", done: false }
-        open[r.sid] = g
-        all.push(g)
-      }
-      g.end = Math.max(g.end, r.at)
-      var f = g.byPath[r.path]
-      if (!f) { f = { path: r.path, add: 0, del: 0, edits: 0 }; g.byPath[r.path] = f; g.files.push(f) }
-      f.add += r.add || 0; f.del += r.del || 0; f.edits++
-      f.at = r.at; f.line = r.line || 1; if (r.why) f.why = r.why; if (r.whole) f.whole = true
-      f.diff = (f.diff && f.diff.length ? f.diff.concat(["\u22ef"]) : []).concat(r.diff || []).slice(0, 80)
-      f.lines = (f.lines || 0) + (r.lines || (r.diff || []).length)
+      out.push(e)
     }
-    var newest = {}
-    for (var x of all) if (!newest[x.sid] || x.end >= newest[x.sid].end) newest[x.sid] = x
-    for (var y of all) y.latest = newest[y.sid] === y
-    return all.sort((a, b) => a.end - b.end).slice(-150)
+    return out.slice(-200)
   }
   readonly property var rows: {
-    var out = [], day = "", prev = 0
-    for (var g of groups) {
-      var label = dayLabel(g.end)
-      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
-      else if ((g.asked || g.start) - prev > 3 * 3600000) out.push({ kind: "day", key: "gap:" + g.key, text: label + " \u00b7 from " + clock(g.asked || g.start) })
-      prev = g.end
-      out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, latest: g.latest, end: g.end, asked: g.asked, count: g.files.length })
-      if (g.summary) out.push({ kind: "result", key: "result:" + g.key, sid: g.sid, text: g.summary })
-      for (var f of g.files)
-        out.push({ kind: "file", key: "file:" + g.key + ":" + f.path, sid: g.sid, path: f.path, add: f.add, del: f.del,
-                   edits: f.edits, at: f.at, line: f.line, diff: f.whole ? [] : f.diff, lines: f.lines, whole: !!f.whole, why: f.why || "" })
+    var out = [], day = "", prev = null
+    for (var e of changes) {
+      var label = dayLabel(e.at)
+      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label; prev = null }
+      if (!prev || prev.sid !== e.sid || prev.ctx.text !== e.ctx.text)
+        out.push({ kind: "ask", key: "ask:" + e.key, sid: e.sid, text: e.ctx.text, from: e.ctx.from })
+      out.push(Object.assign({ kind: "change" }, e))
+      prev = e
     }
     return out
   }
@@ -136,7 +197,7 @@ FocusScope {
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
     if (i >= 0) return i
-    for (i = rows.length - 1; i >= 0 && rows[i].kind !== "file"; i--);
+    for (i = rows.length - 1; i >= 0 && rows[i].kind !== "change"; i--);
     return i
   }
   readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
@@ -144,20 +205,24 @@ FocusScope {
   function select(i) {
     cursorKey = rows[i].key
     var last = rows.length - 1
-    while (last > i && rows[last].kind !== "file") last--
+    while (last > i && rows[last].kind !== "change") last--
     scroller.cursorMoved(i, i === last)
   }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (rows[i].kind === "file") { select(i); return }
+      if (rows[i].kind === "change") { select(i); return }
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {
       var i = last ? rows.length - 1 - n : n
-      if (rows[i].kind === "file") { select(i); return }
+      if (rows[i].kind === "change") { select(i); return }
     }
   }
-  function open() { if (currentRow) fileRequested(currentRow.sid, currentRow.path, currentRow.line || 1) }
+  function open() {
+    if (!currentRow || currentRow.kind !== "change") return
+    var f = currentRow.files.find(x => !x.covered) || currentRow.files[0]
+    fileRequested(currentRow.sid, f.path, f.line || 1)
+  }
 
   component Orb: ThinkingOrb {
     required property string sid
@@ -182,49 +247,18 @@ FocusScope {
     onDraggingChanged: dragging ? scroller.gestureStarted() : scroller.gestureEnded()
     header: Item { height: 12 }
 
-    footer: Flow {
-      width: list.width
-      spacing: 8
-      topPadding: root.working.length ? 14 : 0
-      bottomPadding: 24
-      Repeater {
-        model: root.working
-        delegate: PillSurface {
-          id: pill
-          required property string modelData
-          height: 30
-          width: nowRow.implicitWidth + 24
-          hovered: pillHover.hovered
-          HoverHandler { id: pillHover; cursorShape: Qt.PointingHandCursor }
-          TapHandler { onTapped: root.sessionRequested(pill.modelData) }
-          Row {
-            id: nowRow
-            anchors.centerIn: parent
-            spacing: 8
-            Orb { sid: pill.modelData; running: true; idleBlur: 0; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
-            Text {
-              text: pill.modelData + "  " + root.activityLabelFor(pill.modelData)
-              textFormat: Text.PlainText
-              color: root.contentColor
-              font.family: root.bodyFont; font.pixelSize: root.fsMeta; font.weight: 500
-              anchors.verticalCenter: parent.verticalCenter
-            }
-          }
-        }
-      }
-    }
+    footer: Item { height: 24 }
 
     delegate: Item {
       id: row
       required property string key
       required property int index
-      readonly property var entry: root.rows[index] || ({ kind: "day", diff: [] })
+      readonly property var entry: root.rows[index] || ({ kind: "day", files: [], diff: [] })
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
-      readonly property real dotY: kind === "file" ? fileHead.y + fileHead.height / 2 : height / 2
+      readonly property real dotY: kind === "change" ? changeBox.y + changeCol.y + pills.y + 13 : height / 2
       width: list.width
-      height: kind === "day" ? 52 : kind === "head" ? headCol.implicitHeight + 30 : kind === "result" ? resultText.implicitHeight + 12
-        : fileBox.height + 6
+      height: kind === "day" ? 52 : kind === "ask" ? askCol.implicitHeight + 22 : changeBox.height + 6
 
       CapLabel {
         visible: row.kind === "day"
@@ -232,122 +266,102 @@ FocusScope {
         text: String(row.entry.text || "").toUpperCase()
       }
 
-      Item {
-        visible: row.kind === "head"
-        anchors.fill: parent
-        Orb { id: headOrb; sid: row.entry.sid || ""; running: row.entry.latest === true && root.busy(row.entry.sid); x: 8; y: 24; width: 20; height: 20 }
-        Column {
-          id: headCol
-          anchors { left: headOrb.right; leftMargin: 12; right: headTime.left; rightMargin: 16 }
-          y: headOrb.y + headOrb.height / 2 - headName.implicitHeight / 2
-          spacing: 4
-          Row {
-            width: parent.width
-            spacing: 12
-            Text {
-              id: headName
-              text: row.entry.sid || ""; textFormat: Text.PlainText
-              color: root.contentColor
-              font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
-            }
-            Text {
-              width: parent.width - headName.width - 12
-              anchors.baseline: headName.baseline
-              text: (row.entry.done ? "\u2713 " : "") + (row.entry.task || row.entry.prompt || "")
-              textFormat: Text.PlainText
-              wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
-              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
-              color: row.entry.done ? Theme.green : root.contentColor
-              font.family: root.bodyFont; font.pixelSize: root.fsBody
-            }
-          }
-          Text {
-            visible: !!row.entry.task && !!row.entry.prompt
-            width: parent.width
-            text: (row.entry.from && row.entry.from !== "you" ? row.entry.from : "You") + ": " + (row.entry.prompt || "")
-            textFormat: Text.PlainText
-            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
-            color: root.metaColor
-            font.family: root.bodyFont; font.pixelSize: root.fsMeta
-          }
+      Row {
+        id: askCol
+        visible: row.kind === "ask"
+        x: 8; y: 16
+        width: parent.width - 16
+        spacing: 10
+        Orb { id: askOrb; sid: row.entry.sid || ""; running: false; width: 18; height: 18; y: (askName.implicitHeight - height) / 2 }
+        Text {
+          id: askName
+          text: row.entry.sid || ""; textFormat: Text.PlainText
+          color: root.contentColor
+          font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
         }
         Text {
-          id: headTime
-          anchors { right: parent.right; rightMargin: 12; verticalCenter: headOrb.verticalCenter }
-          readonly property bool live: row.entry.latest === true && root.busy(row.entry.sid)
-          text: live ? root.activityLabelFor(row.entry.sid || "") : root.clock(row.entry.asked || row.entry.end || 0)
-          color: live ? Theme.orange : root.metaColor
-          font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+          width: parent.width - askOrb.width - askName.width - 20
+          anchors.baseline: askName.baseline
+          text: !row.entry.text ? "" : row.entry.from === "task" ? row.entry.text
+            : (row.entry.from && row.entry.from !== "you" ? row.entry.from + ": " : "") + "\u201c" + row.entry.text + "\u201d"
+          textFormat: Text.PlainText
+          wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+          lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
+          color: row.entry.from === "task" ? root.contentColor : Theme.fg_secondary
+          font.family: root.bodyFont; font.pixelSize: root.fsBody
         }
       }
 
       Rectangle {
-        id: fileBox
-        visible: row.kind === "file"
-        x: 18
-        width: parent.width - 18
-        height: visible ? fileCol.implicitHeight + 16 : 0
+        id: changeBox
+        visible: row.kind === "change"
+        x: 0
+        width: parent.width
+        height: visible ? changeCol.implicitHeight + 14 : 0
         radius: 12
-        color: row.current ? Qt.alpha(Theme.fg, 0.05) : fileHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        color: row.current ? Qt.alpha(Theme.fg, 0.05) : changeHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
-        HoverHandler { id: fileHover; cursorShape: Qt.PointingHandCursor }
+        HoverHandler { id: changeHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
 
+        Text {
+          id: timeText
+          x: 10; y: changeCol.y + pills.y + (26 - height) / 2
+          width: 44
+          text: root.clock(row.entry.at || 0)
+          color: root.metaColor
+          font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+        }
         Column {
-          id: fileCol
-          x: 22; y: 8
-          width: parent.width - 34
+          id: changeCol
+          x: 64; y: 7
+          width: parent.width - 76
           spacing: 6
           Item {
-            id: fileHead
             width: parent.width
-            height: 28
-            PillSurface {
-              id: filePill
-              width: Math.min(pathText.implicitWidth + 34, parent.width - fileMeta.width - 16)
-              height: 26
-              radius: height / 2
-              anchors.verticalCenter: parent.verticalCenter
-              Row {
-                id: filePillRow
-                x: 8
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: 6
-                Icon { id: fileIcon; name: "file-content"; width: 12; height: 12; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
-                Text {
-                  id: pathText
-                  readonly property string rel: root.relPath(row.entry.sid, row.entry.path)
+            height: pills.height
+            Flow {
+              id: pills
+              width: parent.width - counts.width - 16
+              spacing: 6
+              Repeater {
+                model: row.kind === "change" ? row.entry.files : []
+                delegate: PillSurface {
+                  id: filePill
+                  required property var modelData
+                  readonly property string rel: root.relPath(row.entry.sid, modelData.path)
                   readonly property int cut: rel.lastIndexOf("/") + 1
-                  width: filePill.width - 34
-                  textFormat: Text.StyledText
-                  text: '<font color="' + root.metaColor + '">' + root.esc(rel.slice(0, cut)) + '</font>' + root.esc(rel.slice(cut))
-                    + (row.entry.line > 1 ? '<font color="' + root.metaColor + '">:' + row.entry.line + '</font>' : "")
-                  elide: Text.ElideLeft
-                  color: filePill.contentColor
-                  font.family: Theme.fontFamily; font.pixelSize: root.fsMeta; font.weight: 500
-                  anchors.verticalCenter: parent.verticalCenter
+                  height: 26; radius: 13
+                  width: Math.min(pathText.implicitWidth + 40, pills.width)
+                  opacity: modelData.covered ? 0.55 : 1
+                  Icon { id: fileIcon; x: 9; name: "file-content"; width: 12; height: 12; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
+                  Text {
+                    id: pathText
+                    anchors { left: fileIcon.right; leftMargin: 6; right: parent.right; rightMargin: 9; verticalCenter: parent.verticalCenter }
+                    textFormat: Text.StyledText
+                    text: '<font color="' + root.metaColor + '">' + root.esc(filePill.rel.slice(0, filePill.cut)) + '</font>' + root.esc(filePill.rel.slice(filePill.cut))
+                    elide: Text.ElideLeft
+                    color: filePill.contentColor
+                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta; font.weight: 500
+                  }
                 }
               }
             }
             Row {
-              id: fileMeta
-              anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+              id: counts
+              anchors { right: parent.right; top: parent.top; topMargin: (26 - height) / 2 }
               spacing: 10
-              Text { text: "+" + (row.entry.add || 0); color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
-              Text { text: "-" + (row.entry.del || 0); color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
-              Text {
-                text: (row.entry.edits > 1 ? row.entry.edits + " edits  " : "") + root.clock(row.entry.at || 0)
-                color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
-                anchors.verticalCenter: parent.verticalCenter
-              }
+              readonly property int add: (row.entry.files || []).reduce((n, f) => n + f.add, 0)
+              readonly property int del: (row.entry.files || []).reduce((n, f) => n + f.del, 0)
+              Text { text: "+" + counts.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
+              Text { text: "-" + counts.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
             }
           }
           Text {
             visible: !!row.entry.why
             width: parent.width
-            leftPadding: 24
-            text: row.entry.why || ""
+            text: (row.entry.commit ? "Committed: " : "") + (row.entry.why || "")
             textFormat: Text.PlainText
             color: Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
@@ -356,14 +370,12 @@ FocusScope {
           }
           Text {
             visible: row.entry.whole === true
-            leftPadding: 24
-            text: (row.entry.edits > 1 ? "Rewrote the whole file" : "Wrote the whole file") + " \u00b7 " + (row.entry.add || 0) + " lines \u00b7 Enter opens it"
+            text: ((row.entry.files || []).length > 1 ? "Wrote " + row.entry.files.length + " new files" : "Wrote the whole file") + " \u00b7 Enter opens it"
             color: root.metaColor
             font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
           }
           Rectangle {
             id: diffPanel
-            readonly property string language: root.rail ? root.rail.codeLanguage(row.entry.path) : ""
             visible: (row.entry.diff || []).length > 0
             width: parent.width
             height: visible ? diffCol.implicitHeight + 12 : 0
@@ -377,54 +389,51 @@ FocusScope {
                 model: (row.entry.diff || []).slice(0, row.current ? 40 : 14)
                 delegate: Rectangle {
                   required property string modelData
+                  required property int index
+                  readonly property bool fileHeader: modelData.charAt(0) === "\u0001"
                   readonly property var parts: modelData.match(/^([+\- ])\s*(\d*)\s?(.*)$/) || ["", " ", "", modelData]
-                  readonly property string sign: parts[1]
+                  readonly property string sign: fileHeader ? "" : parts[1]
+                  readonly property string language: {
+                    var all = row.entry.diff || []
+                    for (var k = index; k >= 0; k--) if (all[k].charAt(0) === "\u0001") return root.rail ? root.rail.codeLanguage(all[k].slice(1)) : ""
+                    return root.rail && row.entry.files.length ? root.rail.codeLanguage(row.entry.files[0].path) : ""
+                  }
                   width: diffCol.width
-                  height: diffLine.implicitHeight + 3
+                  height: diffLine.implicitHeight + (fileHeader && index ? 10 : 3)
                   color: sign === "+" ? Theme.diffAddedBg : sign === "-" ? Theme.diffRemovedBg : "transparent"
-                  Rectangle { width: 2; height: parent.height; visible: parent.sign !== " "; color: parent.sign === "+" ? Theme.green : Theme.red }
+                  Rectangle { width: 2; height: parent.height; visible: parent.sign === "+" || parent.sign === "-"; color: parent.sign === "+" ? Theme.green : Theme.red }
                   Text {
                     id: diffLine
                     x: 10; width: parent.width - 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.StyledText
-                    text: '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + parts[2]).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
-                      + (root.rail ? root.rail.highlightCode(parts[3], diffPanel.language) : root.esc(parts[3]))
-                        .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
-                    color: sign === " " ? Theme.fg_secondary : Theme.fg
-                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                    anchors.bottom: parent.bottom; anchors.bottomMargin: 1
+                    textFormat: fileHeader ? Text.PlainText : Text.StyledText
+                    text: fileHeader ? root.relPath(row.entry.sid, modelData.slice(1))
+                      : modelData === "\u22ef" ? "\u22ef"
+                      : '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + parts[2]).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
+                        + (root.rail ? root.rail.highlightCode(parts[3], language) : root.esc(parts[3]))
+                          .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
+                    color: fileHeader || modelData === "\u22ef" ? root.metaColor : sign === " " ? Theme.fg_secondary : Theme.fg
+                    font.family: fileHeader ? root.bodyFont : Theme.fontFamily
+                    font.pixelSize: root.fsMeta - 2
                     wrapMode: Text.NoWrap; elide: Text.ElideRight; maximumLineCount: 1
                   }
                 }
               }
               Text {
-                readonly property int hidden: (row.entry.lines || 0) + (row.entry.edits || 1) - 1 - Math.min((row.entry.diff || []).length, row.current ? 40 : 14)
+                readonly property int hidden: (row.entry.diff || []).length - Math.min((row.entry.diff || []).length, row.current ? 40 : 14)
                 visible: hidden > 0
                 x: 10; topPadding: 4
-                text: "\u2026 " + hidden + " more lines \u00b7 Enter opens the file"
+                text: "\u2026 " + hidden + " more lines" + (row.current ? " \u00b7 Enter opens the file" : " \u00b7 focus to see more")
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }
           }
         }
       }
-
-      Text {
-        id: resultText
-        visible: row.kind === "result"
-        x: 40; y: 0
-        width: parent.width - 52
-        text: "\u27e2 " + (row.entry.text || "")
-        textFormat: Text.PlainText
-        color: Theme.fg_secondary
-        font.family: root.bodyFont; font.pixelSize: root.fsMeta
-        lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-        wrapMode: Text.Wrap; maximumLineCount: 3; elide: Text.ElideRight
-      }
     }
 
     Text {
-      visible: !root.rows.length && !root.working.length
+      visible: !root.rows.length
       anchors.centerIn: parent
       text: "No code changes yet"
       color: root.metaColor
