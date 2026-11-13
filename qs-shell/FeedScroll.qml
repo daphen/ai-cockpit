@@ -53,6 +53,7 @@ QtObject {
   }
   function _pin() {
     if (!view || !chatVisible || view.count <= 0) return
+    _glide.stop()
     var li = view.itemAtIndex(view.count - 1)
     if (li && li.y + li.height > view.contentHeight + 0.5) {
       view.positionViewAtIndex(view.count - 1, ListView.Beginning)
@@ -76,11 +77,23 @@ QtObject {
 
   // The wheel: ScrollFeel writes contentY directly, so it sets neither `dragging` nor
   // `flicking` and its signal is the only reliable "the user scrolled".
-  function userScrolled(up) { _stick = !up && _atBottom() }
+  // Keyboard reveals glide; anything else that moves the view takes over immediately.
+  readonly property NumberAnimation _glide: NumberAnimation {
+    target: sm.view; property: "contentY"; duration: 120; easing.type: Easing.OutCubic
+  }
+  function _glideTo(y) {
+    y = Math.max(view.originY, Math.min(_bottomY(), y))
+    _glide.stop()
+    if (Math.abs(y - view.contentY) < 1) return
+    _glide.to = y
+    _glide.start()
+  }
+
+  function userScrolled(up) { _glide.stop(); _stick = !up && _atBottom() }
 
   // Drag/flick ended. These two are user-gesture-only, unlike movementStarted/Ended,
   // which Flickable also emits for programmatic contentY changes.
-  function gestureStarted() { _stick = false }
+  function gestureStarted() { _glide.stop(); _stick = false }
   function gestureEnded()   { _stick = _atBottom() }
 
   // A row was added or removed. While following, the cursor moves with the bottom:
@@ -104,7 +117,7 @@ QtObject {
   // Stay where the caller is about to put us. Used when switching to a session whose
   // reading position we remember — the restore itself is the rail's anchor machinery,
   // which only runs while free.
-  function hold() { _stick = false; _pendingCursor = false }
+  function hold() { _glide.stop(); _stick = false; _pendingCursor = false }
 
   // Jump to the newest content (session switch, send). The pin is immediate AND armed:
   // rows that realize later re-pin through the follow connection above, so there is no
@@ -121,10 +134,17 @@ QtObject {
     if (!chatVisible || !view) return
     if (isLast) {
       _stick = true
-      _pin()
+      _glideTo(_bottomY())
       return
     }
     _stick = false
-    if (idx - indexOffset >= 0) view.positionViewAtIndex(idx - indexOffset, ListView.Contain)
+    var item = idx - indexOffset >= 0 ? view.itemAtIndex(idx - indexOffset) : null
+    if (!item) {
+      if (idx - indexOffset >= 0) { _glide.stop(); view.positionViewAtIndex(idx - indexOffset, ListView.Contain) }
+      return
+    }
+    var top = _glide.running ? _glide.to : view.contentY
+    if (item.y < top) _glideTo(item.y)
+    else if (item.y + item.height > top + view.height) _glideTo(Math.max(item.y, item.y + item.height - view.height))
   }
 }
