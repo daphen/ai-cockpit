@@ -606,6 +606,7 @@ ShellRoot {
               activityLabelFor: dashboard.activityLabelFor
               onSessionRequested: sid => { win.pane = "rail"; rail.jumpToSession(sid) }
               onFocusRequested: direction => win.tryFocus(direction)
+              caretHeld: glideCaret.holding
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
             }
             Canvas {
@@ -721,7 +722,7 @@ ShellRoot {
           objectName: "focusGlideCaret"
           z: 100
           visible: caretGlide.running
-          readonly property string owner: term.activeFocus ? "nvim" : dashboard.activeFocus ? "dashboard"
+          readonly property string owner: term.activeFocus ? "nvim" : dashboard.activeFocus ? "dashboard" : activityPage.activeFocus ? "activity"
             : rail.composerField.activeFocus ? "composer" : rail.activeFocus ? "rail" : ""
           property string settled: ""
           property string settledKey: ""
@@ -730,7 +731,7 @@ ShellRoot {
           readonly property bool holding: caretGlide.running || pending
           property string landing: "caret"   // caret: stretch into a line · rest: stay a dot · fade
           readonly property int dot: 8
-          function leftSide(who) { return who === "nvim" || who === "dashboard" }
+          function leftSide(who) { return who === "nvim" || who === "dashboard" || who === "activity" }
           function target(who, key) {
             if (who === "nvim" || who === "composer") {
               const r = who === "nvim" ? term.cursorRect : rail.composerField.cursorRectangle
@@ -744,9 +745,10 @@ ShellRoot {
               const p = rail.mapToItem(paneLayout, q.x, q.y)
               return { x: p.x, y: p.y, h: dot, landing: "rest" }
             }
-            const q = dashboard.cursorPoint()
+            const page = who === "activity" ? activityPage : dashboard
+            const q = page.cursorPoint()
             if (q) {
-              const p = dashboard.mapToItem(paneLayout, q.x, q.y)
+              const p = page.mapToItem(paneLayout, q.x, q.y)
               return { x: p.x, y: p.y, h: dot, landing: "rest" }
             }
             const tab = viewTabRepeater.itemAt(viewTabs.views.indexOf(viewTabs.current))

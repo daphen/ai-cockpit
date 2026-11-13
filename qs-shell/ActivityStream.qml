@@ -13,6 +13,12 @@ FocusScope {
   readonly property bool focused: activeFocus
   signal sessionRequested(string sid)
   signal focusRequested(string direction)
+  property bool caretHeld: false
+  function cursorPoint() {
+    var item = cursor >= 0 ? list.itemAtIndex(cursor) : null
+    return item ? item.mapToItem(root, 10, item.dotY) : null
+  }
+  readonly property var restPoint: { list.contentY; list.contentHeight; cursor; width; return activeFocus ? cursorPoint() : null }
   onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
@@ -210,6 +216,7 @@ FocusScope {
       readonly property bool live: !day && turn.latest === true && !turn.summary && root.busy(turn.sid)
       readonly property var prompt: day ? null : turn.prompts[0] || null
       readonly property bool handoff: !!prompt && prompt.from !== "you"
+      readonly property real dotY: frame.y + 12 + Math.round(root.fsBody * 0.7)
       width: list.width
       height: day ? 56 : frame.height + (turn.showSession ? 64 : 8)
 
@@ -268,12 +275,6 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.ring
 
-        Rectangle {
-          x: 10 - width / 2; y: 12 + Math.round(root.fsBody * 0.7) - height / 2
-          width: 8; height: 8; radius: 4
-          color: Theme.cursor
-          visible: row.current
-        }
 
         Column {
           id: col
@@ -421,5 +422,15 @@ FocusScope {
       color: root.metaColor
       font.family: root.bodyFont; font.pixelSize: root.fsBody
     }
+  }
+
+  Rectangle {
+    width: 8; height: 8; radius: 4
+    color: Theme.cursor
+    visible: !!root.restPoint && !root.caretHeld && root.restPoint.y > 0 && root.restPoint.y < root.height
+    x: root.restPoint ? root.restPoint.x - width / 2 : 0
+    y: root.restPoint ? root.restPoint.y - height / 2 : 0
+    Behavior on x { enabled: parent.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on y { enabled: parent.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
   }
 }
