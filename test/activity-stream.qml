@@ -43,7 +43,7 @@ ShellRoot {
     running: true
     command: ["sh", "-c", 'mkdir -p "$1" && cd "$1" && git init -q && git config user.email t@t && git config user.name t'
       + ' && printf "a\\nb\\nc\\n" > f.txt && git add . && GIT_AUTHOR_DATE=@$2 GIT_COMMITTER_DATE=@$2 git commit -qm init'
-      + ' && printf "a\\nB\\nc\\n" > f.txt && GIT_AUTHOR_DATE=@$3 GIT_COMMITTER_DATE=@$3 git commit -qam "Fix via shell"',
+      + ' && printf "a\\nB\\nc\\n" > f.txt && printf "G\\n" > g.txt && git add g.txt && GIT_AUTHOR_DATE=@$3 GIT_COMMITTER_DATE=@$3 git commit -qam "Fix via shell"',
       "sh", test.repo, String(test.t0 / 1000 - 3600), String(test.t0 / 1000 + 10)]
   }
   Timer {
@@ -101,6 +101,9 @@ ShellRoot {
           test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
         if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
         if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
+        var at = pred => { var it = test.find(page, i => i.visible && pred(String(i.text || ""))); return it ? it.mapToItem(page, 0, 0).y : NaN }
+        var fy = at(t => t.endsWith("</font>f.txt")), by = at(t => t.endsWith("</font>B")), gy = at(t => t.endsWith("</font>g.txt")), Gy = at(t => t.endsWith("</font>G"))
+        if (!(fy < by && by < gy && gy < Gy)) test.fail("each file of a commit should sit directly above its own diff: " + [fy, by, gy, Gy])
         state.sendPrompt("beta", "keep going")
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
