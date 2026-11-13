@@ -13,7 +13,7 @@ FocusScope {
   readonly property bool focused: activeFocus
   signal sessionRequested(string sid)
   signal focusRequested(string direction)
-  onVisibleChanged: if (visible && agentd) agentd.loadActivityHistory()
+  onVisibleChanged: if (visible) { if (agentd) agentd.loadActivityHistory(); Qt.callLater(list.positionViewAtEnd) }
 
   Keys.onPressed: event => {
     var ctrl = event.modifiers & Qt.ControlModifier
@@ -80,7 +80,7 @@ FocusScope {
       }
     }
     for (var sid in open) open[sid].latest = true
-    return list.sort((a, b) => b.end - a.end)
+    return list.sort((a, b) => a.end - b.end)
   }
   readonly property var rows: {
     var out = [], day = "", prev = ""
@@ -94,11 +94,17 @@ FocusScope {
   }
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
-    return i >= 0 ? i : rows.findIndex(r => r.kind !== "day")
+    if (i >= 0) return i
+    for (i = rows.length - 1; i >= 0 && rows[i].kind === "day"; i--);
+    return i
   }
   readonly property string currentSession: cursor >= 0 ? rows[cursor].sid : ""
 
-  function select(i) { cursorKey = rows[i].key; list.positionViewAtIndex(i, ListView.Contain) }
+  function select(i) {
+    cursorKey = rows[i].key
+    list.pinned = i === rows.length - 1
+    list.positionViewAtIndex(i, ListView.Contain)
+  }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
       if (rows[i].kind !== "day") { select(i); return }
@@ -147,11 +153,14 @@ FocusScope {
     boundsBehavior: Flickable.StopAtBounds
     model: root.rows
     ScrollFeel { flick: list }
+    property bool pinned: true
+    onMovementEnded: pinned = atYEnd
+    onContentHeightChanged: if (pinned) Qt.callLater(positionViewAtEnd)
 
-    header: Flow {
+    footer: Flow {
       width: list.width
       spacing: 8
-      bottomPadding: root.working.length ? 6 : 0
+      topPadding: root.working.length ? 14 : 0
       Repeater {
         model: root.working
         delegate: PillSurface {

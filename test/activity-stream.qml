@@ -79,9 +79,9 @@ ShellRoot {
         page.forceActiveFocus()
         test.key(Qt.Key_Return)
         if (String(test.opened) !== "beta") test.fail("Enter on the newest row opened " + test.opened)
-        test.key(Qt.Key_J); test.key(Qt.Key_J)
+        test.key(Qt.Key_K); test.key(Qt.Key_K)
         test.key(Qt.Key_Return)
-        if (String(test.opened) !== "beta,alpha") test.fail("moving down then opening went to " + test.opened)
+        if (String(test.opened) !== "beta,alpha") test.fail("moving up then opening went to " + test.opened)
         console.log("PASS: activity page backfills every session's transcript once without duplicates, groups each turn as asked, task, result and files, appends live events, and Enter opens the row's session")
         Qt.quit()
       }
