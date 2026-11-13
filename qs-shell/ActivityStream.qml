@@ -105,10 +105,12 @@ FocusScope {
     return all.sort((a, b) => a.end - b.end).slice(-150)
   }
   readonly property var rows: {
-    var out = [], day = ""
+    var out = [], day = "", prev = 0
     for (var g of groups) {
       var label = dayLabel(g.end)
       if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
+      else if ((g.asked || g.start) - prev > 3 * 3600000) out.push({ kind: "day", key: "gap:" + g.key, text: label + " \u00b7 from " + clock(g.asked || g.start) })
+      prev = g.end
       out.push({ kind: "head", key: "head:" + g.key, sid: g.sid, task: g.task, prompt: g.prompt, from: g.from, done: g.done, latest: g.latest, end: g.end, asked: g.asked, count: g.files.length })
       if (g.summary) out.push({ kind: "result", key: "result:" + g.key, sid: g.sid, text: g.summary })
       for (var f of g.files)
