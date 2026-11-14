@@ -25,7 +25,21 @@ FocusScope {
   onSessionsChanged: if (visible && agentd) { agentd.loadActivityHistory(); gitAgain.restart() }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
+  // Inside a change with several files: which file j/k, Enter and h/l act on; -1 = not inside.
+  property int itemIndex: -1
+  onCursorKeyChanged: itemIndex = -1
+  function keyItem(event) {
+    var n = currentRow ? currentRow.files.length : 0
+    if (event.key === Qt.Key_Escape) itemIndex = -1
+    else if (event.key === Qt.Key_J || event.key === Qt.Key_Down) itemIndex = Math.min(n - 1, itemIndex + 1)
+    else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) itemIndex = Math.max(0, itemIndex - 1)
+    else if (event.key === Qt.Key_H || event.key === Qt.Key_L) codeShift(event.key === Qt.Key_L ? 1 : -1)
+    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) open()
+    else { itemIndex = -1; return false }
+    return true
+  }
   Keys.onPressed: event => {
+    if (itemIndex >= 0 && keyItem(event)) { event.accepted = true; return }
     var ctrl = event.modifiers & Qt.ControlModifier
     if (ctrl && event.key === Qt.Key_L) focusRequested("right")
     else if (ctrl && event.key === Qt.Key_H) focusRequested("left")
@@ -222,7 +236,9 @@ FocusScope {
   }
   function open() {
     if (!currentRow || currentRow.kind !== "change") return
-    var f = currentRow.files.find(x => !x.covered) || currentRow.files[0]
+    var files = currentRow.files
+    if (itemIndex < 0 && files.length > 1) { itemIndex = Math.max(0, files.findIndex(x => !x.covered)); return }
+    var f = itemIndex >= 0 ? files[itemIndex] : files.find(x => !x.covered) || files[0]
     fileRequested(currentRow.sid, f.path, f.line || 1)
   }
 
@@ -356,11 +372,19 @@ FocusScope {
                 }
                 return out
               }
+              readonly property bool picked: row.current && root.itemIndex === index
+              onPickedChanged: if (picked) Qt.callLater(() => scroller.revealSpan(fileBlock.mapToItem(list.contentItem, 0, 0).y - 8, fileBlock.height + 16))
               width: changeCol.width
               spacing: 6
               Item {
                 width: parent.width
                 height: 26
+                Rectangle {
+                  visible: fileBlock.picked
+                  x: filePill.x - 4; y: -4; width: filePill.width + 8; height: parent.height + 8
+                  radius: height / 2; color: "transparent"
+                  border.width: 1.5; border.color: root.rail ? root.rail.activeRing : Theme.fg
+                }
                 PillSurface {
                   id: filePill
                   readonly property string rel: root.relPath(row.entry.sid, fileBlock.modelData.path)
@@ -406,7 +430,7 @@ FocusScope {
                   NumberAnimation { id: codeGlide; target: codeFlick; property: "contentX"; duration: 120; easing.type: Easing.OutCubic }
                   Connections {
                     target: root
-                    enabled: row.current
+                    enabled: row.current && (root.itemIndex < 0 || root.itemIndex === fileBlock.index)
                     function onCodeShift(dir) {
                       codeGlide.stop()
                       codeGlide.to = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX + dir * codeFlick.width / 2))
@@ -452,7 +476,7 @@ FocusScope {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
                 visible: hidden > 0
                 x: 10
-                text: "\u2026 " + hidden + " more lines" + (row.current ? " \u00b7 Enter opens the file" : " \u00b7 focus to see more")
+                text: "\u2026 " + hidden + " more lines" + (!row.current ? " \u00b7 focus to see more" : root.itemIndex < 0 && row.entry.files.length > 1 ? " \u00b7 Enter picks a file" : " \u00b7 Enter opens the file")
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }

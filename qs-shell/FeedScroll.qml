@@ -143,8 +143,12 @@ QtObject {
       if (idx - indexOffset >= 0) { _glide.stop(); view.positionViewAtIndex(idx - indexOffset, ListView.Contain) }
       return
     }
+    revealSpan(item.y, item.height)
+  }
+  function revealSpan(y, h) {
+    _stick = false
     var top = _glide.running ? _glide.to : view.contentY
-    if (item.y < top) _glideTo(item.y)
-    else if (item.y + item.height > top + view.height) _glideTo(Math.max(item.y, item.y + item.height - view.height))
+    if (y < top) _glideTo(y)
+    else if (y + h > top + view.height) _glideTo(Math.max(y, y + h - view.height))
   }
 }
