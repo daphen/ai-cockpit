@@ -15,11 +15,11 @@ FocusScope {
   signal fileRequested(string sid, string path, int line)
   signal focusRequested(string direction)
 
-  function cursorPoint() {
-    var item = cursor >= 0 ? list.itemAtIndex(cursor) : null
-    return item ? item.mapToItem(root, 4, item.dotY) : null
+  function cursorPoint(key) {
+    var i = key ? rows.findIndex(r => r.key === key) : cursor
+    var item = i >= 0 ? list.itemAtIndex(i) : null
+    return item && item.kind === "change" ? item.restDot.mapToItem(root, 4, 4) : null
   }
-  readonly property var restPoint: { list.contentY; list.contentHeight; cursor; width; return activeFocus ? cursorPoint() : null }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit() }
   onSessionsChanged: if (visible && agentd) { agentd.loadActivityHistory(); gitAgain.restart() }
@@ -275,7 +275,7 @@ FocusScope {
       readonly property var entry: root.rows[index] || ({ kind: "day", files: [], diff: [] })
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
-      readonly property real dotY: kind === "change" ? changeBox.y + timeText.y + timeText.height / 2 : height / 2
+      readonly property Item restDot: cursorDot
       width: list.width
       height: kind === "day" ? 52 : kind === "ask" ? askCol.implicitHeight + 22 : changeBox.height + 6
 
@@ -324,9 +324,17 @@ FocusScope {
         HoverHandler { id: changeHover; cursorShape: Qt.PointingHandCursor }
         TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
 
+        Rectangle {
+          id: cursorDot
+          z: 2
+          x: 12 - width / 2; y: timeText.y + timeText.height / 2 - height / 2
+          width: 8; height: 8; radius: 4
+          color: Theme.cursor
+          visible: row.current && !root.caretHeld
+        }
         Text {
           id: timeText
-          x: 10; y: changeCol.y + (whyText.visible ? (whyText.lineHeight - height) / 2 : (26 - height) / 2)
+          x: 24; y: changeCol.y + (whyText.visible ? (whyText.lineHeight - height) / 2 : (26 - height) / 2)
           width: 44
           text: root.clock(row.entry.at || 0)
           color: root.metaColor
@@ -334,8 +342,8 @@ FocusScope {
         }
         Column {
           id: changeCol
-          x: 64; y: 7
-          width: parent.width - 76
+          x: 78; y: 7
+          width: parent.width - 90
           spacing: 6
           Text {
             id: whyText
@@ -499,15 +507,5 @@ FocusScope {
       color: root.metaColor
       font.family: root.bodyFont; font.pixelSize: root.fsBody
     }
-  }
-
-  Rectangle {
-    width: 8; height: 8; radius: 4
-    color: Theme.cursor
-    visible: !!root.restPoint && !root.caretHeld && root.restPoint.y > 0 && root.restPoint.y < root.height
-    x: root.restPoint ? root.restPoint.x - width / 2 : 0
-    y: root.restPoint ? root.restPoint.y - height / 2 : 0
-    Behavior on x { enabled: parent.visible; NumberAnimation { duration: 180; easing.type: Easing.InOutSine } }
-    Behavior on y { enabled: parent.visible; NumberAnimation { duration: 180; easing.type: Easing.InOutSine } }
   }
 }

@@ -746,7 +746,7 @@ ShellRoot {
               return { x: p.x, y: p.y, h: dot, landing: "rest" }
             }
             const page = who === "activity" ? activityPage : dashboard
-            const q = page.cursorPoint()
+            const q = page.cursorPoint(key)
             if (q) {
               const p = page.mapToItem(paneLayout, q.x, q.y)
               return { x: p.x, y: p.y, h: dot, landing: "rest" }
@@ -761,15 +761,17 @@ ShellRoot {
             if (settled && !(leftSide(owner) && leftSide(settled))) pending = true
             Qt.callLater(settle)
           }
-          Connections { target: rail; function onCursorKeyChanged() {
-              if (glideCaret.owner !== "rail") return
-              glideCaret.pending = true
-              Qt.callLater(glideCaret.settle)
-            } }
+          Connections { target: rail; function onCursorKeyChanged() { glideCaret.cursorMoved("rail") } }
+          Connections { target: activityPage; function onCursorKeyChanged() { glideCaret.cursorMoved("activity") } }
+          function cursorMoved(who) {
+            if (owner !== who) return
+            pending = true
+            Qt.callLater(settle)
+          }
           // Deferred a tick: entering the rail may hop straight on into the composer.
           function settle() {
             if (!owner) { pending = false; return }
-            const key = owner === "rail" ? rail.cursorKey : ""
+            const key = owner === "rail" ? rail.cursorKey : owner === "activity" ? activityPage.cursorKey : ""
             const moved = owner !== settled ? !(leftSide(owner) && leftSide(settled)) : key !== settledKey
             const flying = moved && caretGlide.running
             if (flying) caretGlide.stop()   // animators write their current value back on stop

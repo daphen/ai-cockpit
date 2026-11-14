@@ -126,10 +126,10 @@ ShellRoot {
         page.forceActiveFocus()
         test.key(Qt.Key_Return)
         if (String(test.opened) !== "beta:/r/Live.qml:1") test.fail("Enter on the newest change opened " + test.opened)
-        var before = page.restPoint
+        var before = page.cursorPoint()
         if (!before) test.fail("no cursor dot on the focused page")
         test.key(Qt.Key_K); test.key(Qt.Key_K)
-        if (!page.restPoint || page.restPoint.y >= before.y) test.fail("cursor dot did not move up with k")
+        if (!page.cursorPoint() || page.cursorPoint().y >= before.y) test.fail("cursor dot did not move up with k")
         test.key(Qt.Key_Return)
         if (test.opened[1] !== "alpha:/r/New.qml:1") test.fail("moving up past the commit then opening went to " + test.opened)
         test.key(Qt.Key_K); test.key(Qt.Key_Return)
