@@ -9,6 +9,7 @@ ShellRoot {
   id: test
   property var sent: []
   property var opened: []
+  property var codeFlick: null
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   function event(message) { state.onLine(JSON.stringify(message), 0) }
   function find(item, pred) {
@@ -112,7 +113,7 @@ ShellRoot {
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
         test.event({ type: "tool_execution_start", session: "beta", toolName: "edit", toolCallId: "live1", args: { path: "/r/Live.qml", edits: [] } })
-        test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" } } })
+        test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" + "_".repeat(400) } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped." }] } })
       } else if (stage === 4) {
         if (!test.hasText("Live.qml")) test.fail("live edit not shown")
@@ -133,6 +134,12 @@ ShellRoot {
         if (test.opened[3] !== "gamma:" + test.repo + "/f.txt:2") test.fail("opening a commit went to " + test.opened)
         test.key(Qt.Key_S)
         if (test.opened[4] !== "gamma") test.fail("s did not open the change's session: " + test.opened)
+        test.key(Qt.Key_G, Qt.ShiftModifier)
+        test.codeFlick = test.find(page, i => i.flickableDirection === Flickable.HorizontalFlick && i.contentWidth > i.width + 300)
+        if (!test.codeFlick) test.fail("a long diff line should scroll sideways instead of being cut off")
+        test.key(Qt.Key_L)
+      } else if (stage === 5) {
+        if (!(test.codeFlick.contentX > 0)) test.fail("l did not scroll the focused change's code sideways")
         console.log("PASS: activity is one timeline of code changes: tool edits with their reason and diff, commits made outside the edit tool, the ask shown once per run of changes, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
       }

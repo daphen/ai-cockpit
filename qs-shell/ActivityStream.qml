@@ -31,12 +31,15 @@ FocusScope {
     else if (ctrl && event.key === Qt.Key_H) focusRequested("left")
     else if (event.key === Qt.Key_J || event.key === Qt.Key_Down) move(1)
     else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) move(-1)
+    else if (event.key === Qt.Key_H || event.key === Qt.Key_L) codeShift(event.key === Qt.Key_L ? 1 : -1)
     else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
     else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
     else return
     event.accepted = true
   }
+  signal codeShift(int dir)
+  FontMetrics { id: codeMetrics; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
   Rectangle { anchors.fill: parent; color: root.color }
   TapHandler { onTapped: root.forceActiveFocus() }
 
@@ -391,9 +394,24 @@ FocusScope {
                 radius: 12
                 color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
                 clip: true
+                Flickable {
+                  id: codeFlick
+                  anchors.fill: parent
+                  flickableDirection: Flickable.HorizontalFlick
+                  boundsBehavior: Flickable.StopAtBounds
+                  contentWidth: Math.max(width, 22 + codeMetrics.advanceWidth("0") * (6 + fileBlock.diff.slice(0, fileBlock.shown)
+                    .reduce((n, l) => Math.max(n, l.replace(/^[+\- ]\d*\s?/, "").replace(/\t/g, "    ").length), 0)))
+                  contentHeight: height
+                  Behavior on contentX { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                  Connections {
+                    target: root
+                    enabled: row.current
+                    function onCodeShift(dir) { codeFlick.contentX = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX + dir * codeMetrics.advanceWidth("0") * 16)) }
+                  }
                 Column {
                   id: diffCol
-                  anchors { left: parent.left; right: parent.right; top: parent.top; topMargin: 6 }
+                  width: codeFlick.contentWidth
+                  y: 6
                   Repeater {
                     model: fileBlock.diff.slice(0, fileBlock.shown)
                     delegate: Rectangle {
@@ -418,10 +436,11 @@ FocusScope {
                         color: modelData === "\u22ef" ? root.metaColor : Theme.fg
                         font.family: Theme.fontFamily
                         font.pixelSize: root.fsMeta - 2
-                        wrapMode: Text.NoWrap; elide: Text.ElideRight; maximumLineCount: 1
+                        wrapMode: Text.NoWrap; maximumLineCount: 1
                       }
                     }
                   }
+                }
                 }
               }
               Text {
