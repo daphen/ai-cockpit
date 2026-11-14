@@ -507,7 +507,7 @@ FocusScope {
     visible: !!root.restPoint && !root.caretHeld && root.restPoint.y > 0 && root.restPoint.y < root.height
     x: root.restPoint ? root.restPoint.x - width / 2 : 0
     y: root.restPoint ? root.restPoint.y - height / 2 : 0
-    Behavior on x { enabled: parent.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-    Behavior on y { enabled: parent.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on x { enabled: parent.visible; NumberAnimation { duration: 180; easing.type: Easing.InOutSine } }
+    Behavior on y { enabled: parent.visible; NumberAnimation { duration: 180; easing.type: Easing.InOutSine } }
   }
 }

@@ -77,9 +77,9 @@ QtObject {
 
   // The wheel: ScrollFeel writes contentY directly, so it sets neither `dragging` nor
   // `flicking` and its signal is the only reliable "the user scrolled".
-  // Keyboard reveals glide; anything else that moves the view takes over immediately.
+  // Keyboard reveals glide with the focus dot's timing (shell.qml caretGlide); anything else takes over immediately.
   readonly property NumberAnimation _glide: NumberAnimation {
-    target: sm.view; property: "contentY"; duration: 120; easing.type: Easing.OutCubic
+    target: sm.view; property: "contentY"; duration: 180; easing.type: Easing.InOutSine
   }
   function _glideTo(y) {
     y = Math.max(view.originY, Math.min(_bottomY(), y))
