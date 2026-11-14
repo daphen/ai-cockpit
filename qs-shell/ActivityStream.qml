@@ -73,6 +73,72 @@ FocusScope {
     return d.toLocaleDateString(Qt.locale(), "dddd d MMMM")
   }
   function esc(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
+  // A few lines that say what changed: declarations added/removed and "old → new" edits;
+  // context, blanks, comments, imports and moved lines are dropped.
+  function digest(diff) {
+    var trivial = t => !t || /^[\s{}()\[\];,]*$/.test(t) || /^(\/\/|#|\/\*|\*|--)/.test(t) || /^(import|from\s+\S+\s+import|use|#include)\b/.test(t)
+    var decl = /^(export\s+)?(default\s+)?(async\s+)?(pub\s+)?(readonly\s+|required\s+|default\s+)*(function|def|fn|func|class|interface|type|struct|enum|component|signal|property)\b/
+    var words = /^(if|else|for|while|return|var|let|const|case|switch|function|new|await)$/
+    var lines = diff.map(l => l.match(/^([+\- ])\s*\d*\s?(.*)$/)).filter(m => m)
+    var olds = {}, news = {}
+    for (var m of lines) { var t = m[2].trim(); if (m[1] === "-") olds[t] = true; else if (m[1] === "+") news[t] = true }
+    var out = [], loose = []
+    function head(t) {
+      var k = t.match(/\b(?:function|def|fn|func|class|signal|component|struct|enum|interface|type)\s+([\w$]+)/) || t.match(/^(?:(?:readonly|required|property)\s+)*(?:\w+\s+)?([\w.]+)\s*[:=]/) || t.match(/^([\w.]+(?:\s+on\s+\w+)?)\s*\{\s*$/)
+      return k && !words.test(k[1]) && k[1] !== t ? k[1] : ""
+    }
+    function clip(t) { if (decl.test(t)) t = t.replace(/^((?:\w+\s+)*property\s+[\w<>.]+\s+\w+).*/, "$1").replace(/\s*\{.*$/, "").replace(/:\s*$/, ""); return t.length > 72 ? t.slice(0, 71) + "\u2026" : t }
+    function pair(a, b) {
+      var ta = a.match(/[\w$.]+|"[^"]*"|'[^']*'|\S/g) || [], tb = b.match(/[\w$.]+|"[^"]*"|'[^']*'|\S/g) || []
+      var key = head(b)
+      if (ta.length === tb.length) {
+        var d = [], first = -1
+        for (var i = 0; i < ta.length; i++) if (ta[i] !== tb[i]) {
+          if (first < 0) first = i
+          var c = ta[i] + " \u2192 " + tb[i]
+          if (d.indexOf(c) < 0) d.push(c)
+        }
+        // Name the value by the nearest "name:" / "name =" before the first change.
+        for (var j = first - 1; j > 0; j--) if ((ta[j] === ":" || ta[j] === "=") && /^[\w$.]+$/.test(ta[j - 1]) && !words.test(ta[j - 1])) { key = ta[j - 1]; break }
+        if (d.length && d.length <= 3) return { sign: "~", key: key, text: d.join(" \u00b7 ") }
+      }
+      var p = 0, q = 0
+      while (p < a.length && p < b.length && a[p] === b[p]) p++
+      while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
+      while (p > 0 && /\w/.test(a[p - 1])) p--
+      while (q > 0 && /\w/.test(a[a.length - q])) q--
+      var x = a.slice(p, a.length - q).trim(), y = b.slice(p, b.length - q).trim()
+      if (p + q < Math.min(a.length, b.length) * 0.4 || x.length > 40 || y.length > 40) return null
+      return { sign: "~", key: key, text: x ? y ? x + " \u2192 " + y : "\u2212 " + x : "+ " + y }
+    }
+    function flush(rem, add) {
+      rem = rem.filter(t => !trivial(t) && !news[t]); add = add.filter(t => !trivial(t) && !olds[t])
+      var n = Math.min(rem.length, add.length)
+      for (var i = 0; i < n; i++) {
+        var e = pair(rem[i], add[i])
+        if (e) out.push(e)
+        else { rem.push(rem[i]); add.push(add[i]) }
+      }
+      for (var r of rem.slice(n)) if (decl.test(r)) out.push({ sign: "-", key: "", text: clip(r) })
+      for (var t of add.slice(n)) { if (decl.test(t)) out.push({ sign: "+", key: "", text: clip(t) }); else loose.push(t) }
+    }
+    var rem = [], add = []
+    for (var m of lines) {
+      if (m[1] === "-") rem.push(m[2].trim())
+      else if (m[1] === "+") add.push(m[2].trim())
+      else { flush(rem, add); rem = []; add = [] }
+    }
+    flush(rem, add)
+    if (!out.length && loose.length) out.push({ sign: "+", key: "", text: clip(loose[0]) })
+    var seen = {}, kept = []
+    for (var e of out) {
+      if (e.sign === "-" && out.some(o => o.sign === "+" && o.text === e.text)) continue
+      if (e.sign === "+" && out.some(o => o.sign === "-" && o.text === e.text)) e = { sign: "~", key: head(e.text), text: "body changed" }
+      var id = e.sign + e.key + e.text
+      if (!seen[id]) { seen[id] = true; kept.push(e) }
+    }
+    return kept
+  }
   function relPath(sid, path) {
     var cwd = String((sessions.find(s => s.name === sid) || {}).cwd || "")
     var p = String(path || "")
@@ -364,7 +430,8 @@ FocusScope {
               required property int index
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
-                var left = row.current ? 40 : 14, files = row.entry.files || []
+                if (!row.current) return 0
+                var left = 40, files = row.entry.files || []
                 for (var j = 0; j < index; j++) left -= Math.min(left, (files[j].diff || []).length)
                 return Math.min(left, diff.length)
               }
@@ -418,6 +485,32 @@ FocusScope {
                   spacing: 10
                   Text { text: "+" + fileBlock.modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
                   Text { text: "-" + fileBlock.modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
+                }
+              }
+              Column {
+                readonly property var lines: row.current ? [] : root.digest(fileBlock.diff)
+                visible: lines.length > 0
+                x: 12
+                width: parent.width - 12
+                Repeater {
+                  model: parent.lines.slice(0, 3)
+                  delegate: Text {
+                    required property var modelData
+                    width: parent.width
+                    textFormat: Text.StyledText
+                    text: '<font color="' + (modelData.sign === "+" ? Theme.green : modelData.sign === "-" ? Theme.red : Theme.yellow) + '">'
+                      + (modelData.sign === "-" ? "\u2212" : modelData.sign) + "</font>&nbsp;&nbsp;"
+                      + (modelData.key ? '<font color="' + root.metaColor + '">' + root.esc(modelData.key) + "</font>&nbsp;&nbsp;" : "")
+                      + root.esc(modelData.text)
+                    elide: Text.ElideRight; maximumLineCount: 1
+                    color: Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                  }
+                }
+                Text {
+                  visible: parent.lines.length > 3
+                  text: "+ " + (parent.lines.length - 3) + " more"
+                  color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
                 }
               }
               Rectangle {
@@ -483,9 +576,9 @@ FocusScope {
               }
               Text {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
-                visible: hidden > 0
+                visible: row.current && hidden > 0
                 x: 10
-                text: "\u2026 " + hidden + " more lines" + (!row.current ? " \u00b7 focus to see more" : root.itemIndex < 0 && row.entry.files.length > 1 ? " \u00b7 Enter picks a file" : " \u00b7 Enter opens the file")
+                text: "\u2026 " + hidden + " more lines" + (root.itemIndex < 0 && row.entry.files.length > 1 ? " \u00b7 Enter picks a file" : " \u00b7 Enter opens the file")
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }
