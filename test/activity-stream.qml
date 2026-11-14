@@ -101,6 +101,8 @@ ShellRoot {
           test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
         if (!test.hasText('<font color="' + Theme.syntaxType + '">string</font>&nbsp;y:&nbsp;<font color="' + Theme.syntaxType + '">Text</font>.Wrap'))
           test.fail("QML types are not in the Neovim theme's type color")
+        if (!test.hasText('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</font><font color="' + Theme.red + '">z</font>'))
+          test.fail("a removed line should read like hunk-nvim's ghost line: red, unhighlighted, unnumbered")
         if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
         if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
         var at = pred => { var it = test.find(page, i => i.visible && pred(String(i.text || ""))); return it ? it.mapToItem(page, 0, 0).y : NaN }

@@ -341,6 +341,18 @@ FocusScope {
                 return Math.min(left, diff.length)
               }
               readonly property string language: root.rail ? root.rail.codeLanguage(modelData.path) : ""
+              // hunk-nvim's look: added lines in a hunk that also removed lines are "changed" (yellow sign).
+              readonly property var changed: {
+                var out = [], start = 0
+                for (var i = 0; i <= diff.length; i++) {
+                  var c = i < diff.length ? diff[i].charAt(0) : " "
+                  if (c === "+" || c === "-") continue
+                  var removes = diff.slice(start, i).some(l => l.charAt(0) === "-")
+                  for (var k = start; k < i; k++) out[k] = removes
+                  start = i + 1
+                }
+                return out
+              }
               width: changeCol.width
               spacing: 6
               Item {
@@ -386,20 +398,22 @@ FocusScope {
                     model: fileBlock.diff.slice(0, fileBlock.shown)
                     delegate: Rectangle {
                       required property string modelData
+                      required property int index
                       readonly property var parts: modelData.match(/^([+\- ])\s*(\d*)\s?(.*)$/) || ["", " ", "", modelData]
                       readonly property string sign: parts[1]
                       width: diffCol.width
                       height: diffLine.implicitHeight + 3
-                      color: sign === "+" ? Theme.diffAddedBg : sign === "-" ? Theme.diffRemovedBg : "transparent"
-                      Rectangle { width: 2; height: parent.height; visible: parent.sign === "+" || parent.sign === "-"; color: parent.sign === "+" ? Theme.green : Theme.red }
+                      color: sign === "-" ? Theme.diffRemovedBg : "transparent"
+                      Rectangle { width: 2; height: parent.height; visible: parent.sign === "+"; color: fileBlock.changed[parent.index] ? Theme.yellow : Theme.green }
                       Text {
                         id: diffLine
                         x: 10; width: parent.width - 16
                         anchors.bottom: parent.bottom; anchors.bottomMargin: 1
                         textFormat: Text.StyledText
                         text: modelData === "\u22ef" ? "\u22ef"
-                          : '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + parts[2]).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
-                            + (root.rail ? root.rail.highlightCode(parts[3], fileBlock.language) : root.esc(parts[3]))
+                          : '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + (sign === "-" ? "" : parts[2])).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
+                            + (sign === "-" ? '<font color="' + Theme.red + '">' + root.esc(parts[3]).replace(/\t/g, "    ").replace(/ /g, "&nbsp;") + "</font>"
+                              : root.rail ? root.rail.highlightCode(parts[3], fileBlock.language) : root.esc(parts[3]))
                               .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
                         color: modelData === "\u22ef" ? root.metaColor : Theme.fg
                         font.family: Theme.fontFamily
