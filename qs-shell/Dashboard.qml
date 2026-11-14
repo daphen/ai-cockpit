@@ -311,6 +311,7 @@ FocusScope {
 
   Flickable {
     id: view
+    ScrollFeel { flick: view }
     anchors { fill: parent; bottomMargin: hints.height }
     contentWidth: width
     contentHeight: content.implicitHeight + 56

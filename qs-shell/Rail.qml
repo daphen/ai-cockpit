@@ -4397,6 +4397,7 @@ Item {
           spacing: 8
           Flickable {
             id: composerFlick
+            ScrollFeel { flick: composerFlick }
             Layout.fillWidth: true; Layout.fillHeight: true
             contentHeight: composerInput.implicitHeight; clip: true
             boundsBehavior: Flickable.StopAtBounds
@@ -5149,6 +5150,7 @@ Item {
     z: 12
     ListView {
       id: pickerList
+      ScrollFeel { flick: pickerList }
       anchors.fill: parent; anchors.margins: 4; clip: true
       model: entries
       currentIndex: Math.max(0, Math.min(choice, entries.length - 1))
