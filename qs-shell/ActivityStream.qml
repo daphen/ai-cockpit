@@ -402,11 +402,16 @@ FocusScope {
                   contentWidth: Math.max(width, 22 + codeMetrics.advanceWidth("0") * (6 + fileBlock.diff.slice(0, fileBlock.shown)
                     .reduce((n, l) => Math.max(n, l.replace(/^[+\- ]\d*\s?/, "").replace(/\t/g, "    ").length), 0)))
                   contentHeight: height
-                  Behavior on contentX { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                  ScrollFeel { flick: codeFlick }
+                  NumberAnimation { id: codeGlide; target: codeFlick; property: "contentX"; duration: 120; easing.type: Easing.OutCubic }
                   Connections {
                     target: root
                     enabled: row.current
-                    function onCodeShift(dir) { codeFlick.contentX = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX + dir * codeMetrics.advanceWidth("0") * 16)) }
+                    function onCodeShift(dir) {
+                      codeGlide.stop()
+                      codeGlide.to = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX + dir * codeFlick.width / 2))
+                      codeGlide.start()
+                    }
                   }
                 Column {
                   id: diffCol

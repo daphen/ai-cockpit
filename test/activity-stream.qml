@@ -140,6 +140,14 @@ ShellRoot {
         test.key(Qt.Key_L)
       } else if (stage === 5) {
         if (!(test.codeFlick.contentX > 0)) test.fail("l did not scroll the focused change's code sideways")
+        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0)
+        lv.contentY = lv.contentHeight - lv.height
+        var x0 = test.codeFlick.contentX, y0 = lv.contentY, p = test.codeFlick.mapToItem(page, 50, 10)
+        input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 120, 0, 0)
+        if (!(test.codeFlick.contentX < x0 - 50) || lv.contentY !== y0) test.fail("a sideways wheel should move the code at the family scroll speed, not the page")
+        x0 = test.codeFlick.contentX
+        input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 0, 120, 0)
+        if (!(lv.contentY < y0) || test.codeFlick.contentX !== x0) test.fail("an up/down wheel over code should still scroll the page")
         console.log("PASS: activity is one timeline of code changes: tool edits with their reason and diff, commits made outside the edit tool, the ask shown once per run of changes, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
       }
