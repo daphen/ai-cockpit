@@ -155,7 +155,8 @@ FocusScope {
       var commits = repo.commits.slice().sort((a, b) => a.at - b.at)
       for (var ci = 0; ci < commits.length; ci++) {
         var cm = commits[ci], since = ci ? commits[ci - 1].at : 0
-        var owner = owners[0], best = -1
+        // Only a session that was active shortly before the commit made it; others in the same repo didn't.
+        var owner = null, best = cm.at - 7200000
         for (var o of owners) for (var t of (lastSeen[o] || [])) if (t <= cm.at + 60000 && t > best) { best = t; owner = o }
         if (!owner) continue
         var covered = (editsBy[owner] || []).filter(e => e.at > since && e.at <= cm.at + 60000).map(e => e.path)

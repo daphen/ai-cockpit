@@ -77,6 +77,9 @@ ShellRoot {
           { type: "message", id: "r2", message: { role: "toolResult", toolCallId: "e2", timestamp: test.t0 + 4000 } },
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "Done.\n\u27e2 Activity view renders history." }] } }
         ] } })
+        test.event({ type: "response", command: "get_entries", session: "gamma", success: true, data: { entries: [
+          { type: "message", id: "g1", timestamp: new Date(test.t0 - 60000).toISOString(), message: { role: "user", timestamp: test.t0 - 60000,
+            content: [{ type: "text", text: "Fix the shell script" }] } }] } })
         // The same transcript again must not duplicate rows.
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
@@ -85,7 +88,7 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,edit,prompt,summary,task") test.fail("history rows were " + kinds)
+        if (kinds !== "edit,edit,edit,prompt,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
         if (test.hasText("Activity view renders history.")) test.fail("outcomes are not changes and should not be listed")
@@ -105,6 +108,7 @@ ShellRoot {
         if (!test.hasText('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</font><font color="' + Theme.red + '">z</font>'))
           test.fail("a removed line should read like hunk-nvim's ghost line: red, unhighlighted, unnumbered")
         if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
+        if (test.visibleText("Committed: init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
         if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
         var at = pred => { var it = test.find(page, i => i.visible && pred(String(i.text || ""))); return it ? it.mapToItem(page, 0, 0).y : NaN }
         var fy = at(t => t.endsWith("</font>f.txt")), by = at(t => t.endsWith("</font>B")), gy = at(t => t.endsWith("</font>g.txt")), Gy = at(t => t.endsWith("</font>G"))
