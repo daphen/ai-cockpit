@@ -62,7 +62,7 @@ FocusScope {
 
   // Inside a change with several files: which file j/k, Enter and h/l act on; -1 = not inside.
   property int itemIndex: -1
-  onCursorKeyChanged: { itemIndex = -1; codeFile = -1 }
+  onCursorKeyChanged: { itemIndex = -1; codeFile = -1; anchor = null }
 
   // A vim cursor inside the focused change's code: codeFile is the file it is in, -1 = not in code.
   property int codeFile: -1
@@ -84,6 +84,7 @@ FocusScope {
   }
   function enterCode(fi) {
     codeFile = fi
+    anchor = null
     var rs = codeRows(), first = currentRow.files[fi].diff.findIndex(l => /^[+-]/.test(l))
     codeLine = Math.max(0, first)
     codeCol = Math.max(0, (rs[codeLine] || { text: "" }).text.search(/\S/))
@@ -443,9 +444,30 @@ FocusScope {
   function stop(kind) { return kind === "card" || kind === "change" }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
+  // Moving the cursor collapses the row left and expands the one landed on, a frame later. The landed
+  // row stays where it was on screen through that (nudged only to fit) until the user scrolls.
+  property var anchor: null
   function select(i) {
+    var it = list.itemAtIndex(i), last = rows.length - 1
+    while (last > i && !stop(rows[last].kind)) last--
     cursorKey = rows[i].key
-    showRow(i)
+    if (!it || i === last) { anchor = null; showRow(i); return }
+    scroller.hold()
+    anchor = { key: rows[i].key, top: it.y - list.contentY }
+    holdAnchor()
+  }
+  function holdAnchor() {
+    if (!anchor) return
+    var i = rows.findIndex(r => r.key === anchor.key), it = i >= 0 ? list.itemAtIndex(i) : null
+    if (!it) { anchor = null; return }
+    var top = it.height >= list.height ? 0 : Math.max(0, Math.min(anchor.top, list.height - it.height))
+    list.contentY = Math.max(list.originY, Math.min(list.originY + Math.max(0, list.contentHeight - list.height), it.y - top))
+  }
+  Connections {
+    target: list
+    function onContentHeightChanged() { root.holdAnchor() }
+    function onOriginYChanged() { root.holdAnchor() }
+    function onHeightChanged() { root.holdAnchor() }
   }
   function showRow(i) {
     var last = rows.length - 1
@@ -496,8 +518,8 @@ FocusScope {
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }
     cacheBuffer: 1000000
-    ScrollFeel { flick: list; onScrolled: up => scroller.userScrolled(up) }
-    onDraggingChanged: dragging ? scroller.gestureStarted() : scroller.gestureEnded()
+    ScrollFeel { flick: list; onScrolled: up => { root.anchor = null; scroller.userScrolled(up) } }
+    onDraggingChanged: { root.anchor = null; dragging ? scroller.gestureStarted() : scroller.gestureEnded() }
     header: Item {
       width: list.width; height: root.importantOnly ? 36 : 12
       Text {
@@ -519,7 +541,7 @@ FocusScope {
       readonly property bool current: index === root.cursor && root.focused
       readonly property Item restDot: kind === "card" ? cardDot : cursorDot
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
-      onHeightChanged: if (current && root.codeFile < 0) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
+      onHeightChanged: if (current && root.codeFile < 0 && !root.anchor) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
       height: kind === "day" ? 52 : kind === "who" ? 40 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
 

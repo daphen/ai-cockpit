@@ -11,6 +11,7 @@ ShellRoot {
   property var opened: []
   property var codeFlick: null
   property var yanks: []
+  property var walk: null
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   function event(message) { state.onLine(JSON.stringify(message), 0) }
   function find(item, pred) {
@@ -234,8 +235,29 @@ ShellRoot {
         var top = item.y, bottom = item.y + item.height, viewBottom = lv.contentY + lv.height
         if (top < lv.contentY - 1 || (bottom > viewBottom + 1 && Math.abs(top - lv.contentY) > 1))
           test.fail("the focused edit grew past the view without scrolling: " + [top, bottom, lv.contentY, viewBottom])
-        console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
+        page.height = 360
+        while (page.openKey) test.key(Qt.Key_Escape)
+        test.key(Qt.Key_G, Qt.ShiftModifier)
+        test.walk = { dir: Qt.Key_K, steps: 0 }
+      } else if (stage === 11) {
+        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), w = test.walk
+        if (w.top !== undefined) {
+          var item = lv.itemAtIndex(page.cursor), top = item.y - lv.contentY, bottom = top + item.height
+          if (top < -1 || (bottom > lv.height + 1 && top > 1)) test.fail("step " + w.steps + ": the landed row is off screen at " + [top, bottom])
+          if (w.top >= 0 && w.top + item.height <= lv.height && Math.abs(top - w.top) > 1)
+            test.fail("step " + w.steps + ": the viewport jumped — the landed row moved from " + w.top + " to " + top + " though it fit where it was")
+        }
+        if (w.steps === 6) w.dir = Qt.Key_J
+        if (w.steps === 12) {
+          console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
+        }
+        var dest = page.cursor, step = w.dir === Qt.Key_K ? -1 : 1
+        for (dest += step; dest >= 0 && dest < page.rows.length && !page.stop(page.rows[dest].kind); dest += step);
+        var it = lv.itemAtIndex(dest)
+        w.top = it ? it.y - lv.contentY : -1
+        test.key(w.dir); w.steps++
+        return
       }
       stage++
     }
