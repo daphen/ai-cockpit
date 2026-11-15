@@ -103,6 +103,19 @@ ShellRoot {
         if (test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("an unfocused change should show a summary, not its whole diff")
         if (!test.hasText("</font>&nbsp;&nbsp;property string y")) test.fail("the summary should name the declaration the edit added")
         if (!test.hasText("</font>&nbsp;&nbsp;b \u2192 B")) test.fail("the summary should show a changed line as old \u2192 new")
+        var railEdit = page.changes.find(c => c.files[0].path === "/r/Rail.qml"), shellFix = page.changes.find(c => c.commit)
+        var scored = {}
+        scored[railEdit.jid] = { key: 0.9, picks: [[0, 1]] }
+        scored[shellFix.jid] = { key: 0.2, picks: [] }
+        page.jev = scored
+        if (!test.hasText("</font>&nbsp;&nbsp;x = 1 // set") || test.hasText("</font>&nbsp;&nbsp;property string y"))
+          test.fail("a scored change should show the lines Jev picked instead of the rule summary")
+        if (test.find(page, i => i.visible && String(i.text || "").endsWith("</font>f.txt"))) test.fail("a minor change should shrink to its reason line")
+        page.forceActiveFocus(); test.key(Qt.Key_F)
+        if (test.visibleText("Committed: Fix via shell") || !test.visibleText("The rail needs a hook so the page can open files."))
+          test.fail("f should hide minor changes and keep important ones")
+        test.key(Qt.Key_F)
+        if (!test.visibleText("Committed: Fix via shell")) test.fail("f again should show every change")
         if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
         if (test.visibleText("Committed: init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
         state.sendPrompt("beta", "keep going")

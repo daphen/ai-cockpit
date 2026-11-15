@@ -21,9 +21,45 @@ FocusScope {
     return item && item.kind === "change" ? item.restDot.mapToItem(root, 4, 4) : null
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
-  onVisibleChanged: if (visible) { reveal(); refreshGit() }
+  onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
   onSessionsChanged: if (visible && agentd) { agentd.loadActivityHistory(); gitAgain.restart() }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
+
+  // Jev (Typesafe's classifier) scores each change: key = importance 0..1, picks = [file, diff line] that show it best.
+  property var jev: ({})
+  property var jevAsked: ({})
+  property bool importantOnly: false
+  function minor(e) { var s = jev[e.jid]; return !!s && s.key < 0.5 }
+  function jevNext() {
+    if (jevRun.running || !visible) return
+    var batch = []
+    for (var i = changes.length - 1; i >= 0 && batch.length < 8; i--) {
+      var e = changes[i]
+      if (!(e.jid in jev) && !jevAsked[e.jid]) batch.push(e)
+    }
+    if (!batch.length) return
+    for (var b of batch) jevAsked[b.jid] = true
+    jevRun.command = ["python3", Qt.resolvedUrl("jev-activity.py").toString().replace(/^file:\/\//, ""), JSON.stringify(batch.map(e => {
+      var left = 40
+      return { id: e.jid, why: e.why, files: e.files.map(f => {
+        var lines = []
+        f.diff.forEach((l, li) => { if (left > 0 && /^[+-]/.test(l) && l.replace(/^[+-]\s*\d*\s?/, "").trim()) { lines.push([li, l.slice(0, 200)]); left-- } })
+        return { path: f.path, lines: lines }
+      }) }
+    }))]
+    jevRun.running = true
+  }
+  Process {
+    id: jevRun
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try { root.jev = Object.assign({}, root.jev, JSON.parse(this.text)) } catch (_) {}
+        Qt.callLater(root.jevNext)
+      }
+    }
+  }
+  Timer { id: jevAgain; interval: 800; onTriggered: root.jevNext() }
+  onChangesChanged: jevAgain.restart()
 
   // Inside a change with several files: which file j/k, Enter and h/l act on; -1 = not inside.
   property int itemIndex: -1
@@ -48,6 +84,7 @@ FocusScope {
     else if (event.key === Qt.Key_H || event.key === Qt.Key_L) codeShift(event.key === Qt.Key_L ? 1 : -1)
     else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
     else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
+    else if (event.key === Qt.Key_F) importantOnly = !importantOnly
     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
     else return
     event.accepted = true
@@ -251,11 +288,13 @@ FocusScope {
       }
       out.push(e)
     }
+    for (var x of out) x.jid = x.key + ":" + x.files.length + ":" + x.files.reduce((n, f) => n + f.diff.length, 0)
     return out.slice(-200)
   }
   readonly property var rows: {
     var out = [], day = "", prev = null
     for (var e of changes) {
+      if (importantOnly && minor(e)) continue
       var label = dayLabel(e.at)
       if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label; prev = null }
       if (!prev || prev.sid !== e.sid || prev.ctx.text !== e.ctx.text)
@@ -330,7 +369,15 @@ FocusScope {
     cacheBuffer: 1000000
     ScrollFeel { flick: list; onScrolled: up => scroller.userScrolled(up) }
     onDraggingChanged: dragging ? scroller.gestureStarted() : scroller.gestureEnded()
-    header: Item { height: 12 }
+    header: Item {
+      width: list.width; height: root.importantOnly ? 36 : 12
+      Text {
+        visible: root.importantOnly
+        x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
+        text: "Important changes only \u00b7 f shows all"
+        color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+      }
+    }
 
     footer: Item { height: 24 }
 
@@ -384,6 +431,8 @@ FocusScope {
         width: parent.width
         height: visible ? changeCol.implicitHeight + 14 : 0
         radius: 12
+        readonly property bool dim: root.minor(row.entry) && !row.current
+        opacity: dim ? 0.55 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : changeHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
@@ -420,7 +469,7 @@ FocusScope {
             color: Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-            wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : 2; elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : changeBox.dim ? 1 : 2; elide: Text.ElideRight
           }
           Repeater {
             model: row.kind === "change" ? row.entry.files : []
@@ -428,6 +477,7 @@ FocusScope {
               id: fileBlock
               required property var modelData
               required property int index
+              visible: !changeBox.dim
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
                 if (!row.current) return 0
@@ -488,7 +538,12 @@ FocusScope {
                 }
               }
               Column {
-                readonly property var lines: row.current ? [] : root.digest(fileBlock.diff)
+                readonly property var score: root.jev[row.entry.jid]
+                readonly property var lines: row.current ? [] : !score ? root.digest(fileBlock.diff)
+                  : score.picks.filter(p => p[0] === fileBlock.index).map(p => p[1]).sort((a, b) => a - b).map(li => {
+                      var m = String(fileBlock.diff[li] || "").match(/^([+\- ])\s*\d*\s?(.*)$/) || ["", "+", ""]
+                      return { sign: m[1], key: "", text: m[2].trim() }
+                    })
                 visible: lines.length > 0
                 x: 12
                 width: parent.width - 12
