@@ -10,6 +10,7 @@ ShellRoot {
   property var sent: []
   property var opened: []
   property var codeFlick: null
+  property var yanks: []
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   function event(message) { state.onLine(JSON.stringify(message), 0) }
   function find(item, pred) {
@@ -35,6 +36,7 @@ ShellRoot {
       rail: rail
       onSessionRequested: sid => test.opened.push(sid)
       onFileRequested: (sid, path, line) => test.opened.push(sid + ":" + path + ":" + line)
+      onYanked: text => test.yanks.push(text)
     }
   }
   function key(k, mods) { input.keyClick(k, mods || Qt.NoModifier, 0); find(page, i => String(i).indexOf("QQuickListView") === 0).forceLayout() }
@@ -127,7 +129,11 @@ ShellRoot {
         test.key(Qt.Key_Return)
         if (page.currentRow.kind !== "change" || !test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("Enter on a card should unfold its edits with their reasons")
         test.key(Qt.Key_Return)
-        if (String(test.opened) !== "beta:/r/Live.qml:1") test.fail("Enter on the newest edit opened " + test.opened)
+        if (page.codeFile !== 0 || test.opened.length) test.fail("Enter on an edit should step into its code, not open the file")
+        test.key(Qt.Key_Return)
+        if (String(test.opened) !== "beta:/r/Live.qml:1") test.fail("Enter on a code line opened " + test.opened)
+        test.key(Qt.Key_Escape)
+        if (page.codeFile !== -1 || page.currentRow.kind !== "change") test.fail("Esc should leave the code but stay on the edit")
         test.key(Qt.Key_K)
         if (page.currentRow.kind !== "card" || !page.cursorPoint() || page.cursorPoint().y >= before.y + 1) test.fail("k from the first edit should land on its card")
         test.key(Qt.Key_K); test.key(Qt.Key_K)
@@ -136,7 +142,28 @@ ShellRoot {
         if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown when unfolded")
         if (test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("unfolding one card should fold the other")
         test.key(Qt.Key_Return)
-        if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("opening an edit went to " + test.opened)
+        if (page.codeLine !== 1 || page.codeCol !== 0) test.fail("the code cursor should start on the first changed line: " + [page.codeLine, page.codeCol])
+        var at2 = (l, c, what) => { if (page.codeLine !== l || page.codeCol !== c) test.fail(what + ": cursor at " + [page.codeLine, page.codeCol] + ", wanted " + [l, c]) }
+        test.key(Qt.Key_W); at2(1, 2, "w")
+        test.key(Qt.Key_W); at2(1, 4, "w again")
+        test.key(Qt.Key_E); at2(1, 7, "e")
+        test.key(Qt.Key_B); at2(1, 6, "b")
+        test.key(Qt.Key_Dollar); at2(1, 11, "$")
+        test.key(Qt.Key_0); at2(1, 0, "0")
+        test.key(Qt.Key_L); test.key(Qt.Key_H); test.key(Qt.Key_H); at2(1, 0, "h stops at the line start")
+        test.key(Qt.Key_J); test.key(Qt.Key_W); at2(2, 9, "j then w")
+        test.key(Qt.Key_V); test.key(Qt.Key_E); test.key(Qt.Key_Y)
+        if (test.yanks[0] !== "string") test.fail("v e y should yank the word, got " + test.yanks)
+        test.key(Qt.Key_V, Qt.ShiftModifier); test.key(Qt.Key_K); test.key(Qt.Key_Y)
+        if (test.yanks[1] !== "x = 1 // set\nproperty string y: Text.Wrap") test.fail("V k y should yank both lines, got " + JSON.stringify(test.yanks[1]))
+        test.key(Qt.Key_G, Qt.ShiftModifier); at2(3, 0, "G")
+        test.key(Qt.Key_G); test.key(Qt.Key_G); at2(0, 0, "gg")
+        test.key(Qt.Key_Y); test.key(Qt.Key_Y)
+        if (test.yanks[2] !== "ctx") test.fail("yy should yank the line, got " + test.yanks[2])
+        if (test.opened.length !== 1) test.fail("vim keys should not open anything: " + test.opened)
+        test.key(Qt.Key_J); test.key(Qt.Key_Return)
+        if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("Enter on a code line should open it at that line, got " + test.opened)
+        test.key(Qt.Key_Escape)
         if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("the focused change should show its full diff, the change with its context")
         if (!test.hasText('</font>x&nbsp;<font color="' + Theme.syntaxOperator + '">=</font>&nbsp;<font color="' + Theme.syntaxNumber + '">1</font>&nbsp;<i><font color="' + Theme.syntaxComment + '">//&nbsp;set</font></i>'))
           test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
@@ -160,16 +187,17 @@ ShellRoot {
         if (!(fy < by && by < gy && gy < Gy)) test.fail("each file of a commit should sit directly above its own diff: " + [fy, by, gy, Gy])
         test.key(Qt.Key_Return)
         if (test.opened.length !== 3 || page.itemIndex !== 0) test.fail("Enter on a change with several files should step inside it, not open one")
-        test.key(Qt.Key_Return)
+        test.key(Qt.Key_Return); test.key(Qt.Key_Return)
         if (test.opened[3] !== "gamma:" + test.repo + "/f.txt:2") test.fail("Enter inside a commit should open its first file: " + test.opened)
-        test.key(Qt.Key_J); test.key(Qt.Key_Return)
+        test.key(Qt.Key_Escape); test.key(Qt.Key_J); test.key(Qt.Key_Return); test.key(Qt.Key_Return)
         if (test.opened[4] !== "gamma:" + test.repo + "/g.txt:1") test.fail("j then Enter inside a change should open the second file, got " + test.opened)
-        test.key(Qt.Key_Escape)
+        test.key(Qt.Key_Escape); test.key(Qt.Key_Escape)
         if (page.itemIndex !== -1) test.fail("Esc should leave the change")
         test.opened.pop()
         test.key(Qt.Key_S)
         if (test.opened[4] !== "gamma") test.fail("s did not open the change's session: " + test.opened)
         test.key(Qt.Key_G, Qt.ShiftModifier); test.key(Qt.Key_Return)
+        if (page.codeFile >= 0) test.key(Qt.Key_Escape)
         test.codeFlick = test.find(page, i => i.flickableDirection === Flickable.HorizontalFlick && i.contentWidth > i.width + 300)
         if (!test.codeFlick) test.fail("a long diff line should scroll sideways instead of being cut off")
         test.key(Qt.Key_L)

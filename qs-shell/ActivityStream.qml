@@ -14,6 +14,7 @@ FocusScope {
   signal sessionRequested(string sid)
   signal fileRequested(string sid, string path, int line)
   signal focusRequested(string direction)
+  signal yanked(string text)
 
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
@@ -61,7 +62,96 @@ FocusScope {
 
   // Inside a change with several files: which file j/k, Enter and h/l act on; -1 = not inside.
   property int itemIndex: -1
-  onCursorKeyChanged: itemIndex = -1
+  onCursorKeyChanged: { itemIndex = -1; codeFile = -1 }
+
+  // A vim cursor inside the focused change's code: codeFile is the file it is in, -1 = not in code.
+  property int codeFile: -1
+  property int codeLine: 0
+  property int codeCol: 0
+  property string visMode: ""
+  property int visLine: 0
+  property int visCol: 0
+  property string pending: ""
+  onCodeFileChanged: { visMode = ""; pending = "" }
+  function codeRows() {
+    var f = currentRow && codeFile >= 0 ? currentRow.files[codeFile] : null, out = [], last = 0
+    for (var l of f ? f.diff : []) {
+      var m = l.match(/^([+\- ])\s*(\d*)\s?(.*)$/)
+      if (m && m[2]) last = +m[2]
+      out.push({ text: l === "\u22ef" || !m ? "" : m[3].replace(/\t/g, "    "), line: m && m[2] ? +m[2] : last + 1 })
+    }
+    return out
+  }
+  function enterCode(fi) {
+    codeFile = fi
+    var rs = codeRows(), first = currentRow.files[fi].diff.findIndex(l => /^[+-]/.test(l))
+    codeLine = Math.max(0, first)
+    codeCol = Math.max(0, (rs[codeLine] || { text: "" }).text.search(/\S/))
+  }
+  function selRange(i) {
+    if (!visMode) return null
+    var a = { l: visLine, c: visCol }, b = { l: codeLine, c: codeCol }
+    if (a.l > b.l || (a.l === b.l && a.c > b.c)) { var t = a; a = b; b = t }
+    if (i < a.l || i > b.l) return null
+    if (visMode === "V") return [0, Infinity]
+    return [i === a.l ? a.c : 0, i === b.l ? b.c + 1 : Infinity]
+  }
+  function keyCode(event) {
+    if (event.modifiers & Qt.ControlModifier) return false
+    var rs = codeRows(), k = event.key, shift = event.modifiers & Qt.ShiftModifier, p = { l: codeLine, c: codeCol }
+    var len = l => rs[l].text.length
+    var ch = q => q.c < len(q.l) ? rs[q.l].text[q.c] : "\n"
+    var cls = c => /\s/.test(c) ? 0 : /\w/.test(c) ? 1 : 2
+    var next = q => q.c < len(q.l) ? { l: q.l, c: q.c + 1 } : q.l < rs.length - 1 ? { l: q.l + 1, c: 0 } : null
+    var prev = q => q.c > 0 ? { l: q.l, c: q.c - 1 } : q.l > 0 ? { l: q.l - 1, c: len(q.l - 1) } : null
+    var was = pending
+    pending = ""
+    if (k === Qt.Key_Escape) { if (visMode) visMode = ""; else codeFile = -1; return true }
+    if (k === Qt.Key_Return || k === Qt.Key_Enter) { fileRequested(currentRow.sid, currentRow.files[codeFile].path, rs[codeLine].line); return true }
+    if (k === Qt.Key_G && !shift && was !== "g") { pending = "g"; return true }
+    if (k === Qt.Key_Y && !visMode && was !== "y") { pending = "y"; return true }
+    if (k === Qt.Key_Y) {
+      var out = []
+      for (var i = 0; i < rs.length; i++) {
+        var r = visMode ? selRange(i) : i === codeLine ? [0, Infinity] : null
+        if (r) out.push(rs[i].text.slice(r[0], r[1]))
+      }
+      yanked(out.join("\n"))
+      if (visMode) { codeLine = Math.min(visLine, codeLine); visMode = "" }
+      return true
+    }
+    if (k === Qt.Key_V) {
+      var mode = shift ? "V" : "v"
+      if (visMode === mode) visMode = ""
+      else { if (!visMode) { visLine = codeLine; visCol = codeCol }; visMode = mode }
+      return true
+    }
+    if (k === Qt.Key_H || k === Qt.Key_Left) p.c--
+    else if (k === Qt.Key_L || k === Qt.Key_Right) p.c++
+    else if (k === Qt.Key_J || k === Qt.Key_Down) p.l++
+    else if (k === Qt.Key_K || k === Qt.Key_Up) p.l--
+    else if (k === Qt.Key_0) p.c = 0
+    else if (k === Qt.Key_AsciiCircum) p.c = Math.max(0, rs[p.l].text.search(/\S/))
+    else if (k === Qt.Key_Dollar) p.c = Infinity
+    else if (k === Qt.Key_G) p = shift ? { l: rs.length - 1, c: 0 } : { l: 0, c: 0 }
+    else if (k === Qt.Key_W) {
+      var c0 = cls(ch(p)), q = p
+      while (q && c0 && cls(ch(q)) === c0) q = next(q)
+      while (q && cls(ch(q)) === 0) q = next(q)
+      if (q) p = q
+    } else if (k === Qt.Key_E) {
+      var q = next(p)
+      while (q && cls(ch(q)) === 0) q = next(q)
+      if (q) { var c1 = cls(ch(q)); for (var n = next(q); n && cls(ch(n)) === c1; n = next(n)) q = n; p = q }
+    } else if (k === Qt.Key_B) {
+      var q = prev(p)
+      while (q && cls(ch(q)) === 0) q = prev(q)
+      if (q) { var c2 = cls(ch(q)); for (var n = prev(q); n && cls(ch(n)) === c2; n = prev(n)) q = n; p = q }
+    } else return true
+    codeLine = Math.max(0, Math.min(rs.length - 1, p.l))
+    codeCol = Math.max(0, Math.min(len(codeLine) - 1, p.c))
+    return true
+  }
   function keyItem(event) {
     var n = currentRow ? currentRow.files.length : 0
     if (event.key === Qt.Key_Escape) itemIndex = -1
@@ -73,6 +163,7 @@ FocusScope {
     return true
   }
   Keys.onPressed: event => {
+    if (codeFile >= 0 && keyCode(event)) { event.accepted = true; return }
     if (itemIndex >= 0 && keyItem(event)) { event.accepted = true; return }
     var ctrl = event.modifiers & Qt.ControlModifier
     if (ctrl && event.key === Qt.Key_L) focusRequested("right")
@@ -367,7 +458,7 @@ FocusScope {
       if (rows[i].kind !== "day") { select(i); return }
     }
   }
-  function open() {
+  function open(byClick) {
     if (currentRow && currentRow.kind === "card") {
       openKey = currentRow.key
       var i = rows.findIndex(r => r.key === openKey) + 1
@@ -378,6 +469,7 @@ FocusScope {
     var files = currentRow.files
     if (itemIndex < 0 && files.length > 1) { itemIndex = Math.max(0, files.findIndex(x => !x.covered)); return }
     var f = itemIndex >= 0 ? files[itemIndex] : files.find(x => !x.covered) || files[0]
+    if (f.diff.length && !byClick) { enterCode(files.indexOf(f)); return }
     fileRequested(currentRow.sid, f.path, f.line || 1)
   }
 
@@ -423,7 +515,7 @@ FocusScope {
       readonly property bool current: index === root.cursor && root.focused
       readonly property Item restDot: kind === "card" ? cardDot : cursorDot
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
-      onHeightChanged: if (current) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
+      onHeightChanged: if (current && root.codeFile < 0) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
       height: kind === "day" ? 52 : kind === "card" ? cardBox.height + 8 : changeBox.height + 6
 
@@ -555,7 +647,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: changeHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
+        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open(true) } }
 
         Rectangle {
           id: cursorDot
@@ -598,6 +690,7 @@ FocusScope {
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
                 if (!row.current) return 0
+                if (root.codeFile === index) return diff.length
                 var left = 40, files = row.entry.files || []
                 for (var j = 0; j < index; j++) left -= Math.min(left, (files[j].diff || []).length)
                 return Math.min(left, diff.length)
@@ -696,6 +789,13 @@ FocusScope {
                     .reduce((n, l) => Math.max(n, l.replace(/^[+\- ]\d*\s?/, "").replace(/\t/g, "    ").length), 0)))
                   contentHeight: height
                   ScrollFeel { flick: codeFlick }
+                  readonly property real caretX: row.current && root.codeFile === fileBlock.index ? 10 + (6 + root.codeCol) * codeMetrics.advanceWidth("0") : -1
+                  onCaretXChanged: {
+                    if (caretX < 0) return
+                    codeGlide.stop()
+                    if (caretX < contentX + 30) contentX = Math.max(0, caretX - 60)
+                    else if (caretX + 30 > contentX + width) contentX = Math.min(contentWidth - width, caretX - width + 60)
+                  }
                   NumberAnimation { id: codeGlide; target: codeFlick; property: "contentX"; duration: 120; easing.type: Easing.OutCubic }
                   Connections {
                     target: root
@@ -720,6 +820,24 @@ FocusScope {
                       width: diffCol.width
                       height: diffLine.implicitHeight + 3
                       color: sign === "-" ? Theme.diffRemovedBg : "transparent"
+                      readonly property bool inCode: row.current && root.codeFile === fileBlock.index
+                      readonly property bool caretHere: inCode && root.codeLine === index
+                      readonly property var sel: inCode ? root.selRange(index) : null
+                      readonly property real adv: codeMetrics.advanceWidth("0")
+                      onCaretHereChanged: if (caretHere) Qt.callLater(() => { var q = mapToItem(list.contentItem, 0, 0); scroller.revealSpan(q.y - 24, height + 48) })
+                      Rectangle {
+                        visible: !!parent.sel
+                        x: diffLine.x + 6 * parent.adv + (parent.sel ? parent.sel[0] : 0) * parent.adv
+                        width: parent.sel ? Math.max(parent.adv, (Math.min(parent.sel[1], diffLine.text === "\u22ef" ? 0 : parent.parts[3].replace(/\t/g, "    ").length) - parent.sel[0]) * parent.adv) : 0
+                        height: parent.height
+                        color: Qt.alpha(Theme.cursor, 0.25)
+                      }
+                      Rectangle {
+                        visible: parent.caretHere
+                        x: diffLine.x + (6 + root.codeCol) * parent.adv
+                        width: parent.adv; height: parent.height
+                        color: Qt.alpha(Theme.cursor, 0.6)
+                      }
                       Rectangle { width: 2; height: parent.height; visible: parent.sign === "+"; color: fileBlock.changed[parent.index] ? Theme.yellow : Theme.green }
                       Text {
                         id: diffLine
@@ -743,9 +861,11 @@ FocusScope {
               }
               Text {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
-                visible: row.current && hidden > 0
+                readonly property bool inCode: root.codeFile === fileBlock.index
+                visible: row.current && fileBlock.diff.length > 0 && (inCode || root.codeFile < 0) && (root.itemIndex < 0 || fileBlock.picked)
                 x: 10
-                text: "\u2026 " + hidden + " more lines" + (root.itemIndex < 0 && row.entry.files.length > 1 ? " \u00b7 Enter picks a file" : " \u00b7 Enter opens the file")
+                text: inCode ? (root.visMode ? (root.visMode === "V" ? "VISUAL LINE" : "VISUAL") + " \u00b7 y yanks \u00b7 Esc" : "hjkl w b e 0 ^ $ gg G \u00b7 v V y yy \u00b7 Enter opens this line \u00b7 Esc leaves")
+                  : (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (root.itemIndex < 0 && row.entry.files.length > 1 ? "Enter picks a file" : "Enter steps into the code")
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }

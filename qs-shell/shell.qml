@@ -606,6 +606,7 @@ ShellRoot {
               onSessionRequested: sid => { win.pane = "rail"; rail.jumpToSession(sid) }
               onFileRequested: (sid, path, line) => { rail.openSessionFile(sid, path, line); win.pane = "nvim" }
               onFocusRequested: direction => win.tryFocus(direction)
+              onYanked: text => rail.copyText(text)
               caretHeld: glideCaret.holding
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
             }
