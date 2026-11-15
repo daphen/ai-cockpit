@@ -120,7 +120,6 @@ ShellRoot {
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" + "_".repeat(400) } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped (`abc1234`)." }] } })
       } else if (stage === 4) {
-        if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
         if (!test.visibleText("Beta shipped.")) test.fail("the live ask's outcome is not on its card")
         if (test.hasText("keep going")) test.fail("a prompt with an outcome should give its heading to the outcome")
         if (test.hasText("streaming") || test.hasText("thinking") || test.hasText("working")) test.fail("live status does not belong on the activity page")
@@ -129,6 +128,9 @@ ShellRoot {
         if (!before) test.fail("no cursor dot on the focused page")
         test.key(Qt.Key_Return)
         if (page.currentRow.kind !== "change" || !test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("Enter on a card should unfold its edits with their reasons")
+        if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
+        test.key(Qt.Key_Return)
+        if (page.showKey !== page.currentRow.key || page.codeFile !== -1) test.fail("the first Enter on an edit should show its diff")
         test.key(Qt.Key_Return)
         if (page.codeFile !== 0 || test.opened.length) test.fail("Enter on an edit should step into its code, not open the file")
         test.key(Qt.Key_Return)
@@ -139,8 +141,11 @@ ShellRoot {
         if (page.currentRow.kind !== "card" || !page.cursorPoint() || page.cursorPoint().y >= before.y + 1) test.fail("k from the first edit should land on its card")
         test.key(Qt.Key_K); test.key(Qt.Key_K)
         if (!page.currentRow.ctx || page.currentRow.ctx.text !== "Activity view") test.fail("k should step card by card, got " + JSON.stringify(page.currentRow.ctx))
+        if (test.visibleText("Activity view") || test.visibleText("New.qml")) test.fail("focusing a card must not grow it")
+        test.key(Qt.Key_Return)
         if (!test.visibleText("Activity view") || !test.visibleText("Rail.qml") || !test.visibleText("New.qml") || !test.visibleText("+2") || !test.visibleText("-1"))
-          test.fail("the focused card should show its ask and its files with counts")
+          test.fail("the unfolded card should show its ask and its files with counts")
+        if (test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("focusing an edit must not show its full diff")
         test.key(Qt.Key_Return)
         if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown when unfolded")
         if (test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("unfolding one card should fold the other")
@@ -174,15 +179,15 @@ ShellRoot {
           test.fail("QML types are not in the Neovim theme's type color")
         if (!test.hasText('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</font><font color="' + Theme.red + '">z</font>'))
           test.fail("a removed line should read like hunk-nvim's ghost line: red, unhighlighted, unnumbered")
-        test.key(Qt.Key_J)
+        test.key(Qt.Key_Escape); test.key(Qt.Key_J)
         if (!test.visibleText("Wrote the whole file \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
         if (test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("an unfocused change should show a summary, not its whole diff")
         if (!test.hasText("</font>&nbsp;&nbsp;property string y")) test.fail("the summary should name the declaration the edit added")
-        test.key(Qt.Key_Return)
+        test.key(Qt.Key_Return); test.key(Qt.Key_Return)
         if (test.opened[2] !== "alpha:/r/New.qml:1") test.fail("j then Enter inside a card opened " + test.opened)
-        test.key(Qt.Key_Escape)
+        test.key(Qt.Key_Escape); test.key(Qt.Key_Escape)
         if (page.currentRow.kind !== "card" || test.visibleText("The rail needs a hook so the page can open files.")) test.fail("Esc should fold the card back")
-        test.key(Qt.Key_J); test.key(Qt.Key_Return)
+        test.key(Qt.Key_J); test.key(Qt.Key_Return); test.key(Qt.Key_Return)
         if (page.currentRow.why !== "Fix via shell" || page.currentRow.files.length !== 2) test.fail("expected the two-file commit, got " + page.currentRow.why)
         if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
         var at = pred => { var it = test.find(page, i => i.visible && pred(String(i.text || ""))); return it ? it.mapToItem(page, 0, 0).y : NaN }
@@ -199,7 +204,7 @@ ShellRoot {
         test.opened.pop()
         test.key(Qt.Key_S)
         if (test.opened[4] !== "gamma") test.fail("s did not open the change's session: " + test.opened)
-        test.key(Qt.Key_G, Qt.ShiftModifier); test.key(Qt.Key_Return)
+        test.key(Qt.Key_G, Qt.ShiftModifier); test.key(Qt.Key_Return); test.key(Qt.Key_Return)
         if (page.codeFile >= 0) test.key(Qt.Key_Escape)
         test.codeFlick = test.find(page, i => i.flickableDirection === Flickable.HorizontalFlick && i.contentWidth > i.width + 300)
         if (!test.codeFlick) test.fail("a long diff line should scroll sideways instead of being cut off")
@@ -242,6 +247,7 @@ ShellRoot {
       } else if (stage === 11) {
         var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), w = test.walk
         if (w.top !== undefined) {
+          if (Math.abs(lv.contentHeight - w.height) > 0.5) test.fail("step " + w.steps + ": moving the cursor resized rows, " + w.height + " -> " + lv.contentHeight)
           var item = lv.itemAtIndex(page.cursor), top = item.y - lv.contentY, bottom = top + item.height
           if (top < -1 || (bottom > lv.height + 1 && top > 1)) test.fail("step " + w.steps + ": the landed row is off screen at " + [top, bottom])
           if (w.top >= 0 && w.top + item.height <= lv.height && Math.abs(top - w.top) > 1)
@@ -255,7 +261,7 @@ ShellRoot {
         var dest = page.cursor, step = w.dir === Qt.Key_K ? -1 : 1
         for (dest += step; dest >= 0 && dest < page.rows.length && !page.stop(page.rows[dest].kind); dest += step);
         var it = lv.itemAtIndex(dest)
-        w.top = it ? it.y - lv.contentY : -1
+        w.top = it ? it.y - lv.contentY : -1; w.height = lv.contentHeight
         test.key(w.dir); w.steps++
         return
       }

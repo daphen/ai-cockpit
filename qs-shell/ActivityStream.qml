@@ -62,7 +62,7 @@ FocusScope {
 
   // Inside a change with several files: which file j/k, Enter and h/l act on; -1 = not inside.
   property int itemIndex: -1
-  onCursorKeyChanged: { itemIndex = -1; codeFile = -1; anchor = null }
+  onCursorKeyChanged: { itemIndex = -1; codeFile = -1 }
 
   // A vim cursor inside the focused change's code: codeFile is the file it is in, -1 = not in code.
   property int codeFile: -1
@@ -84,7 +84,6 @@ FocusScope {
   }
   function enterCode(fi) {
     codeFile = fi
-    anchor = null
     var rs = codeRows(), first = currentRow.files[fi].diff.findIndex(l => /^[+-]/.test(l))
     codeLine = Math.max(0, first)
     codeCol = Math.max(0, (rs[codeLine] || { text: "" }).text.search(/\S/))
@@ -175,6 +174,7 @@ FocusScope {
     else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
     else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
     else if (event.key === Qt.Key_F) importantOnly = !importantOnly
+    else if (event.key === Qt.Key_Escape && currentRow && showKey === currentRow.key) showKey = ""
     else if (event.key === Qt.Key_Escape && openKey) { var k = openKey; openKey = ""; cursorKey = k }
     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
     else return
@@ -409,6 +409,8 @@ FocusScope {
     return out.sort((a, b) => a.at - b.at)
   }
   property string openKey: ""
+  // Focus never resizes a row: only Enter does. showKey is the one edit whose full diff is out.
+  property string showKey: ""
   readonly property var rows: {
     var out = [], day = "", sid = ""
     for (var c of cards) {
@@ -444,30 +446,9 @@ FocusScope {
   function stop(kind) { return kind === "card" || kind === "change" }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
-  // Moving the cursor collapses the row left and expands the one landed on, a frame later. The landed
-  // row stays where it was on screen through that (nudged only to fit) until the user scrolls.
-  property var anchor: null
   function select(i) {
-    var it = list.itemAtIndex(i), last = rows.length - 1
-    while (last > i && !stop(rows[last].kind)) last--
     cursorKey = rows[i].key
-    if (!it || i === last) { anchor = null; showRow(i); return }
-    scroller.hold()
-    anchor = { key: rows[i].key, top: it.y - list.contentY }
-    holdAnchor()
-  }
-  function holdAnchor() {
-    if (!anchor) return
-    var i = rows.findIndex(r => r.key === anchor.key), it = i >= 0 ? list.itemAtIndex(i) : null
-    if (!it) { anchor = null; return }
-    var top = it.height >= list.height ? 0 : Math.max(0, Math.min(anchor.top, list.height - it.height))
-    list.contentY = Math.max(list.originY, Math.min(list.originY + Math.max(0, list.contentHeight - list.height), it.y - top))
-  }
-  Connections {
-    target: list
-    function onContentHeightChanged() { root.holdAnchor() }
-    function onOriginYChanged() { root.holdAnchor() }
-    function onHeightChanged() { root.holdAnchor() }
+    showRow(i)
   }
   function showRow(i) {
     var last = rows.length - 1
@@ -492,6 +473,7 @@ FocusScope {
       return
     }
     if (!currentRow || currentRow.kind !== "change") return
+    if (showKey !== currentRow.key) { showKey = currentRow.key; return }
     var files = currentRow.files
     if (itemIndex < 0 && files.length > 1) { itemIndex = Math.max(0, files.findIndex(x => !x.covered)); return }
     var f = itemIndex >= 0 ? files[itemIndex] : files.find(x => !x.covered) || files[0]
@@ -518,8 +500,8 @@ FocusScope {
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }
     cacheBuffer: 1000000
-    ScrollFeel { flick: list; onScrolled: up => { root.anchor = null; scroller.userScrolled(up) } }
-    onDraggingChanged: { root.anchor = null; dragging ? scroller.gestureStarted() : scroller.gestureEnded() }
+    ScrollFeel { flick: list; onScrolled: up => scroller.userScrolled(up) }
+    onDraggingChanged: dragging ? scroller.gestureStarted() : scroller.gestureEnded()
     header: Item {
       width: list.width; height: root.importantOnly ? 36 : 12
       Text {
@@ -541,7 +523,8 @@ FocusScope {
       readonly property bool current: index === root.cursor && root.focused
       readonly property Item restDot: kind === "card" ? cardDot : cursorDot
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
-      onHeightChanged: if (current && root.codeFile < 0 && !root.anchor) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
+      readonly property bool expanded: root.showKey === key
+      onHeightChanged: if (current && root.codeFile < 0) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
       height: kind === "day" ? 52 : kind === "who" ? 40 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
 
@@ -568,9 +551,9 @@ FocusScope {
         visible: row.kind === "card"
         y: 1
         width: parent.width
-        height: visible ? cardCol.implicitHeight + (open ? 20 : 12) : 0
+        height: visible ? cardCol.implicitHeight + 16 : 0
         radius: 12
-        readonly property bool open: row.current || root.openKey === row.key
+        readonly property bool open: root.openKey === row.key
         readonly property bool dim: root.minor(row.entry) && !open
         readonly property var files: row.entry.files || []
         readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
@@ -595,14 +578,14 @@ FocusScope {
         Text {
           id: cardMeta
           anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: cardCol.y + (cardHead.lineHeight - height) / 2 }
-          text: (cardBox.open || !cardBox.files.length ? "" : cardBox.files.length + (cardBox.files.length === 1 ? " file" : " files") + "  \u00b7  ")
+          text: (!cardBox.files.length ? "" : cardBox.files.length + (cardBox.files.length === 1 ? " file" : " files") + "  \u00b7  ")
             + root.clock(row.entry.at || 0)
           color: root.metaColor
           font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
         }
         Column {
           id: cardCol
-          x: 24; y: cardBox.open ? 10 : 6
+          x: 24; y: 8
           width: parent.width - 36 - cardMeta.width - 12
           spacing: 6
           Text {
@@ -651,11 +634,6 @@ FocusScope {
               color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
             }
           }
-          Text {
-            visible: row.current
-            text: root.openKey === row.key ? "Esc folds the edits" : "Enter shows " + (row.entry.changes || []).length + ((row.entry.changes || []).length === 1 ? " edit" : " edits")
-            color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
-          }
         }
       }
 
@@ -702,7 +680,7 @@ FocusScope {
             color: Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-            wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : 2; elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: row.expanded ? 6 : 2; elide: Text.ElideRight
           }
           Repeater {
             model: row.kind === "change" ? row.entry.files : []
@@ -712,7 +690,7 @@ FocusScope {
               required property int index
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
-                if (!row.current) return 0
+                if (!row.expanded) return 0
                 if (root.codeFile === index) return diff.length
                 var left = 40, files = row.entry.files || []
                 for (var j = 0; j < index; j++) left -= Math.min(left, (files[j].diff || []).length)
@@ -771,7 +749,7 @@ FocusScope {
                 }
               }
               Column {
-                readonly property var lines: row.current ? [] : root.digest(fileBlock.diff)
+                readonly property var lines: row.expanded ? [] : root.digest(fileBlock.diff)
                 visible: lines.length > 0
                 x: 12
                 width: parent.width - 12
@@ -885,7 +863,7 @@ FocusScope {
               Text {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
                 readonly property bool inCode: root.codeFile === fileBlock.index
-                visible: row.current && fileBlock.diff.length > 0 && (inCode || root.codeFile < 0) && (root.itemIndex < 0 || fileBlock.picked)
+                visible: row.expanded && fileBlock.diff.length > 0 && (inCode || root.codeFile < 0) && (root.itemIndex < 0 || fileBlock.picked)
                 x: 10
                 text: inCode ? (root.visMode ? (root.visMode === "V" ? "VISUAL LINE" : "VISUAL") + " \u00b7 y yanks \u00b7 Esc" : "hjkl w b e 0 ^ $ gg G \u00b7 v V y yy \u00b7 Enter opens this line \u00b7 Esc leaves")
                   : (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (root.itemIndex < 0 && row.entry.files.length > 1 ? "Enter picks a file" : "Enter steps into the code")
