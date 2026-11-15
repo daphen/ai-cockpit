@@ -97,7 +97,6 @@ FocusScope {
     return [i === a.l ? a.c : 0, i === b.l ? b.c + 1 : Infinity]
   }
   function keyCode(event) {
-    if (event.modifiers & Qt.ControlModifier) return false
     var rs = codeRows(), k = event.key, shift = event.modifiers & Qt.ShiftModifier, p = { l: codeLine, c: codeCol }
     var len = l => rs[l].text.length
     var ch = q => q.c < len(q.l) ? rs[q.l].text[q.c] : "\n"
@@ -126,7 +125,10 @@ FocusScope {
       else { if (!visMode) { visLine = codeLine; visCol = codeCol }; visMode = mode }
       return true
     }
-    if (k === Qt.Key_H || k === Qt.Key_Left) p.c--
+    if (event.modifiers & Qt.ControlModifier) {
+      if (k !== Qt.Key_D && k !== Qt.Key_U) return false
+      p.l += (k === Qt.Key_D ? 1 : -1) * Math.max(1, Math.floor(height / (2 * fsMeta * 1.5)))
+    } else if (k === Qt.Key_H || k === Qt.Key_Left) p.c--
     else if (k === Qt.Key_L || k === Qt.Key_Right) p.c++
     else if (k === Qt.Key_J || k === Qt.Key_Down) p.l++
     else if (k === Qt.Key_K || k === Qt.Key_Up) p.l--
@@ -202,70 +204,46 @@ FocusScope {
   function esc(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
   // A few lines that say what changed: declarations added/removed and "old → new" edits;
   // context, blanks, comments, imports and moved lines are dropped.
-  function digest(diff) {
+  // The hunk that best matches what the agent said it did, as real diff lines.
+  function snippet(card) {
+    var words = t => (String(t).replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z]{3,}/g) || [])
+      .filter(w => !/^(the|and|for|with|now|that|this|from|into|var|let|const|function|return|property|readonly|true|false|null|string|bool|int)$/.test(w))
+    var want = {}
+    for (var w of words((card.outcome || "") + " " + (card.ctx ? card.ctx.text : ""))) want[w] = true
     var trivial = t => !t || /^[\s{}()\[\];,]*$/.test(t) || /^(\/\/|#|\/\*|\*|--)/.test(t) || /^(import|from\s+\S+\s+import|use|#include)\b/.test(t)
-    var decl = /^(export\s+)?(default\s+)?(async\s+)?(pub\s+)?(readonly\s+|required\s+|default\s+)*(function|def|fn|func|class|interface|type|struct|enum|component|signal|property)\b/
-    var words = /^(if|else|for|while|return|var|let|const|case|switch|function|new|await)$/
-    var lines = diff.map(l => l.match(/^([+\- ])\s*\d*\s?(.*)$/)).filter(m => m)
-    var olds = {}, news = {}
-    for (var m of lines) { var t = m[2].trim(); if (m[1] === "-") olds[t] = true; else if (m[1] === "+") news[t] = true }
-    var out = [], loose = []
-    function head(t) {
-      var k = t.match(/\b(?:function|def|fn|func|class|signal|component|struct|enum|interface|type)\s+([\w$]+)/) || t.match(/^(?:(?:readonly|required|property)\s+)*(?:\w+\s+)?([\w.]+)\s*[:=]/) || t.match(/^([\w.]+(?:\s+on\s+\w+)?)\s*\{\s*$/)
-      return k && !words.test(k[1]) && k[1] !== t ? k[1] : ""
-    }
-    function clip(t) { if (decl.test(t)) t = t.replace(/^((?:\w+\s+)*property\s+[\w<>.]+\s+\w+).*/, "$1").replace(/\s*\{.*$/, "").replace(/:\s*$/, ""); return t.length > 72 ? t.slice(0, 71) + "\u2026" : t }
-    function pair(a, b) {
-      var ta = a.match(/[\w$.]+|"[^"]*"|'[^']*'|\S/g) || [], tb = b.match(/[\w$.]+|"[^"]*"|'[^']*'|\S/g) || []
-      var key = head(b)
-      if (ta.length === tb.length) {
-        var d = [], first = -1
-        for (var i = 0; i < ta.length; i++) if (ta[i] !== tb[i]) {
-          if (first < 0) first = i
-          var c = ta[i] + " \u2192 " + tb[i]
-          if (d.indexOf(c) < 0) d.push(c)
+    var best = null, files = []
+    for (var e of card.changes || [])
+      for (var f of e.files || []) {
+        if (f.covered) continue
+        var seen = files.find(x => x.path === f.path)
+        if (!seen) files.push(seen = { path: f.path, add: 0, del: 0 })
+        seen.add += f.add; seen.del += f.del
+        var hunk = []
+        var close = () => {
+          var real = hunk.filter(l => !trivial(l.text.trim()))
+          if (real.length) {
+            var hit = {}
+            for (var l of real) for (var w of words(l.text)) if (want[w]) hit[w] = true
+            var score = 3 * Object.keys(hit).length + Math.min(real.length, 6) + (real.some(l => /\b(function|def|fn|func|class|signal|property|struct|interface|type)\b/.test(l.text)) ? 2 : 0)
+            if (!best || score > best.score) best = { score: score, path: f.path, lines: real }
+          }
+          hunk = []
         }
-        // Name the value by the nearest "name:" / "name =" before the first change.
-        for (var j = first - 1; j > 0; j--) if ((ta[j] === ":" || ta[j] === "=") && /^[\w$.]+$/.test(ta[j - 1]) && !words.test(ta[j - 1])) { key = ta[j - 1]; break }
-        if (d.length && d.length <= 3) return { sign: "~", key: key, text: d.join(" \u00b7 ") }
+        for (var line of f.diff || []) {
+          var m = String(line).match(/^([+\-])\s*(\d*)\s?(.*)$/)
+          if (m) hunk.push({ sign: m[1], num: m[2], text: m[3].replace(/\t/g, "    ") })
+          else close()
+        }
+        close()
       }
-      var p = 0, q = 0
-      while (p < a.length && p < b.length && a[p] === b[p]) p++
-      while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++
-      while (p > 0 && /\w/.test(a[p - 1])) p--
-      while (q > 0 && /\w/.test(a[a.length - q])) q--
-      var x = a.slice(p, a.length - q).trim(), y = b.slice(p, b.length - q).trim()
-      if (p + q < Math.min(a.length, b.length) * 0.4 || x.length > 40 || y.length > 40) return null
-      return { sign: "~", key: key, text: x ? y ? x + " \u2192 " + y : "\u2212 " + x : "+ " + y }
-    }
-    function flush(rem, add) {
-      rem = rem.filter(t => !trivial(t) && !news[t]); add = add.filter(t => !trivial(t) && !olds[t])
-      var n = Math.min(rem.length, add.length)
-      for (var i = 0; i < n; i++) {
-        var e = pair(rem[i], add[i])
-        if (e) out.push(e)
-        else { rem.push(rem[i]); add.push(add[i]) }
-      }
-      for (var r of rem.slice(n)) if (decl.test(r)) out.push({ sign: "-", key: "", text: clip(r) })
-      for (var t of add.slice(n)) { if (decl.test(t)) out.push({ sign: "+", key: "", text: clip(t) }); else loose.push(t) }
-    }
-    var rem = [], add = []
-    for (var m of lines) {
-      if (m[1] === "-") rem.push(m[2].trim())
-      else if (m[1] === "+") add.push(m[2].trim())
-      else { flush(rem, add); rem = []; add = [] }
-    }
-    flush(rem, add)
-    if (!out.length && loose.length) out.push({ sign: "+", key: "", text: clip(loose[0]) })
-    var seen = {}, kept = []
-    for (var e of out) {
-      if (e.sign === "-" && out.some(o => o.sign === "+" && o.text === e.text)) continue
-      if (e.sign === "+" && out.some(o => o.sign === "-" && o.text === e.text)) e = { sign: "~", key: head(e.text), text: "body changed" }
-      var id = e.sign + e.key + e.text
-      if (!seen[id]) { seen[id] = true; kept.push(e) }
-    }
-    return kept
+    if (!best) return null
+    var fileOf = files.find(x => x.path === best.path)
+    var indent = Math.min(...best.lines.slice(0, 5).map(l => l.text.search(/\S|$/)))
+    return { path: best.path, name: String(best.path).split("/").pop(), add: fileOf.add, del: fileOf.del,
+             lines: best.lines.slice(0, 5).map(l => Object.assign({}, l, { text: l.text.slice(indent) })),
+             more: best.lines.length - 5, otherFiles: files.length - 1 }
   }
+
   function relPath(sid, path) {
     var cwd = String((sessions.find(s => s.name === sid) || {}).cwd || "")
     var p = String(path || "")
@@ -605,16 +583,7 @@ FocusScope {
         readonly property var ctx: row.entry.ctx || ({ text: "" })
         readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
           : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
-        // What changed, at a glance: the first few digest lines across the ask's files.
-        readonly property var glance: {
-          var out = []
-          for (var e of row.kind === "card" ? row.entry.changes || [] : [])
-            for (var f of e.files || []) {
-              if (f.covered) continue
-              for (var d of root.digest(f.diff || [])) out.push(Object.assign({ file: String(f.path).split("/").pop() }, d))
-            }
-          return out
-        }
+        readonly property var glance: row.kind === "card" ? root.snippet(row.entry) : null
         readonly property string done: open ? root.tidy(row.entry.outcome || last.why) : root.headline(row.entry.outcome || last.why)
         opacity: dim ? 0.5 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
@@ -652,30 +621,61 @@ FocusScope {
             color: root.contentColor
             font.family: root.bodyFont; font.pixelSize: root.fsBody
           }
-          Column {
+          Rectangle {
+            id: glanceBox
             width: parent.width
-            visible: !cardBox.dim && cardBox.glance.length > 0
-            Repeater {
-              model: cardBox.glance.slice(0, 3)
-              delegate: Text {
-                required property var modelData
-                width: parent.width
-                textFormat: Text.StyledText
-                text: '<font color="' + root.metaColor + '">' + root.esc(modelData.file) + '</font>&nbsp;&nbsp;<font color="'
-                  + (modelData.sign === "+" ? Theme.green : modelData.sign === "-" ? Theme.red : Theme.yellow) + '">'
-                  + (modelData.sign === "-" ? "\u2212" : modelData.sign) + "</font>&nbsp;"
-                  + (modelData.key ? '<font color="' + root.metaColor + '">' + root.esc(modelData.key) + "</font>&nbsp;" : "")
-                  + root.esc(modelData.text)
-                elide: Text.ElideRight; maximumLineCount: 1
-                color: Theme.fg
-                font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
-                lineHeightMode: Text.FixedHeight; lineHeight: (root.fsMeta - 2) * 1.6
+            visible: !cardBox.dim && !cardBox.open && !!cardBox.glance
+            height: visible ? glanceCol.implicitHeight + 14 : 0
+            radius: 10
+            color: Qt.alpha(Theme.fg, 0.035)
+            clip: true
+            readonly property string language: root.rail && cardBox.glance ? root.rail.codeLanguage(cardBox.glance.path) : ""
+            Column {
+              id: glanceCol
+              y: 7
+              width: parent.width
+              Item {
+                x: 12; width: parent.width - 24; height: 22
+                Icon { id: gIcon; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
+                Text {
+                  anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                  text: cardBox.glance ? cardBox.glance.name + (cardBox.glance.otherFiles > 0 ? "  +" + cardBox.glance.otherFiles + (cardBox.glance.otherFiles === 1 ? " file" : " files") : "") : ""
+                  textFormat: Text.PlainText
+                  color: Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
+                }
+                Row {
+                  anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                  spacing: 8
+                  Text { visible: !!cardBox.glance && cardBox.glance.add > 0; text: cardBox.glance ? "+" + cardBox.glance.add : ""; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+                  Text { visible: !!cardBox.glance && cardBox.glance.del > 0; text: cardBox.glance ? "\u2212" + cardBox.glance.del : ""; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+                }
               }
-            }
-            Text {
-              visible: cardBox.glance.length > 3
-              text: "+ " + (cardBox.glance.length - 3) + " more"
-              color: root.metaColor; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
+              Repeater {
+                model: cardBox.glance ? cardBox.glance.lines : []
+                delegate: Rectangle {
+                  required property var modelData
+                  width: glanceCol.width
+                  height: (root.fsMeta - 2) * 1.65
+                  color: modelData.sign === "-" ? Theme.diffRemovedBg : "transparent"
+                  Rectangle { width: 2; height: parent.height; visible: modelData.sign === "+"; color: Theme.green }
+                  Text {
+                    x: 12; width: parent.width - 24
+                    anchors.verticalCenter: parent.verticalCenter
+                    textFormat: Text.StyledText
+                    text: root.rail ? root.rail.highlightCode(modelData.text, glanceBox.language) : root.esc(modelData.text)
+                    elide: Text.ElideRight; maximumLineCount: 1
+                    color: Theme.fg
+                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                  }
+                }
+              }
+              Text {
+                x: 12
+                visible: !!cardBox.glance && cardBox.glance.more > 0
+                text: cardBox.glance ? "\u22ef " + cardBox.glance.more + " more lines" : ""
+                color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
+                topPadding: 2
+              }
             }
           }
           Text {

@@ -87,7 +87,7 @@ ShellRoot {
             content: [{ type: "text", text: "Old ask" }] } },
           { type: "message", id: "g01", message: { role: "assistant", timestamp: test.t0 - 3 * 86400000 + 500, content: [
             { type: "toolCall", id: "eo", name: "edit", arguments: { path: "/r/Older.qml", edits: [] } }] } },
-          { type: "message", id: "ro", message: { role: "toolResult", toolCallId: "eo", timestamp: test.t0 - 3 * 86400000 + 600, details: { diff: "+ 1 older" } } },
+          { type: "message", id: "ro", message: { role: "toolResult", toolCallId: "eo", timestamp: test.t0 - 3 * 86400000 + 600, details: { diff: "+ 1 older\n  2 ctx\n+ 3 const done = checkCockpit()" } } },
           { type: "message", id: "g00", message: { role: "assistant", timestamp: test.t0 - 3 * 86400000 + 1000, content: [{ type: "text", text: "\u27e2 Old thing done; check it in your Cockpit." }] } }] } })
         // The same transcript again must not duplicate rows.
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
@@ -103,14 +103,17 @@ ShellRoot {
         if (!test.visibleText("Activity view renders history")) test.fail("an ask's card should say its outcome as a short headline")
         var fold = page.rows.find(r => r.kind === "fold")
         if (!fold || fold.count !== 1 || test.hasText("Old thing done")) test.fail("a past day should fold to one row with its ask count")
+        var od = {}; od[fold.text] = true; page.openDays = od
+        test.find(page, i => String(i).indexOf("QQuickListView") === 0).forceLayout()
+        if (!test.hasText("checkCockpit") || test.hasText("older")) test.fail("a card's preview should show the code that matches what the agent said it did")
+        page.openDays = ({})
         if (!test.find(page, i => i.visible && i.color !== undefined && i.width === 3 && Qt.colorEqual(i.color, page.hueFor("gamma"))))
           test.fail("a session's cards should carry its colour bar")
         if (page.cards.filter(c => c.ctx.text === "Activity view").length !== 1) test.fail("one card per ask")
         if (test.visibleText("Activity view")) test.fail("an unfocused card should be one line: what was done, not also the ask")
         if (page.rows.filter(r => r.kind === "who" && r.sid === "gamma").length !== 1) test.fail("the session name should head its run of cards once")
         if (test.visibleText("The rail needs a hook so the page can open files.")) test.fail("an edit's reason belongs inside its folded card")
-        if (test.visibleText("Rail.qml")) test.fail("file pills belong to the focused card only")
-        if (!test.find(page, i => i.visible && /^<font[^>]*>Rail\.qml<\/font>.*property string y/.test(String(i.text || ""))))
+        if (!test.hasText("Rail.qml  +1 file") || !test.hasText('</font>&nbsp;y:&nbsp;<font'))
           test.fail("a folded card should show at a glance what changed: the file and the declaration it added")
         if (!test.visibleText("Fix via shell")) test.fail("a commit made outside the edit tool is missing")
         if (test.visibleText("init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
@@ -128,6 +131,7 @@ ShellRoot {
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
         test.event({ type: "tool_execution_start", session: "beta", toolName: "edit", toolCallId: "live1", args: { path: "/r/Live.qml", edits: [] } })
+        test.event({ type: "tool_execution_end", session: "beta", toolName: "read", toolCallId: "rd1", result: { details: {} } })
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" + "_".repeat(400) } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped (`abc1234`)." }] } })
       } else if (stage === 4) {
@@ -152,7 +156,7 @@ ShellRoot {
         if (page.currentRow.kind !== "card" || !page.cursorPoint() || page.cursorPoint().y >= before.y + 1) test.fail("k from the first edit should land on its card")
         test.key(Qt.Key_K); test.key(Qt.Key_K)
         if (!page.currentRow.ctx || page.currentRow.ctx.text !== "Activity view") test.fail("k should step card by card, got " + JSON.stringify(page.currentRow.ctx))
-        if (test.visibleText("Activity view") || test.visibleText("New.qml")) test.fail("focusing a card must not grow it")
+        if (test.visibleText("Activity view")) test.fail("focusing a card must not grow it")
         test.key(Qt.Key_Return)
         if (!test.visibleText("Activity view") || !test.visibleText("Rail.qml") || !test.visibleText("New.qml") || !test.visibleText("+2") || !test.visibleText("-1"))
           test.fail("the unfolded card should show its ask and its files with counts")
@@ -176,6 +180,8 @@ ShellRoot {
         if (test.yanks[1] !== "x = 1 // set\nproperty string y: Text.Wrap") test.fail("V k y should yank both lines, got " + JSON.stringify(test.yanks[1]))
         test.key(Qt.Key_G, Qt.ShiftModifier); at2(3, 0, "G")
         test.key(Qt.Key_G); test.key(Qt.Key_G); at2(0, 0, "gg")
+        test.key(Qt.Key_D, Qt.ControlModifier); at2(3, 0, "ctrl-d")
+        test.key(Qt.Key_U, Qt.ControlModifier); at2(0, 0, "ctrl-u")
         test.key(Qt.Key_Y); test.key(Qt.Key_Y)
         if (test.yanks[2] !== "ctx") test.fail("yy should yank the line, got " + test.yanks[2])
         if (test.opened.length !== 1) test.fail("vim keys should not open anything: " + test.opened)

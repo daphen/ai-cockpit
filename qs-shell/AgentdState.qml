@@ -1581,11 +1581,12 @@ Item {
         activity.del = ad[1]
         feedGen++
       }
-      if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || "")))
+      if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || ""))) {
         var editRow = _editActivity(sid, m.toolCallId, Date.now(), activity.path, det, "", _editWhy[m.toolCallId])
         var whys = _editWhy; delete whys[m.toolCallId]
         if (!editRow.add && !editRow.del) { editRow.add = activity.add || 0; editRow.del = activity.del || 0 }
         _noteActivity([editRow])
+      }
     } else if (t === "agent_end" && sid === selectedSession) {
       refreshEntries(sid)
       send({ type: "get_session_stats", session: sid })
