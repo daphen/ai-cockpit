@@ -211,13 +211,15 @@ FocusScope {
     var want = {}
     for (var w of words((card.outcome || "") + " " + (card.ctx ? card.ctx.text : ""))) want[w] = true
     var trivial = t => !t || /^[\s{}()\[\];,]*$/.test(t) || /^(\/\/|#|\/\*|\*|--)/.test(t) || /^(import|from\s+\S+\s+import|use|#include)\b/.test(t)
-    var best = null, files = []
+    var isTest = p => /(^|\/)(tests?|__tests__|spec)\/|[._-](test|spec)\.|(^|\/)test_[^/]*$/.test(String(p))
+    var files = []
     for (var e of card.changes || [])
       for (var f of e.files || []) {
         if (f.covered) continue
-        var seen = files.find(x => x.path === f.path)
-        if (!seen) files.push(seen = { path: f.path, add: 0, del: 0 })
-        seen.add += f.add; seen.del += f.del
+        var file = files.find(x => x.path === f.path)
+        if (!file) files.push(file = { path: f.path, name: String(f.path).split("/").pop(), add: 0, del: 0, why: "", best: null, test: isTest(f.path) })
+        file.add += f.add; file.del += f.del
+        if (e.why) file.why = headline(e.why)
         var hunk = []
         var close = () => {
           var real = hunk.filter(l => !trivial(l.text.trim()))
@@ -225,7 +227,7 @@ FocusScope {
             var hit = {}
             for (var l of real) for (var w of words(l.text)) if (want[w]) hit[w] = true
             var score = 3 * Object.keys(hit).length + Math.min(real.length, 6) + (real.some(l => /\b(function|def|fn|func|class|signal|property|struct|interface|type)\b/.test(l.text)) ? 2 : 0)
-            if (!best || score > best.score) best = { score: score, path: f.path, lines: real }
+            if (!file.best || score > file.best.score) file.best = { score: score, lines: real }
           }
           hunk = []
         }
@@ -236,12 +238,14 @@ FocusScope {
         }
         close()
       }
-    if (!best) return null
-    var fileOf = files.find(x => x.path === best.path)
-    var indent = Math.min(...best.lines.slice(0, 5).map(l => l.text.search(/\S|$/)))
-    return { path: best.path, name: String(best.path).split("/").pop(), add: fileOf.add, del: fileOf.del,
-             lines: best.lines.slice(0, 5).map(l => Object.assign({}, l, { text: l.text.slice(indent) })),
-             more: best.lines.length - 5, otherFiles: files.length - 1 }
+    if (!files.length) return null
+    var score = x => x.best ? x.best.score : -1
+    files.sort((a, b) => (a.test - b.test) || (score(b) - score(a)))
+    var top = files[0].best, lines = top ? top.lines.slice(0, 5) : []
+    var indent = lines.length ? Math.min(...lines.map(l => l.text.search(/\S|$/))) : 0
+    return { files: files.slice(0, 4), more: files.length - 4, path: files[0].path,
+             lines: lines.map(l => Object.assign({}, l, { text: l.text.slice(indent) })),
+             moreLines: top ? top.lines.length - lines.length : 0 }
   }
 
   function relPath(sid, path) {
@@ -634,45 +638,67 @@ FocusScope {
               id: glanceCol
               y: 7
               width: parent.width
-              Item {
-                x: 12; width: parent.width - 24; height: 22
-                Icon { id: gIcon; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
-                Text {
-                  anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
-                  text: cardBox.glance ? cardBox.glance.name + (cardBox.glance.otherFiles > 0 ? "  +" + cardBox.glance.otherFiles + (cardBox.glance.otherFiles === 1 ? " file" : " files") : "") : ""
-                  textFormat: Text.PlainText
-                  color: Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
-                }
-                Row {
-                  anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-                  spacing: 8
-                  Text { visible: !!cardBox.glance && cardBox.glance.add > 0; text: cardBox.glance ? "+" + cardBox.glance.add : ""; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
-                  Text { visible: !!cardBox.glance && cardBox.glance.del > 0; text: cardBox.glance ? "\u2212" + cardBox.glance.del : ""; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
-                }
-              }
               Repeater {
-                model: cardBox.glance ? cardBox.glance.lines : []
-                delegate: Rectangle {
+                model: cardBox.glance ? cardBox.glance.files : []
+                delegate: Column {
                   required property var modelData
+                  required property int index
                   width: glanceCol.width
-                  height: (root.fsMeta - 2) * 1.65
-                  color: modelData.sign === "-" ? Theme.diffRemovedBg : "transparent"
-                  Rectangle { width: 2; height: parent.height; visible: modelData.sign === "+"; color: Theme.green }
+                  Item {
+                    x: 12; width: parent.width - 24; height: 22
+                    Icon { id: gIcon; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
+                    Text {
+                      id: gName
+                      anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
+                      text: modelData.name; textFormat: Text.PlainText
+                      color: Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
+                    }
+                    Text {
+                      anchors { left: gName.right; leftMargin: 12; right: gCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+                      text: modelData.why; textFormat: Text.PlainText
+                      elide: Text.ElideRight; maximumLineCount: 1
+                      color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
+                    }
+                    Row {
+                      id: gCounts
+                      anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+                      spacing: 8
+                      Text { visible: modelData.add > 0; text: "+" + modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+                      Text { visible: modelData.del > 0; text: "\u2212" + modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+                    }
+                  }
+                  Repeater {
+                    model: index === 0 ? cardBox.glance.lines : []
+                    delegate: Rectangle {
+                      required property var modelData
+                      width: glanceCol.width
+                      height: (root.fsMeta - 2) * 1.65
+                      color: modelData.sign === "-" ? Theme.diffRemovedBg : "transparent"
+                      Rectangle { width: 2; height: parent.height; visible: modelData.sign === "+"; color: Theme.green }
+                      Text {
+                        x: 12; width: parent.width - 24
+                        anchors.verticalCenter: parent.verticalCenter
+                        textFormat: Text.StyledText
+                        text: root.rail ? root.rail.highlightCode(modelData.text, glanceBox.language) : root.esc(modelData.text)
+                        elide: Text.ElideRight; maximumLineCount: 1
+                        color: Theme.fg
+                        font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                      }
+                    }
+                  }
                   Text {
-                    x: 12; width: parent.width - 24
-                    anchors.verticalCenter: parent.verticalCenter
-                    textFormat: Text.StyledText
-                    text: root.rail ? root.rail.highlightCode(modelData.text, glanceBox.language) : root.esc(modelData.text)
-                    elide: Text.ElideRight; maximumLineCount: 1
-                    color: Theme.fg
-                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                    x: 12
+                    visible: index === 0 && cardBox.glance.moreLines > 0
+                    text: "\u22ef " + cardBox.glance.moreLines + " more lines"
+                    color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
+                    topPadding: 2; bottomPadding: 4
                   }
                 }
               }
               Text {
                 x: 12
                 visible: !!cardBox.glance && cardBox.glance.more > 0
-                text: cardBox.glance ? "\u22ef " + cardBox.glance.more + " more lines" : ""
+                text: cardBox.glance ? "and " + cardBox.glance.more + " more " + (cardBox.glance.more === 1 ? "file" : "files") : ""
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
                 topPadding: 2
               }
