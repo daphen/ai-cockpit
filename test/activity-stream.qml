@@ -119,6 +119,7 @@ ShellRoot {
       } else if (stage === 4) {
         if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
         if (!test.visibleText("Beta shipped.")) test.fail("the live ask's outcome is not on its card")
+        if (test.hasText("keep going")) test.fail("a prompt with an outcome should give its heading to the outcome")
         if (test.hasText("streaming") || test.hasText("thinking") || test.hasText("working")) test.fail("live status does not belong on the activity page")
         page.forceActiveFocus()
         var before = page.cursorPoint()

@@ -438,6 +438,10 @@ FocusScope {
         readonly property bool dim: root.minor(row.entry) && !row.current
         readonly property var files: row.entry.files || []
         readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
+        readonly property var ctx: row.entry.ctx || ({ text: "" })
+        readonly property string outcome: String(row.entry.outcome || "").replace(/`/g, "")
+        // A prompt ("go") says less than what came of it; task titles do name the work.
+        readonly property bool outcomeHeads: ctx.from !== "task" && outcome !== ""
         opacity: dim ? 0.55 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
@@ -475,15 +479,15 @@ FocusScope {
               font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
             }
             Text {
-              readonly property var ctx: row.entry.ctx || ({ text: "" })
+              readonly property var ctx: cardBox.ctx
               width: parent.width - cardOrb.width - cardName.width - 20
               anchors.baseline: cardName.baseline
-              text: !ctx.text ? "" : ctx.from === "task" ? ctx.text
+              text: cardBox.outcomeHeads ? cardBox.outcome : !ctx.text ? "" : ctx.from === "task" ? ctx.text
                 : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
               textFormat: Text.PlainText
-              wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : 2; elide: Text.ElideRight
+              wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : cardBox.outcomeHeads ? 3 : 2; elide: Text.ElideRight
               lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
-              color: Theme.fg_secondary
+              color: cardBox.outcomeHeads ? root.contentColor : Theme.fg_secondary
               font.family: root.bodyFont; font.pixelSize: root.fsBody
             }
           }
@@ -491,9 +495,9 @@ FocusScope {
             x: 28
             width: parent.width - 28
             visible: text !== ""
-            text: row.entry.outcome || cardBox.last.why || ""
+            text: cardBox.outcomeHeads ? "" : cardBox.outcome || cardBox.last.why || ""
             textFormat: Text.PlainText
-            color: row.entry.outcome ? root.contentColor : Theme.fg_secondary
+            color: cardBox.outcome ? root.contentColor : Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
             wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : row.current ? 8 : 3; elide: Text.ElideRight
