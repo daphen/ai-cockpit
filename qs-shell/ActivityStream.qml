@@ -19,7 +19,7 @@ FocusScope {
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
     var item = i >= 0 ? list.itemAtIndex(i) : null
-    return item && item.kind !== "day" ? item.restDot.mapToItem(root, 4, 4) : null
+    return item && root.stop(item.kind) ? item.restDot.mapToItem(root, 4, 4) : null
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
@@ -409,11 +409,12 @@ FocusScope {
   }
   property string openKey: ""
   readonly property var rows: {
-    var out = [], day = ""
+    var out = [], day = "", sid = ""
     for (var c of cards) {
       if (importantOnly && minor(c) && c.key !== openKey) continue
       var label = dayLabel(c.at)
-      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
+      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label; sid = "" }
+      if (c.sid !== sid) { out.push({ kind: "who", key: "who:" + c.key, sid: c.sid }); sid = c.sid }
       out.push(c)
       if (c.key === openKey) for (var e of c.changes) out.push(Object.assign({ kind: "change" }, e))
     }
@@ -434,28 +435,31 @@ FocusScope {
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
     if (i >= 0) return i
-    for (i = rows.length - 1; i >= 0 && rows[i].kind === "day"; i--);
+    for (i = rows.length - 1; i >= 0 && !stop(rows[i].kind); i--);
     return i
   }
   readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
 
+  function stop(kind) { return kind === "card" || kind === "change" }
+  // Commit hashes in outcomes are for the chat, not for scanning.
+  function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
   function select(i) {
     cursorKey = rows[i].key
     showRow(i)
   }
   function showRow(i) {
     var last = rows.length - 1
-    while (last > i && rows[last].kind === "day") last--
+    while (last > i && !stop(rows[last].kind)) last--
     scroller.cursorMoved(i, i === last)
   }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (rows[i].kind !== "day") { select(i); return }
+      if (stop(rows[i].kind)) { select(i); return }
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {
       var i = last ? rows.length - 1 - n : n
-      if (rows[i].kind !== "day") { select(i); return }
+      if (stop(rows[i].kind)) { select(i); return }
     }
   }
   function open(byClick) {
@@ -517,7 +521,7 @@ FocusScope {
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
       onHeightChanged: if (current && root.codeFile < 0) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
-      height: kind === "day" ? 52 : kind === "card" ? cardBox.height + 8 : changeBox.height + 6
+      height: kind === "day" ? 52 : kind === "who" ? 40 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
 
       CapLabel {
         visible: row.kind === "day"
@@ -525,21 +529,34 @@ FocusScope {
         text: String(row.entry.text || "").toUpperCase()
       }
 
+      Row {
+        visible: row.kind === "who"
+        x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
+        spacing: 10
+        Orb { sid: row.kind === "who" ? row.entry.sid : ""; running: false; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
+        Text {
+          text: row.entry.sid || ""; textFormat: Text.PlainText
+          color: root.contentColor
+          font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
+        }
+      }
+
       Rectangle {
         id: cardBox
         visible: row.kind === "card"
-        y: 4
+        y: 1
         width: parent.width
-        height: visible ? cardCol.implicitHeight + 20 : 0
+        height: visible ? cardCol.implicitHeight + (open ? 20 : 12) : 0
         radius: 12
-        readonly property bool dim: root.minor(row.entry) && !row.current
+        readonly property bool open: row.current || root.openKey === row.key
+        readonly property bool dim: root.minor(row.entry) && !open
         readonly property var files: row.entry.files || []
         readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
         readonly property var ctx: row.entry.ctx || ({ text: "" })
-        readonly property string outcome: String(row.entry.outcome || "").replace(/`/g, "")
-        // A prompt ("go") says less than what came of it; task titles do name the work.
-        readonly property bool outcomeHeads: ctx.from !== "task" && outcome !== ""
-        opacity: dim ? 0.55 : 1
+        readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
+          : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
+        readonly property string done: root.tidy(row.entry.outcome || last.why)
+        opacity: dim ? 0.5 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
@@ -548,64 +565,49 @@ FocusScope {
         Rectangle {
           id: cardDot
           z: 2
-          x: 12 - width / 2; y: cardCol.y + cardName.height / 2 - height / 2
+          x: 12 - width / 2; y: cardCol.y + cardHead.lineHeight / 2 - height / 2
           width: 8; height: 8; radius: 4
           color: Theme.cursor
           visible: row.current && !root.caretHeld
         }
         Text {
-          id: cardTime
-          anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: cardCol.y + (cardName.height - height) / 2 }
-          text: root.clock(row.entry.at || 0)
+          id: cardMeta
+          anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: cardCol.y + (cardHead.lineHeight - height) / 2 }
+          text: (cardBox.open || !cardBox.files.length ? "" : cardBox.files.length + (cardBox.files.length === 1 ? " file" : " files") + "  \u00b7  ")
+            + root.clock(row.entry.at || 0)
           color: root.metaColor
           font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
         }
         Column {
           id: cardCol
-          x: 24; y: 10
-          width: parent.width - 36 - cardTime.width - 12
+          x: 24; y: cardBox.open ? 10 : 6
+          width: parent.width - 36 - cardMeta.width - 12
           spacing: 6
-          Row {
+          Text {
+            id: cardHead
             width: parent.width
-            spacing: 10
-            Orb { id: cardOrb; sid: row.entry.sid || ""; running: false; width: 18; height: 18; y: (cardName.implicitHeight - height) / 2 }
-            Text {
-              id: cardName
-              text: row.entry.sid || ""; textFormat: Text.PlainText
-              color: root.contentColor
-              font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
-            }
-            Text {
-              readonly property var ctx: cardBox.ctx
-              width: parent.width - cardOrb.width - cardName.width - 20
-              anchors.baseline: cardName.baseline
-              text: cardBox.outcomeHeads ? cardBox.outcome : !ctx.text ? "" : ctx.from === "task" ? ctx.text
-                : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
-              textFormat: Text.PlainText
-              wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : cardBox.outcomeHeads ? 3 : 2; elide: Text.ElideRight
-              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
-              color: cardBox.outcomeHeads ? root.contentColor : Theme.fg_secondary
-              font.family: root.bodyFont; font.pixelSize: root.fsBody
-            }
+            text: cardBox.done || cardBox.asked
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap; maximumLineCount: cardBox.open ? 8 : 1; elide: Text.ElideRight
+            lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
+            color: root.contentColor
+            font.family: root.bodyFont; font.pixelSize: root.fsBody
           }
           Text {
-            x: 28
-            width: parent.width - 28
-            visible: text !== ""
-            text: cardBox.outcomeHeads ? "" : cardBox.outcome || cardBox.last.why || ""
+            width: parent.width
+            visible: cardBox.open && cardBox.done !== "" && cardBox.asked !== ""
+            text: cardBox.asked
             textFormat: Text.PlainText
-            color: cardBox.outcome ? root.contentColor : Theme.fg_secondary
-            font.family: root.bodyFont; font.pixelSize: root.fsMeta
-            lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-            wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : row.current ? 8 : 3; elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+            color: Theme.fg_secondary
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
           }
           Flow {
-            x: 28
-            width: parent.width - 28
-            visible: !cardBox.dim && cardBox.files.length > 0
+            width: parent.width
+            visible: cardBox.open && cardBox.files.length > 0
             spacing: 6
             Repeater {
-              model: cardBox.files.slice(0, 6)
+              model: cardBox.open ? cardBox.files.slice(0, 8) : []
               delegate: PillSurface {
                 required property var modelData
                 height: 22; radius: 11
@@ -621,14 +623,13 @@ FocusScope {
               }
             }
             Text {
-              visible: cardBox.files.length > 6
+              visible: cardBox.files.length > 8
               height: 22; verticalAlignment: Text.AlignVCenter
-              text: "+" + (cardBox.files.length - 6) + " files"
+              text: "+" + (cardBox.files.length - 8) + " files"
               color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
             }
           }
           Text {
-            x: 28
             visible: row.current
             text: root.openKey === row.key ? "Esc folds the edits" : "Enter shows " + (row.entry.changes || []).length + ((row.entry.changes || []).length === 1 ? " edit" : " edits")
             color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
