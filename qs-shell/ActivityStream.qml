@@ -174,7 +174,6 @@ FocusScope {
     else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
     else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
     else if (event.key === Qt.Key_F) importantOnly = !importantOnly
-    else if (event.key === Qt.Key_Escape && currentRow && showKey === currentRow.key) showKey = ""
     else if (event.key === Qt.Key_Escape && openKey) { var k = openKey; openKey = ""; cursorKey = k }
     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
     else return
@@ -409,8 +408,7 @@ FocusScope {
     return out.sort((a, b) => a.at - b.at)
   }
   property string openKey: ""
-  // Focus never resizes a row: only Enter does. showKey is the one edit whose full diff is out.
-  property string showKey: ""
+  // Focus never resizes a row: only Enter does.
   // Past days fold to one row so today is what's on screen.
   property var openDays: ({})
   readonly property var rows: {
@@ -490,7 +488,6 @@ FocusScope {
       return
     }
     if (!currentRow || currentRow.kind !== "change") return
-    if (showKey !== currentRow.key) { showKey = currentRow.key; return }
     var files = currentRow.files
     if (itemIndex < 0 && files.length > 1) { itemIndex = Math.max(0, files.findIndex(x => !x.covered)); return }
     var f = itemIndex >= 0 ? files[itemIndex] : files.find(x => !x.covered) || files[0]
@@ -540,7 +537,6 @@ FocusScope {
       readonly property bool current: index === root.cursor && root.focused
       readonly property Item restDot: kind === "card" ? cardDot : kind === "fold" ? foldDot : cursorDot
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
-      readonly property bool expanded: root.showKey === key
       onHeightChanged: if (current && root.codeFile < 0) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
       height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
@@ -559,7 +555,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: foldHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.open() } }
         Rectangle {
           id: foldDot
           x: 12 - width / 2; anchors.verticalCenter: parent.verticalCenter
@@ -625,7 +621,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.open() } }
         Rectangle {
           id: cardDot
           z: 2
@@ -732,7 +728,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: changeHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open(true) } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.open(true) } }
 
         Rectangle {
           id: cursorDot
@@ -764,7 +760,7 @@ FocusScope {
             color: Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-            wrapMode: Text.Wrap; maximumLineCount: row.expanded ? 6 : 2; elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: 6; elide: Text.ElideRight
           }
           Repeater {
             model: row.kind === "change" ? row.entry.files : []
@@ -774,7 +770,6 @@ FocusScope {
               required property int index
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
-                if (!row.expanded) return 0
                 if (root.codeFile === index) return diff.length
                 var left = 40, files = row.entry.files || []
                 for (var j = 0; j < index; j++) left -= Math.min(left, (files[j].diff || []).length)
@@ -830,32 +825,6 @@ FocusScope {
                   spacing: 10
                   Text { text: "+" + fileBlock.modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
                   Text { text: "-" + fileBlock.modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
-                }
-              }
-              Column {
-                readonly property var lines: row.expanded ? [] : root.digest(fileBlock.diff)
-                visible: lines.length > 0
-                x: 12
-                width: parent.width - 12
-                Repeater {
-                  model: parent.lines.slice(0, 3)
-                  delegate: Text {
-                    required property var modelData
-                    width: parent.width
-                    textFormat: Text.StyledText
-                    text: '<font color="' + (modelData.sign === "+" ? Theme.green : modelData.sign === "-" ? Theme.red : Theme.yellow) + '">'
-                      + (modelData.sign === "-" ? "\u2212" : modelData.sign) + "</font>&nbsp;&nbsp;"
-                      + (modelData.key ? '<font color="' + root.metaColor + '">' + root.esc(modelData.key) + "</font>&nbsp;&nbsp;" : "")
-                      + root.esc(modelData.text)
-                    elide: Text.ElideRight; maximumLineCount: 1
-                    color: Theme.fg
-                    font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
-                  }
-                }
-                Text {
-                  visible: parent.lines.length > 3
-                  text: "+ " + (parent.lines.length - 3) + " more"
-                  color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
                 }
               }
               Rectangle {
@@ -947,7 +916,7 @@ FocusScope {
               Text {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
                 readonly property bool inCode: root.codeFile === fileBlock.index
-                visible: row.expanded && fileBlock.diff.length > 0 && (inCode || root.codeFile < 0) && (root.itemIndex < 0 || fileBlock.picked)
+                visible: fileBlock.diff.length > 0 && (inCode || root.codeFile < 0) && (root.itemIndex < 0 || fileBlock.picked)
                 x: 10
                 text: inCode ? (root.visMode ? (root.visMode === "V" ? "VISUAL LINE" : "VISUAL") + " \u00b7 y yanks \u00b7 Esc" : "hjkl w b e 0 ^ $ gg G \u00b7 v V y yy \u00b7 Enter opens this line \u00b7 Esc leaves")
                   : (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (root.itemIndex < 0 && row.entry.files.length > 1 ? "Enter picks a file" : "Enter steps into the code")
