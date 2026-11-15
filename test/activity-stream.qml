@@ -82,7 +82,13 @@ ShellRoot {
         ] } })
         test.event({ type: "response", command: "get_entries", session: "gamma", success: true, data: { entries: [
           { type: "message", id: "g1", timestamp: new Date(test.t0 - 60000).toISOString(), message: { role: "user", timestamp: test.t0 - 60000,
-            content: [{ type: "text", text: "Fix the shell script" }] } }] } })
+            content: [{ type: "text", text: "Fix the shell script" }] } },
+          { type: "message", id: "g0", timestamp: new Date(test.t0 - 3 * 86400000).toISOString(), message: { role: "user", timestamp: test.t0 - 3 * 86400000,
+            content: [{ type: "text", text: "Old ask" }] } },
+          { type: "message", id: "g01", message: { role: "assistant", timestamp: test.t0 - 3 * 86400000 + 500, content: [
+            { type: "toolCall", id: "eo", name: "edit", arguments: { path: "/r/Older.qml", edits: [] } }] } },
+          { type: "message", id: "ro", message: { role: "toolResult", toolCallId: "eo", timestamp: test.t0 - 3 * 86400000 + 600, details: { diff: "+ 1 older" } } },
+          { type: "message", id: "g00", message: { role: "assistant", timestamp: test.t0 - 3 * 86400000 + 1000, content: [{ type: "text", text: "\u27e2 Old thing done; check it in your Cockpit." }] } }] } })
         // The same transcript again must not duplicate rows.
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
@@ -91,16 +97,21 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,edit,prompt,prompt,summary,task") test.fail("history rows were " + kinds)
+        if (kinds !== "edit,edit,edit,edit,prompt,prompt,prompt,summary,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
-        if (!test.visibleText("Activity view renders history.")) test.fail("an ask's card should say its outcome")
+        if (!test.visibleText("Activity view renders history")) test.fail("an ask's card should say its outcome as a short headline")
+        var fold = page.rows.find(r => r.kind === "fold")
+        if (!fold || fold.count !== 1 || test.hasText("Old thing done")) test.fail("a past day should fold to one row with its ask count")
+        if (!test.find(page, i => i.visible && i.color !== undefined && i.width === 3 && Qt.colorEqual(i.color, page.hueFor("gamma"))))
+          test.fail("a session's cards should carry its colour bar")
         if (page.cards.filter(c => c.ctx.text === "Activity view").length !== 1) test.fail("one card per ask")
         if (test.visibleText("Activity view")) test.fail("an unfocused card should be one line: what was done, not also the ask")
         if (page.rows.filter(r => r.kind === "who" && r.sid === "gamma").length !== 1) test.fail("the session name should head its run of cards once")
         if (test.visibleText("The rail needs a hook so the page can open files.")) test.fail("an edit's reason belongs inside its folded card")
-        if (!test.hasText("2 files")) test.fail("an unfocused card should count the files its ask touched")
         if (test.visibleText("Rail.qml")) test.fail("file pills belong to the focused card only")
+        if (!test.find(page, i => i.visible && /^<font[^>]*>Rail\.qml<\/font>.*property string y/.test(String(i.text || ""))))
+          test.fail("a folded card should show at a glance what changed: the file and the declaration it added")
         if (!test.visibleText("Fix via shell")) test.fail("a commit made outside the edit tool is missing")
         if (test.visibleText("init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
         var work = page.cards.find(c => c.ctx.text === "Activity view"), shellFix = page.cards.find(c => c.changes.some(e => e.commit))
@@ -110,7 +121,7 @@ ShellRoot {
         page.jev = scored
         if (test.visibleText("f.txt")) test.fail("a minor ask should shrink to one line")
         page.forceActiveFocus(); test.key(Qt.Key_F)
-        if (test.visibleText("Fix via shell") || !test.visibleText("Activity view renders history.")) test.fail("f should hide minor asks and keep important ones")
+        if (test.visibleText("Fix via shell") || !test.visibleText("Activity view renders history")) test.fail("f should hide minor asks and keep important ones")
         test.key(Qt.Key_F)
         if (!test.visibleText("Fix via shell")) test.fail("f again should show every ask")
         state.sendPrompt("beta", "keep going")
@@ -120,9 +131,10 @@ ShellRoot {
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" + "_".repeat(400) } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped (`abc1234`)." }] } })
       } else if (stage === 4) {
-        if (!test.visibleText("Beta shipped.")) test.fail("the live ask's outcome is not on its card")
+        if (!test.visibleText("Beta shipped")) test.fail("the live ask's outcome is not on its card")
         if (test.hasText("keep going")) test.fail("a prompt with an outcome should give its heading to the outcome")
-        if (test.hasText("streaming") || test.hasText("thinking") || test.hasText("working")) test.fail("live status does not belong on the activity page")
+        var lvs = test.find(page, i => String(i).indexOf("QQuickListView") === 0), inList = t => !!test.find(lvs, i => i.visible && String(i.text || "").indexOf(t) >= 0)
+        if (inList("streaming") || inList("thinking") || inList("working")) test.fail("live status does not belong on the activity page")
         page.forceActiveFocus()
         var before = page.cursorPoint()
         if (!before) test.fail("no cursor dot on the focused page")

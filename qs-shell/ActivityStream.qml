@@ -411,12 +411,19 @@ FocusScope {
   property string openKey: ""
   // Focus never resizes a row: only Enter does. showKey is the one edit whose full diff is out.
   property string showKey: ""
+  // Past days fold to one row so today is what's on screen.
+  property var openDays: ({})
   readonly property var rows: {
-    var out = [], day = "", sid = ""
-    for (var c of cards) {
-      if (importantOnly && minor(c) && c.key !== openKey) continue
-      var label = dayLabel(c.at)
-      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label; sid = "" }
+    var out = [], day = "", sid = "", shown = cards.filter(c => !importantOnly || !minor(c) || c.key === openKey)
+    var counts = {}
+    for (var c of shown) counts[dayLabel(c.at)] = (counts[dayLabel(c.at)] || 0) + 1
+    for (c of shown) {
+      var label = dayLabel(c.at), past = label !== "Today"
+      if (label !== day) {
+        out.push({ kind: past ? "fold" : "day", key: "day:" + label, text: label, count: counts[label], open: !!openDays[label] })
+        day = label; sid = ""
+      }
+      if (past && !openDays[label]) continue
       if (c.sid !== sid) { out.push({ kind: "who", key: "who:" + c.key, sid: c.sid }); sid = c.sid }
       out.push(c)
       if (c.key === openKey) for (var e of c.changes) out.push(Object.assign({ kind: "change" }, e))
@@ -443,7 +450,13 @@ FocusScope {
   }
   readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
 
-  function stop(kind) { return kind === "card" || kind === "change" }
+  function stop(kind) { return kind === "card" || kind === "change" || kind === "fold" }
+  function headline(t) { return tidy(t).split(/;\s|:\s|\.\s/)[0].replace(/\.$/, "") }
+  function hueFor(sid) {
+    var p = [Theme.sky, Theme.green, Theme.yellow, Theme.electric, Theme.syntaxKeyword, Theme.syntaxFunction], h = 0
+    for (var i = 0; i < sid.length; i++) h = (h * 31 + sid.charCodeAt(i)) >>> 0
+    return p[h % p.length]
+  }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
   function select(i) {
@@ -466,6 +479,10 @@ FocusScope {
     }
   }
   function open(byClick) {
+    if (currentRow && currentRow.kind === "fold") {
+      var d = Object.assign({}, openDays); d[currentRow.text] = !d[currentRow.text]; openDays = d
+      return
+    }
     if (currentRow && currentRow.kind === "card") {
       openKey = currentRow.key
       var i = rows.findIndex(r => r.key === openKey) + 1
@@ -521,12 +538,12 @@ FocusScope {
       readonly property var entry: root.rows[index] || ({ kind: "day", files: [], diff: [] })
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
-      readonly property Item restDot: kind === "card" ? cardDot : cursorDot
+      readonly property Item restDot: kind === "card" ? cardDot : kind === "fold" ? foldDot : cursorDot
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
       readonly property bool expanded: root.showKey === key
       onHeightChanged: if (current && root.codeFile < 0) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
-      height: kind === "day" ? 52 : kind === "who" ? 40 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
+      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
 
       CapLabel {
         visible: row.kind === "day"
@@ -534,9 +551,40 @@ FocusScope {
         text: String(row.entry.text || "").toUpperCase()
       }
 
+      Rectangle {
+        id: foldBox
+        visible: row.kind === "fold"
+        y: 6; width: parent.width; height: 34; radius: 10
+        color: row.current ? Qt.alpha(Theme.fg, 0.05) : foldHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        border.width: row.current ? 1 : 0
+        border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
+        HoverHandler { id: foldHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
+        Rectangle {
+          id: foldDot
+          x: 12 - width / 2; anchors.verticalCenter: parent.verticalCenter
+          width: 8; height: 8; radius: 4
+          color: Theme.cursor
+          visible: row.current && !root.caretHeld
+        }
+        CapLabel {
+          x: 24; anchors.verticalCenter: parent.verticalCenter
+          text: String(row.entry.text || "").toUpperCase() + "  \u00b7  " + row.entry.count + (row.entry.count === 1 ? " ask" : " asks") + (row.entry.open ? "" : "  \u25b8")
+        }
+      }
+
+      Rectangle {
+        visible: row.kind === "who" || row.kind === "card" || row.kind === "change"
+        x: 0; width: 3; radius: 1.5
+        y: row.kind === "who" ? 14 : 0
+        height: parent.height - y
+        color: root.hueFor(row.entry.sid || "")
+        opacity: 0.7
+      }
+
       Row {
         visible: row.kind === "who"
-        x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
+        x: 14; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
         spacing: 10
         Orb { sid: row.kind === "who" ? row.entry.sid : ""; running: false; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
         Text {
@@ -550,7 +598,8 @@ FocusScope {
         id: cardBox
         visible: row.kind === "card"
         y: 1
-        width: parent.width
+        x: 8
+        width: parent.width - 8
         height: visible ? cardCol.implicitHeight + 16 : 0
         radius: 12
         readonly property bool open: root.openKey === row.key
@@ -560,7 +609,17 @@ FocusScope {
         readonly property var ctx: row.entry.ctx || ({ text: "" })
         readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
           : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
-        readonly property string done: root.tidy(row.entry.outcome || last.why)
+        // What changed, at a glance: the first few digest lines across the ask's files.
+        readonly property var glance: {
+          var out = []
+          for (var e of row.kind === "card" ? row.entry.changes || [] : [])
+            for (var f of e.files || []) {
+              if (f.covered) continue
+              for (var d of root.digest(f.diff || [])) out.push(Object.assign({ file: String(f.path).split("/").pop() }, d))
+            }
+          return out
+        }
+        readonly property string done: open ? root.tidy(row.entry.outcome || last.why) : root.headline(row.entry.outcome || last.why)
         opacity: dim ? 0.5 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
@@ -578,8 +637,7 @@ FocusScope {
         Text {
           id: cardMeta
           anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: cardCol.y + (cardHead.lineHeight - height) / 2 }
-          text: (!cardBox.files.length ? "" : cardBox.files.length + (cardBox.files.length === 1 ? " file" : " files") + "  \u00b7  ")
-            + root.clock(row.entry.at || 0)
+          text: root.clock(row.entry.at || 0)
           color: root.metaColor
           font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
         }
@@ -597,6 +655,32 @@ FocusScope {
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
             color: root.contentColor
             font.family: root.bodyFont; font.pixelSize: root.fsBody
+          }
+          Column {
+            width: parent.width
+            visible: !cardBox.dim && cardBox.glance.length > 0
+            Repeater {
+              model: cardBox.glance.slice(0, 3)
+              delegate: Text {
+                required property var modelData
+                width: parent.width
+                textFormat: Text.StyledText
+                text: '<font color="' + root.metaColor + '">' + root.esc(modelData.file) + '</font>&nbsp;&nbsp;<font color="'
+                  + (modelData.sign === "+" ? Theme.green : modelData.sign === "-" ? Theme.red : Theme.yellow) + '">'
+                  + (modelData.sign === "-" ? "\u2212" : modelData.sign) + "</font>&nbsp;"
+                  + (modelData.key ? '<font color="' + root.metaColor + '">' + root.esc(modelData.key) + "</font>&nbsp;" : "")
+                  + root.esc(modelData.text)
+                elide: Text.ElideRight; maximumLineCount: 1
+                color: Theme.fg
+                font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+                lineHeightMode: Text.FixedHeight; lineHeight: (root.fsMeta - 2) * 1.6
+              }
+            }
+            Text {
+              visible: cardBox.glance.length > 3
+              text: "+ " + (cardBox.glance.length - 3) + " more"
+              color: root.metaColor; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
+            }
           }
           Text {
             width: parent.width
