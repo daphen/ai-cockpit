@@ -189,6 +189,21 @@ ShellRoot {
         input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 0, 120, 0)
         if (lv.contentHeight <= lv.height) test.fail("the feed must overflow for this check, got " + lv.contentHeight + " in " + lv.height)
         if (!(lv.contentY < y0) || test.codeFlick.contentX !== x0) test.fail("an up/down wheel over code should still scroll the page")
+        page.height = 200
+        page.forceActiveFocus(); test.key(Qt.Key_Escape); test.key(Qt.Key_G); test.key(Qt.Key_J); test.key(Qt.Key_Return)
+      } else if (stage === 8) {
+        test.key(Qt.Key_K)
+      } else if (stage === 9) {
+        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), next = lv.itemAtIndex(page.cursor + 1)
+        var p = next.mapToItem(page, 100, 12)
+        if (p.y > page.height - 4) test.fail("the edit below the card should be partly in view, at " + p.y)
+        input.mouseClick(page, p.x, p.y, Qt.LeftButton, Qt.NoModifier, 0)
+      } else if (stage === 10) {
+        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), item = lv.itemAtIndex(page.cursor)
+        if (page.currentRow.kind !== "change") test.fail("expected an unfolded edit, got " + page.currentRow.kind)
+        var top = item.y, bottom = item.y + item.height, viewBottom = lv.contentY + lv.height
+        if (top < lv.contentY - 1 || (bottom > viewBottom + 1 && Math.abs(top - lv.contentY) > 1))
+          test.fail("the focused edit grew past the view without scrolling: " + [top, bottom, lv.contentY, viewBottom])
         console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
       }

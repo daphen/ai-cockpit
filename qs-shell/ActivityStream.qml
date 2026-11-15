@@ -350,6 +350,9 @@ FocusScope {
 
   function select(i) {
     cursorKey = rows[i].key
+    showRow(i)
+  }
+  function showRow(i) {
     var last = rows.length - 1
     while (last > i && rows[last].kind === "day") last--
     scroller.cursorMoved(i, i === last)
@@ -419,6 +422,8 @@ FocusScope {
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
       readonly property Item restDot: kind === "card" ? cardDot : cursorDot
+      // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
+      onHeightChanged: if (current) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
       height: kind === "day" ? 52 : kind === "card" ? cardBox.height + 8 : changeBox.height + 6
 
