@@ -22,27 +22,20 @@ def api_key():
         return ""
 
 
-def score(change, key):
+def score(card, key):
     lines = []
-    for fi, f in enumerate(change["files"]):
-        for li, text in f["lines"]:
-            if len(lines) < MAX_LINES:
-                lines.append((fi, li, text))
-    questions = {"key": {"type": "noul", "instructions":
-                         "This change is important for someone reviewing what an agent did today: a new capability, a changed interface, "
-                         "or a fix of a user-visible bug, rather than a cosmetic tweak, rename, test-only edit or constant nudge."}}
-    for i, _ in enumerate(lines):
-        questions[f"l{i}"] = {"type": "noul", "instructions":
-                              f"Diff line {i} is one of the two or three lines that best show what this change does, given its reason; "
-                              "not supporting, mechanical or incidental."}
-    state = {"reason": change.get("why", ""), "files": [f["path"] for f in change["files"]],
-             "diff": [f"{i}: [{change['files'][fi]['path'].rsplit('/', 1)[-1]}] {t}" for i, (fi, _, t) in enumerate(lines)]}
+    for f in card["files"]:
+        name = f["path"].rsplit("/", 1)[-1]
+        lines += [f"[{name}] {t}" for t in f["lines"]]
+    question = ("This piece of agent work is important for someone reviewing what happened today: a new capability, a changed interface, "
+                "or a fix of a user-visible bug, rather than a cosmetic tweak, rename, test-only edit, notes or constant nudge.")
+    state = {"ask": card.get("ask", ""), "outcome": card.get("outcome", ""),
+             "files": sorted({f["path"] for f in card["files"]}), "diff": lines[:MAX_LINES]}
     request = urllib.request.Request("https://api.typesafe.ai/v1/systemone", method="POST",
-                                     data=json.dumps({"model": "jev-latest", "state": state, "questions": questions}).encode(),
+                                     data=json.dumps({"model": "jev-latest", "state": state,
+                                                      "questions": {"key": {"type": "noul", "instructions": question}}}).encode(),
                                      headers={"authorization": f"Bearer {key}", "content-type": "application/json"})
-    answers = json.load(urllib.request.urlopen(request, timeout=20))["answers"]
-    picks = sorted(((answers[f"l{i}"]["noul"], fi, li) for i, (fi, li, _) in enumerate(lines)), reverse=True)[:3]
-    return {"key": answers["key"]["noul"], "picks": [[fi, li] for p, fi, li in picks if p >= 0.5]}
+    return {"key": json.load(urllib.request.urlopen(request, timeout=20))["answers"]["key"]["noul"]}
 
 
 def main():

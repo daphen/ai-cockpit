@@ -37,7 +37,7 @@ ShellRoot {
       onFileRequested: (sid, path, line) => test.opened.push(sid + ":" + path + ":" + line)
     }
   }
-  function key(k, mods) { input.keyClick(k, mods || Qt.NoModifier, 0) }
+  function key(k, mods) { input.keyClick(k, mods || Qt.NoModifier, 0); find(page, i => String(i).indexOf("QQuickListView") === 0).forceLayout() }
   readonly property double t0: Math.floor(Date.now() / 1000) * 1000 - 2 * 3600000
   readonly property string repo: Quickshell.env("XDG_RUNTIME_DIR") + "/repo"
   Process {
@@ -84,40 +84,32 @@ ShellRoot {
         test.event({ type: "response", command: "get_entries", session: "alpha", success: true, data: { entries: [
           { type: "message", id: "a2", message: { role: "assistant", timestamp: test.t0 + 5000, content: [{ type: "text", text: "\u27e2 Activity view renders history." }] } }] } })
       } else if (stage === 3) {
-        if (!test.visibleText("Committed: Fix via shell") && waits++ < 20) return
+        if (!test.visibleText("Fix via shell") && waits++ < 20) return
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
         if (kinds !== "edit,edit,edit,prompt,prompt,summary,task") test.fail("history rows were " + kinds)
         var prompt = state.activity.find(r => r.kind === "prompt")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
-        if (test.hasText("Activity view renders history.")) test.fail("outcomes are not changes and should not be listed")
-        if (test.find(page, item => item.visible && String(item.text || "") === "Activity view") === null) test.fail("the task behind the changes is not shown")
+        if (!test.visibleText("Activity view renders history.")) test.fail("an ask's card should say its outcome")
         var asks = []
         test.find(page, item => { if (item.visible && item.text === "Activity view") asks.push(item); return false })
-        if (new Set(asks).size !== 1) test.fail("the ask should appear once above consecutive changes, got " + new Set(asks).size)
-        if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown")
-        if (!test.hasText("Rail.qml") || !test.hasText("New.qml")) test.fail("changed files not shown")
-        if (!test.visibleText("Wrote the whole file \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
-        if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-change counts wrong")
-        if (test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("an unfocused change should show a summary, not its whole diff")
-        if (!test.hasText("</font>&nbsp;&nbsp;property string y")) test.fail("the summary should name the declaration the edit added")
-        if (!test.hasText("</font>&nbsp;&nbsp;b \u2192 B")) test.fail("the summary should show a changed line as old \u2192 new")
-        var railEdit = page.changes.find(c => c.files[0].path === "/r/Rail.qml"), shellFix = page.changes.find(c => c.commit)
+        if (new Set(asks).size !== 1) test.fail("one card per ask, got " + new Set(asks).size)
+        if (test.visibleText("The rail needs a hook so the page can open files.")) test.fail("an edit's reason belongs inside its folded card")
+        if (!test.visibleText("Rail.qml") || !test.visibleText("New.qml")) test.fail("the card should list the files its ask touched")
+        if (!test.visibleText("+2") || !test.visibleText("-1")) test.fail("per-file counts wrong")
+        if (!test.visibleText("Fix via shell")) test.fail("a commit made outside the edit tool is missing")
+        if (test.visibleText("init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
+        var work = page.cards.find(c => c.ctx.text === "Activity view"), shellFix = page.cards.find(c => c.changes.some(e => e.commit))
         var scored = {}
-        scored[railEdit.jid] = { key: 0.9, picks: [[0, 1]] }
-        scored[shellFix.jid] = { key: 0.2, picks: [] }
+        scored[work.jid] = { key: 0.9 }
+        scored[shellFix.jid] = { key: 0.2 }
         page.jev = scored
-        if (!test.hasText("</font>&nbsp;&nbsp;x = 1 // set") || test.hasText("</font>&nbsp;&nbsp;property string y"))
-          test.fail("a scored change should show the lines Jev picked instead of the rule summary")
-        if (test.find(page, i => i.visible && String(i.text || "").endsWith("</font>f.txt"))) test.fail("a minor change should shrink to its reason line")
+        if (test.visibleText("f.txt")) test.fail("a minor ask should shrink to one line")
         page.forceActiveFocus(); test.key(Qt.Key_F)
-        if (test.visibleText("Committed: Fix via shell") || !test.visibleText("The rail needs a hook so the page can open files."))
-          test.fail("f should hide minor changes and keep important ones")
+        if (test.visibleText("Fix via shell") || !test.visibleText("Activity view renders history.")) test.fail("f should hide minor asks and keep important ones")
         test.key(Qt.Key_F)
-        if (!test.visibleText("Committed: Fix via shell")) test.fail("f again should show every change")
-        if (!test.visibleText("Committed: Fix via shell")) test.fail("a commit made outside the edit tool is missing")
-        if (test.visibleText("Committed: init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
+        if (!test.visibleText("Fix via shell")) test.fail("f again should show every ask")
         state.sendPrompt("beta", "keep going")
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [
           { type: "text", text: "Live needs its own file so the stream can follow it." }, { type: "toolCall", id: "live1", name: "edit", arguments: { path: "/r/Live.qml" } }] } })
@@ -125,20 +117,25 @@ ShellRoot {
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" + "_".repeat(400) } } })
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped." }] } })
       } else if (stage === 4) {
-        if (!test.hasText("Live.qml")) test.fail("live edit not shown")
-        if (!test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("live edit lost its reason")
+        if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
+        if (!test.visibleText("Beta shipped.")) test.fail("the live ask's outcome is not on its card")
         if (test.hasText("streaming") || test.hasText("thinking") || test.hasText("working")) test.fail("live status does not belong on the activity page")
         page.forceActiveFocus()
-        test.key(Qt.Key_Return)
-        if (String(test.opened) !== "beta:/r/Live.qml:1") test.fail("Enter on the newest change opened " + test.opened)
         var before = page.cursorPoint()
         if (!before) test.fail("no cursor dot on the focused page")
-        test.key(Qt.Key_K); test.key(Qt.Key_K)
-        if (!page.cursorPoint() || page.cursorPoint().y >= before.y) test.fail("cursor dot did not move up with k")
         test.key(Qt.Key_Return)
-        if (test.opened[1] !== "alpha:/r/New.qml:1") test.fail("moving up past the commit then opening went to " + test.opened)
-        test.key(Qt.Key_K); test.key(Qt.Key_Return)
-        if (test.opened[2] !== "alpha:/r/Rail.qml:10") test.fail("opening an edit went to " + test.opened)
+        if (page.currentRow.kind !== "change" || !test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("Enter on a card should unfold its edits with their reasons")
+        test.key(Qt.Key_Return)
+        if (String(test.opened) !== "beta:/r/Live.qml:1") test.fail("Enter on the newest edit opened " + test.opened)
+        test.key(Qt.Key_K)
+        if (page.currentRow.kind !== "card" || !page.cursorPoint() || page.cursorPoint().y >= before.y + 1) test.fail("k from the first edit should land on its card")
+        test.key(Qt.Key_K); test.key(Qt.Key_K)
+        if (!page.currentRow.ctx || page.currentRow.ctx.text !== "Activity view") test.fail("k should step card by card, got " + JSON.stringify(page.currentRow.ctx))
+        test.key(Qt.Key_Return)
+        if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown when unfolded")
+        if (test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("unfolding one card should fold the other")
+        test.key(Qt.Key_Return)
+        if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("opening an edit went to " + test.opened)
         if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("the focused change should show its full diff, the change with its context")
         if (!test.hasText('</font>x&nbsp;<font color="' + Theme.syntaxOperator + '">=</font>&nbsp;<font color="' + Theme.syntaxNumber + '">1</font>&nbsp;<i><font color="' + Theme.syntaxComment + '">//&nbsp;set</font></i>'))
           test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
@@ -146,7 +143,15 @@ ShellRoot {
           test.fail("QML types are not in the Neovim theme's type color")
         if (!test.hasText('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</font><font color="' + Theme.red + '">z</font>'))
           test.fail("a removed line should read like hunk-nvim's ghost line: red, unhighlighted, unnumbered")
-        test.key(Qt.Key_J); test.key(Qt.Key_J)
+        test.key(Qt.Key_J)
+        if (!test.visibleText("Wrote the whole file \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
+        if (test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("an unfocused change should show a summary, not its whole diff")
+        if (!test.hasText("</font>&nbsp;&nbsp;property string y")) test.fail("the summary should name the declaration the edit added")
+        test.key(Qt.Key_Return)
+        if (test.opened[2] !== "alpha:/r/New.qml:1") test.fail("j then Enter inside a card opened " + test.opened)
+        test.key(Qt.Key_Escape)
+        if (page.currentRow.kind !== "card" || test.visibleText("The rail needs a hook so the page can open files.")) test.fail("Esc should fold the card back")
+        test.key(Qt.Key_J); test.key(Qt.Key_Return)
         if (page.currentRow.why !== "Fix via shell" || page.currentRow.files.length !== 2) test.fail("expected the two-file commit, got " + page.currentRow.why)
         if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
         var at = pred => { var it = test.find(page, i => i.visible && pred(String(i.text || ""))); return it ? it.mapToItem(page, 0, 0).y : NaN }
@@ -163,7 +168,7 @@ ShellRoot {
         test.opened.pop()
         test.key(Qt.Key_S)
         if (test.opened[4] !== "gamma") test.fail("s did not open the change's session: " + test.opened)
-        test.key(Qt.Key_G, Qt.ShiftModifier)
+        test.key(Qt.Key_G, Qt.ShiftModifier); test.key(Qt.Key_Return)
         test.codeFlick = test.find(page, i => i.flickableDirection === Flickable.HorizontalFlick && i.contentWidth > i.width + 300)
         if (!test.codeFlick) test.fail("a long diff line should scroll sideways instead of being cut off")
         test.key(Qt.Key_L)
@@ -183,7 +188,7 @@ ShellRoot {
         input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 0, 120, 0)
         if (lv.contentHeight <= lv.height) test.fail("the feed must overflow for this check, got " + lv.contentHeight + " in " + lv.height)
         if (!(lv.contentY < y0) || test.codeFlick.contentX !== x0) test.fail("an up/down wheel over code should still scroll the page")
-        console.log("PASS: activity is one timeline of code changes: tool edits with their reason and diff, commits made outside the edit tool, the ask shown once per run of changes, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
+        console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
       }
       stage++

@@ -18,14 +18,14 @@ FocusScope {
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
     var item = i >= 0 ? list.itemAtIndex(i) : null
-    return item && item.kind === "change" ? item.restDot.mapToItem(root, 4, 4) : null
+    return item && item.kind !== "day" ? item.restDot.mapToItem(root, 4, 4) : null
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
   onSessionsChanged: if (visible && agentd) { agentd.loadActivityHistory(); gitAgain.restart() }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
-  // Jev (Typesafe's classifier) scores each change: key = importance 0..1, picks = [file, diff line] that show it best.
+  // Jev (Typesafe's classifier) scores each ask's card: key = importance 0..1.
   property var jev: ({})
   property var jevAsked: ({})
   property bool importantOnly: false
@@ -33,19 +33,17 @@ FocusScope {
   function jevNext() {
     if (jevRun.running || !visible) return
     var batch = []
-    for (var i = changes.length - 1; i >= 0 && batch.length < 8; i--) {
-      var e = changes[i]
+    for (var i = cards.length - 1; i >= 0 && batch.length < 8; i--) {
+      var e = cards[i]
       if (!(e.jid in jev) && !jevAsked[e.jid]) batch.push(e)
     }
     if (!batch.length) return
     for (var b of batch) jevAsked[b.jid] = true
     jevRun.command = ["python3", Qt.resolvedUrl("jev-activity.py").toString().replace(/^file:\/\//, ""), JSON.stringify(batch.map(e => {
-      var left = 40
-      return { id: e.jid, why: e.why, files: e.files.map(f => {
-        var lines = []
-        f.diff.forEach((l, li) => { if (left > 0 && /^[+-]/.test(l) && l.replace(/^[+-]\s*\d*\s?/, "").trim()) { lines.push([li, l.slice(0, 200)]); left-- } })
-        return { path: f.path, lines: lines }
-      }) }
+      var left = 40, last = e.changes[e.changes.length - 1]
+      return { id: e.jid, ask: e.ctx.text, outcome: e.outcome || last.why, files: [].concat(...e.changes.map(ch => ch.files.map(f => ({
+        path: f.path, lines: f.diff.filter(l => /^[+-]/.test(l) && l.replace(/^[+-]\s*\d*\s?/, "").trim()).slice(0, Math.max(0, left)).map(l => (left--, l.slice(0, 200)))
+      })))) }
     }))]
     jevRun.running = true
   }
@@ -85,6 +83,7 @@ FocusScope {
     else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
     else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
     else if (event.key === Qt.Key_F) importantOnly = !importantOnly
+    else if (event.key === Qt.Key_Escape && openKey) { var k = openKey; openKey = ""; cursorKey = k }
     else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
     else return
     event.accepted = true
@@ -241,11 +240,11 @@ FocusScope {
     var ctx = {}, events = [], editsBy = {}, lastSeen = {}
     for (var r of src) {
       if (r.kind === "prompt" || r.kind === "edit") (lastSeen[r.sid] = lastSeen[r.sid] || []).push(r.at)
-      if (r.kind === "task" && r.action === "switch") ctx[r.sid] = { text: r.text, from: "task" }
-      else if (r.kind === "prompt") ctx[r.sid] = { text: r.text, from: r.from || "you" }
+      if (r.kind === "task" && r.action === "switch") ctx[r.sid] = { text: r.text, from: "task", at: r.at }
+      else if (r.kind === "prompt") ctx[r.sid] = { text: r.text, from: r.from || "you", at: r.at }
       if (r.kind !== "edit") continue
       ;(editsBy[r.sid] = editsBy[r.sid] || []).push(r)
-      events.push({ sid: r.sid, at: r.at, ctx: ctx[r.sid] || { text: "", from: "" }, why: r.why || "", whole: !!r.whole,
+      events.push({ sid: r.sid, at: r.at, ctx: ctx[r.sid] || { text: "", from: "", at: 0 }, why: r.why || "", whole: !!r.whole,
                     files: [{ path: r.path, add: r.add || 0, del: r.del || 0, line: r.line || 1, diff: r.whole ? [] : (r.diff || []) }],
                     key: r.key })
     }
@@ -264,8 +263,8 @@ FocusScope {
         if (!owner) continue
         var covered = (editsBy[owner] || []).filter(e => e.at > since && e.at <= cm.at + 60000).map(e => e.path)
         var c = ctx[owner]
-        for (var q of src) if (q.sid === owner && q.at <= cm.at && (q.kind === "prompt" || (q.kind === "task" && q.action === "switch"))) c = { text: q.text, from: q.kind === "task" ? "task" : q.from || "you" }
-        events.push({ sid: owner, at: cm.at, ctx: c || { text: "", from: "" }, why: cm.subject, commit: true, whole: false,
+        for (var q of src) if (q.sid === owner && q.at <= cm.at && (q.kind === "prompt" || (q.kind === "task" && q.action === "switch"))) c = { text: q.text, from: q.kind === "task" ? "task" : q.from || "you", at: q.at }
+        events.push({ sid: owner, at: cm.at, ctx: c || { text: "", from: "", at: 0 }, why: cm.subject, commit: true, whole: false,
                       files: cm.files.map(f => { var seen = covered.indexOf(f.path) >= 0
                         return { path: f.path, add: f.add, del: f.del, line: f.line || 1, covered: seen, diff: seen ? [] : f.diff } }),
                       key: "commit:" + cm.hash })
@@ -288,19 +287,44 @@ FocusScope {
       }
       out.push(e)
     }
-    for (var x of out) x.jid = x.key + ":" + x.files.length + ":" + x.files.reduce((n, f) => n + f.diff.length, 0)
     return out.slice(-200)
   }
-  readonly property var rows: {
-    var out = [], day = "", prev = null
+  // One card per ask: its outcome (the agent's closing line) plus every file it touched.
+  readonly property var cards: {
+    if (!agentd) return []
+    agentd.activityGen
+    var marks = agentd.activity.filter(r => r.kind === "summary" || r.kind === "prompt" || (r.kind === "task" && r.action === "switch"))
+    var byKey = {}, out = []
     for (var e of changes) {
-      if (importantOnly && minor(e)) continue
-      var label = dayLabel(e.at)
-      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label; prev = null }
-      if (!prev || prev.sid !== e.sid || prev.ctx.text !== e.ctx.text)
-        out.push({ kind: "ask", key: "ask:" + e.key, sid: e.sid, text: e.ctx.text, from: e.ctx.from })
-      out.push(Object.assign({ kind: "change" }, e))
-      prev = e
+      var k = "card:" + e.sid + ":" + e.ctx.at + ":" + e.ctx.text
+      var c = byKey[k]
+      if (!c) { c = byKey[k] = { kind: "card", key: k, sid: e.sid, ctx: e.ctx, at: e.at, changes: [], files: [], outcome: "" }; out.push(c) }
+      c.changes.push(e); c.at = Math.max(c.at, e.at)
+      for (var f of e.files) {
+        if (f.covered) continue
+        var g = c.files.find(x => x.path === f.path)
+        if (g) { g.add += f.add; g.del += f.del }
+        else c.files.push({ path: f.path, add: f.add, del: f.del })
+      }
+    }
+    for (var c of out) {
+      var end = Infinity, best = null
+      for (var r of marks) if (r.sid === c.sid && r.kind !== "summary" && r.at > c.ctx.at && r.at < end) end = r.at
+      for (var r of marks) if (r.sid === c.sid && r.kind === "summary" && r.at >= c.ctx.at && r.at < end && (!best || r.at > best.at)) best = r
+      c.outcome = best ? best.text : ""
+      c.jid = c.key + ":" + c.changes.length + ":" + (best ? 1 : 0)
+    }
+    return out.sort((a, b) => a.at - b.at)
+  }
+  property string openKey: ""
+  readonly property var rows: {
+    var out = [], day = ""
+    for (var c of cards) {
+      if (importantOnly && minor(c) && c.key !== openKey) continue
+      var label = dayLabel(c.at)
+      if (label !== day) { out.push({ kind: "day", key: "day:" + label, text: label }); day = label }
+      out.push(c)
+      if (c.key === openKey) for (var e of c.changes) out.push(Object.assign({ kind: "change" }, e))
     }
     return out
   }
@@ -319,7 +343,7 @@ FocusScope {
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
     if (i >= 0) return i
-    for (i = rows.length - 1; i >= 0 && rows[i].kind !== "change"; i--);
+    for (i = rows.length - 1; i >= 0 && rows[i].kind === "day"; i--);
     return i
   }
   readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
@@ -327,20 +351,26 @@ FocusScope {
   function select(i) {
     cursorKey = rows[i].key
     var last = rows.length - 1
-    while (last > i && rows[last].kind !== "change") last--
+    while (last > i && rows[last].kind === "day") last--
     scroller.cursorMoved(i, i === last)
   }
   function move(delta) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (rows[i].kind === "change") { select(i); return }
+      if (rows[i].kind !== "day") { select(i); return }
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {
       var i = last ? rows.length - 1 - n : n
-      if (rows[i].kind === "change") { select(i); return }
+      if (rows[i].kind !== "day") { select(i); return }
     }
   }
   function open() {
+    if (currentRow && currentRow.kind === "card") {
+      openKey = currentRow.key
+      var i = rows.findIndex(r => r.key === openKey) + 1
+      if (rows[i] && rows[i].kind === "change") select(i)
+      return
+    }
     if (!currentRow || currentRow.kind !== "change") return
     var files = currentRow.files
     if (itemIndex < 0 && files.length > 1) { itemIndex = Math.max(0, files.findIndex(x => !x.covered)); return }
@@ -374,7 +404,7 @@ FocusScope {
       Text {
         visible: root.importantOnly
         x: 8; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
-        text: "Important changes only \u00b7 f shows all"
+        text: "Important asks only \u00b7 f shows all"
         color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
       }
     }
@@ -388,9 +418,9 @@ FocusScope {
       readonly property var entry: root.rows[index] || ({ kind: "day", files: [], diff: [] })
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
-      readonly property Item restDot: cursorDot
+      readonly property Item restDot: kind === "card" ? cardDot : cursorDot
       width: list.width
-      height: kind === "day" ? 52 : kind === "ask" ? askCol.implicitHeight + 22 : changeBox.height + 6
+      height: kind === "day" ? 52 : kind === "card" ? cardBox.height + 8 : changeBox.height + 6
 
       CapLabel {
         visible: row.kind === "day"
@@ -398,41 +428,120 @@ FocusScope {
         text: String(row.entry.text || "").toUpperCase()
       }
 
-      Row {
-        id: askCol
-        visible: row.kind === "ask"
-        x: 8; y: 16
-        width: parent.width - 16
-        spacing: 10
-        Orb { id: askOrb; sid: row.entry.sid || ""; running: false; width: 18; height: 18; y: (askName.implicitHeight - height) / 2 }
-        Text {
-          id: askName
-          text: row.entry.sid || ""; textFormat: Text.PlainText
-          color: root.contentColor
-          font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
+      Rectangle {
+        id: cardBox
+        visible: row.kind === "card"
+        y: 4
+        width: parent.width
+        height: visible ? cardCol.implicitHeight + 20 : 0
+        radius: 12
+        readonly property bool dim: root.minor(row.entry) && !row.current
+        readonly property var files: row.entry.files || []
+        readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
+        opacity: dim ? 0.55 : 1
+        color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        border.width: row.current ? 1 : 0
+        border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
+        HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: { root.cursorKey = row.key; root.forceActiveFocus(); root.open() } }
+        Rectangle {
+          id: cardDot
+          z: 2
+          x: 12 - width / 2; y: cardCol.y + cardName.height / 2 - height / 2
+          width: 8; height: 8; radius: 4
+          color: Theme.cursor
+          visible: row.current && !root.caretHeld
         }
         Text {
-          width: parent.width - askOrb.width - askName.width - 20
-          anchors.baseline: askName.baseline
-          text: !row.entry.text ? "" : row.entry.from === "task" ? row.entry.text
-            : (row.entry.from && row.entry.from !== "you" ? row.entry.from + ": " : "") + "\u201c" + row.entry.text + "\u201d"
-          textFormat: Text.PlainText
-          wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
-          lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
-          color: row.entry.from === "task" ? root.contentColor : Theme.fg_secondary
-          font.family: root.bodyFont; font.pixelSize: root.fsBody
+          id: cardTime
+          anchors { right: parent.right; rightMargin: 12; top: parent.top; topMargin: cardCol.y + (cardName.height - height) / 2 }
+          text: root.clock(row.entry.at || 0)
+          color: root.metaColor
+          font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+        }
+        Column {
+          id: cardCol
+          x: 24; y: 10
+          width: parent.width - 36 - cardTime.width - 12
+          spacing: 6
+          Row {
+            width: parent.width
+            spacing: 10
+            Orb { id: cardOrb; sid: row.entry.sid || ""; running: false; width: 18; height: 18; y: (cardName.implicitHeight - height) / 2 }
+            Text {
+              id: cardName
+              text: row.entry.sid || ""; textFormat: Text.PlainText
+              color: root.contentColor
+              font.family: root.bodyFont; font.pixelSize: root.fsName; font.weight: 600
+            }
+            Text {
+              readonly property var ctx: row.entry.ctx || ({ text: "" })
+              width: parent.width - cardOrb.width - cardName.width - 20
+              anchors.baseline: cardName.baseline
+              text: !ctx.text ? "" : ctx.from === "task" ? ctx.text
+                : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
+              textFormat: Text.PlainText
+              wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : 2; elide: Text.ElideRight
+              lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
+              color: Theme.fg_secondary
+              font.family: root.bodyFont; font.pixelSize: root.fsBody
+            }
+          }
+          Text {
+            x: 28
+            width: parent.width - 28
+            visible: text !== ""
+            text: row.entry.outcome || cardBox.last.why || ""
+            textFormat: Text.PlainText
+            color: row.entry.outcome ? root.contentColor : Theme.fg_secondary
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta
+            lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
+            wrapMode: Text.Wrap; maximumLineCount: cardBox.dim ? 1 : row.current ? 8 : 3; elide: Text.ElideRight
+          }
+          Flow {
+            x: 28
+            width: parent.width - 28
+            visible: !cardBox.dim && cardBox.files.length > 0
+            spacing: 6
+            Repeater {
+              model: cardBox.files.slice(0, 6)
+              delegate: PillSurface {
+                required property var modelData
+                height: 22; radius: 11
+                width: pillRow.implicitWidth + 18
+                Row {
+                  id: pillRow
+                  x: 9; anchors.verticalCenter: parent.verticalCenter
+                  spacing: 6
+                  Text { text: String(modelData.path).split("/").pop(); color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
+                  Text { visible: modelData.add > 0; text: "+" + modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
+                  Text { visible: modelData.del > 0; text: "-" + modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
+                }
+              }
+            }
+            Text {
+              visible: cardBox.files.length > 6
+              height: 22; verticalAlignment: Text.AlignVCenter
+              text: "+" + (cardBox.files.length - 6) + " files"
+              color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
+            }
+          }
+          Text {
+            x: 28
+            visible: row.current
+            text: root.openKey === row.key ? "Esc folds the edits" : "Enter shows " + (row.entry.changes || []).length + ((row.entry.changes || []).length === 1 ? " edit" : " edits")
+            color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
+          }
         }
       }
 
       Rectangle {
         id: changeBox
         visible: row.kind === "change"
-        x: 0
-        width: parent.width
+        x: 32
+        width: parent.width - 32
         height: visible ? changeCol.implicitHeight + 14 : 0
         radius: 12
-        readonly property bool dim: root.minor(row.entry) && !row.current
-        opacity: dim ? 0.55 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : changeHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
@@ -469,7 +578,7 @@ FocusScope {
             color: Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
-            wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : changeBox.dim ? 1 : 2; elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: row.current ? 6 : 2; elide: Text.ElideRight
           }
           Repeater {
             model: row.kind === "change" ? row.entry.files : []
@@ -477,7 +586,6 @@ FocusScope {
               id: fileBlock
               required property var modelData
               required property int index
-              visible: !changeBox.dim
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
                 if (!row.current) return 0
@@ -538,12 +646,7 @@ FocusScope {
                 }
               }
               Column {
-                readonly property var score: root.jev[row.entry.jid]
-                readonly property var lines: row.current ? [] : !score ? root.digest(fileBlock.diff)
-                  : score.picks.filter(p => p[0] === fileBlock.index).map(p => p[1]).sort((a, b) => a - b).map(li => {
-                      var m = String(fileBlock.diff[li] || "").match(/^([+\- ])\s*\d*\s?(.*)$/) || ["", "+", ""]
-                      return { sign: m[1], key: "", text: m[2].trim() }
-                    })
+                readonly property var lines: row.current ? [] : root.digest(fileBlock.diff)
                 visible: lines.length > 0
                 x: 12
                 width: parent.width - 12
