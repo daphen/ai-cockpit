@@ -401,6 +401,7 @@ FocusScope {
       for (var r of marks) if (r.sid === c.sid && r.kind !== "summary" && r.at > c.ctx.at && r.at < end) end = r.at
       for (var r of marks) if (r.sid === c.sid && r.kind === "summary" && r.at >= c.ctx.at && r.at < end && (!best || r.at > best.at)) best = r
       c.outcome = best ? best.text : ""
+      c.lead = best && best.lead || ""
       if (best && !c.changes.length) c.at = best.at
       c.jid = c.key + ":" + c.changes.length + ":" + (best ? 1 : 0)
     }
@@ -632,8 +633,8 @@ FocusScope {
           }
           Text {
             width: parent.width
-            visible: !cardBox.open && cardBox.question !== "" && cardBox.done !== ""
-            text: cardBox.done
+            visible: !cardBox.open && cardBox.question !== "" && text !== ""
+            text: row.entry.lead ? root.tidy(row.entry.lead).replace(/\.$/, "") : cardBox.done
             textFormat: Text.PlainText
             elide: Text.ElideRight; maximumLineCount: 1
             color: Theme.fg_secondary

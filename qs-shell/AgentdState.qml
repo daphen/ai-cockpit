@@ -768,8 +768,9 @@ Item {
     return line ? { key: "prompt:" + sid + ":" + (message.timestamp || line), sid: sid, at: at, kind: "prompt", from: from, text: line } : null
   }
   function _summaryActivity(sid, message, at) {
-    var line = _closingLine(_contentText(message.content))
-    return line ? { key: "summary:" + sid + ":" + (message.timestamp || line), sid: sid, at: at, kind: "summary", text: line } : null
+    var text = _contentText(message.content), line = _closingLine(text)
+    var lead = (text.split("\n").map(l => l.replace(/\*\*|__|`/g, "").replace(/^\s*([#>]+|[-*]|\d+\.)\s+/, "").trim()).find(l => l && !/^⟢/.test(l)) || "").slice(0, 240)
+    return line ? { key: "summary:" + sid + ":" + (message.timestamp || line), sid: sid, at: at, kind: "summary", text: line, lead: lead } : null
   }
   function _taskActivity(sid, action, title, at) {
     return { key: "task:" + sid + ":" + action + ":" + title, sid: sid, at: at, kind: "task", action: action, text: title }
@@ -814,6 +815,10 @@ Item {
   function _noteActivity(rows) {
     var list = activity, added = false
     for (var row of rows) {
+      if (row && row.lead && _activityKeys.has(row.key)) {
+        var old = list.findIndex(r => r.key === row.key)
+        if (old >= 0 && !list[old].lead) { list[old] = row; added = true }
+      }
       if (!row || _activityKeys.has(row.key)) continue
       _activityKeys.set(row.key, true)
       list.push(row)
