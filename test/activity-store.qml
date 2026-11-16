@@ -10,6 +10,7 @@ ShellRoot {
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   AgentdState { id: first; activityStorePath: test.store; function send(message) { return true } }
   Loader { id: later; active: false; sourceComponent: AgentdState { activityStorePath: test.store; function send(message) { return true } } }
+  FileView { id: writer; path: test.store }
   property int stage: 0
   Timer {
     running: true; repeat: true; interval: 500
@@ -24,7 +25,13 @@ ShellRoot {
       } else if (test.stage === 5) {
         // A new Cockpit: the session is gone from agentd, so its transcript can't be asked for.
         later.active = true
-      } else if (test.stage === 7) {
+      } else if (test.stage === 6) {
+        // Another Cockpit (or a recovery) writes rows into the store: this one should pick them up.
+        var rows = JSON.parse(JSON.stringify(later.item.activity))
+        rows.push({ key: "summary:other:1", sid: "other", at: Date.now(), kind: "summary", text: "from elsewhere" })
+        writer.setText(JSON.stringify(rows))
+      } else if (test.stage === 9) {
+        if (!first.activity.some(r => r.key === "summary:other:1")) test.fail("rows written to the store by someone else should be merged in")
         if (!later.item.activity.some(r => r.sid === "gone" && r.path === "/r/Kept.qml"))
           test.fail("a closed session's activity should survive a Cockpit restart")
         console.log("PASS: activity outlives the sessions it came from")

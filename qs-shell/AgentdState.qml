@@ -794,6 +794,8 @@ Item {
     id: activityStore
     path: root.activityStorePath
     printErrors: false
+    watchChanges: true
+    onFileChanged: reload()
     onLoaded: {
       try { root._noteActivity(JSON.parse(text())) } catch (_) {}
       root._activityStoreRead = true
