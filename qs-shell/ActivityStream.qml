@@ -319,7 +319,7 @@ FocusScope {
       else if (r.kind === "prompt") ctx[r.sid] = { text: r.text, from: r.from || "you", at: r.at }
       if (r.kind !== "edit") continue
       ;(editsBy[r.sid] = editsBy[r.sid] || []).push(r)
-      events.push({ sid: r.sid, at: r.at, ctx: ctx[r.sid] || { text: "", from: "", at: 0 }, why: r.why || "", whole: !!r.whole,
+      events.push({ sid: r.sid, at: r.at, ctx: ctx[r.sid] || { text: "", from: "", at: 0 }, why: r.why || "", whole: !!r.whole, review: r.review || null,
                     files: [{ path: r.path, add: r.add || 0, del: r.del || 0, line: r.line || 1, diff: r.whole ? [] : (r.diff || []) }],
                     key: r.key })
     }
@@ -590,7 +590,8 @@ FocusScope {
         readonly property var ctx: row.entry.ctx || ({ text: "" })
         readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
           : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
-        readonly property var glance: row.kind === "card" ? root.snippet(row.entry) : null
+        readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
+        readonly property var glance: row.kind === "card" && !review ? root.snippet(row.entry) : null
         readonly property string done: open ? root.tidy(row.entry.outcome || last.why) : root.headline(row.entry.outcome || last.why)
         opacity: dim ? 0.5 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
@@ -621,12 +622,55 @@ FocusScope {
           Text {
             id: cardHead
             width: parent.width
-            text: cardBox.done || cardBox.asked
-            textFormat: Text.PlainText
+            text: cardBox.review ? '<font color="' + root.metaColor + '">#' + cardBox.review.pr + "</font>&nbsp;&nbsp;" + root.esc(cardBox.review.title || "Review")
+              : root.esc(cardBox.done || cardBox.asked)
+            textFormat: Text.StyledText
             wrapMode: Text.Wrap; maximumLineCount: cardBox.open ? 8 : 1; elide: Text.ElideRight
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
             color: root.contentColor
             font.family: root.bodyFont; font.pixelSize: root.fsBody
+          }
+          Row {
+            objectName: "reviewRow"
+            visible: !!cardBox.review
+            width: parent.width
+            spacing: 10
+            readonly property var r: cardBox.review || ({ verdict: "", why: "", blocker: 0, should: 0, nit: 0 })
+            readonly property color tone: r.verdict === "approve" ? Theme.green : r.verdict === "request-changes" ? Theme.red : Theme.yellow
+            Rectangle {
+              visible: parent.r.verdict !== ""
+              anchors.verticalCenter: parent.verticalCenter
+              width: verdictText.implicitWidth + 16; height: verdictText.implicitHeight + 6
+              radius: height / 2
+              color: Qt.alpha(parent.tone, 0.14)
+              Text {
+                id: verdictText
+                anchors.centerIn: parent
+                text: ({ "approve": "Approve", "request-changes": "Changes requested", "comment": "Comment" })[parent.parent.r.verdict] || ""
+                color: parent.parent.tone
+                font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2; font.weight: Font.DemiBold
+              }
+            }
+            Text {
+              id: findingsText
+              anchors.verticalCenter: parent.verticalCenter
+              textFormat: Text.StyledText
+              text: { var r = parent.r, parts = []
+                if (r.blocker) parts.push('<font color="' + Theme.red + '">' + r.blocker + (r.blocker === 1 ? " blocker" : " blockers") + "</font>")
+                if (r.should) parts.push(r.should + " should-fix")
+                if (r.nit) parts.push(r.nit + (r.nit === 1 ? " nit" : " nits"))
+                return parts.length ? parts.join(" \u00b7 ") : "No findings" }
+              color: root.contentColor
+              font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+            }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - x
+              text: parent.r.why; textFormat: Text.PlainText
+              elide: Text.ElideRight; maximumLineCount: 1
+              color: root.metaColor
+              font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+            }
           }
           Rectangle {
             id: glanceBox

@@ -730,6 +730,19 @@ Item {
   property int activityGen: 0
   property var _activityKeys: new Map()
   property var _editWhy: ({})
+  property var _reviewText: ({})
+  function _isReview(path) { return /\/reviews\/pr-\d+\.md$/.test(String(path || "")) }
+  // The review-pr document: "# PR #N — title", "## Verdict" (bold verdict + why), "## Findings" ("### <severity> · …").
+  function _reviewDigest(text) {
+    var section = name => { var m = text.match(new RegExp("^##\\s+" + name + "\\s*$([\\s\\S]*?)(?=^##\\s|(?![\\s\\S]))", "mi")); return m ? m[1] : "" }
+    var head = text.match(/^#\s+PR\s+#?(\d+)\s*[\u2014\u2013:-]?\s*(.*)$/m)
+    var verdictText = section("Verdict").replace(/\s+/g, " ").trim()
+    var v = (verdictText.match(/\b(approve|request[- ]changes|comment)\b/i) || [])[1] || ""
+    var rest = verdictText.replace(/^\*\*[^*]*\*\*\s*/, "").replace(/^[\s\u2014\u2013:.-]+/, ""), why = (rest.match(/^[\s\S]*?[.!?](?=\s|$)/) || [rest])[0]
+    var count = sev => (section("Findings").match(new RegExp("^###\\s+" + sev + "\\b", "gim")) || []).length
+    return { pr: head ? head[1] : "", title: head ? head[2].trim() : "", verdict: v.toLowerCase().replace(" ", "-"), why: why,
+             blocker: count("blocker"), should: count("should-fix"), nit: count("nit") }
+  }
   property var _activityQueue: []
   property var _activityRequested: new Map()
   // The agent's note right before each tool call in one message: why that edit was made.
@@ -771,7 +784,8 @@ Item {
     var first = changed ? Number(changed.match(/^[+-]\s*(\d+)/)[1]) : 1
     return { key: "edit:" + id, sid: sid, at: at, kind: "edit", path: String(path), add: counts[0], del: counts[1],
              line: Number(details && details.firstChangedLine) || first, why: String(why || ""), lines: lines.length, whole: !diff && !!content,
-             diff: lines.slice(0, 40).map(l => l.length > 200 ? l.slice(0, 200) : l) }
+             diff: lines.slice(0, 40).map(l => l.length > 200 ? l.slice(0, 200) : l),
+             review: _isReview(path) && content ? _reviewDigest(String(content)) : null }
   }
   function _noteActivity(rows) {
     var list = activity, added = false
@@ -1320,6 +1334,8 @@ Item {
     _lastAct.set(sid, Date.now())
     if (t === "message_end" && m.message && m.message.role === "assistant") {
       _editWhy = Object.assign({}, _editWhy, _whyByCall(m.message))
+      for (var rb of m.message.content || [])
+        if (rb.type === "toolCall" && _isReview(rb.arguments && rb.arguments.path) && rb.arguments.content) _reviewText[rb.id] = String(rb.arguments.content)
       _noteActivity([_summaryActivity(sid, m.message, Date.now())])
     }
     if (t === "message_end" && m.message && m.message.role === "user") _noteActivity([_promptActivity(sid, m.message, Date.now())])
@@ -1582,8 +1598,8 @@ Item {
         feedGen++
       }
       if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || ""))) {
-        var editRow = _editActivity(sid, m.toolCallId, Date.now(), activity.path, det, "", _editWhy[m.toolCallId])
-        var whys = _editWhy; delete whys[m.toolCallId]
+        var editRow = _editActivity(sid, m.toolCallId, Date.now(), activity.path, det, _reviewText[m.toolCallId] || "", _editWhy[m.toolCallId])
+        var whys = _editWhy; delete whys[m.toolCallId]; delete _reviewText[m.toolCallId]
         if (!editRow.add && !editRow.del) { editRow.add = activity.add || 0; editRow.del = activity.del || 0 }
         _noteActivity([editRow])
       }

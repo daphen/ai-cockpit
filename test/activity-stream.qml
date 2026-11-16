@@ -69,6 +69,13 @@ ShellRoot {
           { type: "message", id: "a0", message: { role: "assistant", timestamp: test.t0 - 5 * 3600000, content: [
             { type: "toolCall", id: "e0", name: "edit", arguments: { path: "/r/Old.qml", edits: [] } }] } },
           { type: "message", id: "r0", message: { role: "toolResult", toolCallId: "e0", timestamp: test.t0 - 5 * 3600000, details: { diff: "+ 1 old" } } },
+          { type: "message", id: "gr", timestamp: new Date(test.t0 - 110000).toISOString(), message: { role: "user", timestamp: test.t0 - 110000,
+            content: [{ type: "text", text: "Review PR 42" }] } },
+          { type: "message", id: "gr1", message: { role: "assistant", timestamp: test.t0 - 109000, content: [
+            { type: "toolCall", id: "ew", name: "write", arguments: { path: "/h/notes/storage/reviews/pr-42.md",
+              content: "# PR #42 \u2014 fix(rail): keep focus\n\nfeat \u00b7 +3/-1\n\n## Verdict\n\n**Request changes.** Focus is lost on reload. More detail here.\n\n## Findings\n\n### Blocker \u00b7 `a.qml:1`\n\nx\n\n### Nit \u00b7 `b.qml:2`\n\ny\n\n## Verification\n\n### Blocker in prose does not count\n" } }] } },
+          { type: "message", id: "grr", message: { role: "toolResult", toolCallId: "ew", timestamp: test.t0 - 108500 } },
+          { type: "message", id: "gr2", message: { role: "assistant", timestamp: test.t0 - 108000, content: [{ type: "text", text: "\u27e2 Reviewed PR #42 and wrote the review (request changes, 2 findings)." }] } },
           { type: "message", id: "u1", timestamp: new Date(test.t0).toISOString(), message: { role: "user", timestamp: test.t0,
             content: [{ type: "text", text: "\u21c4 nixos (user-approved)\nBuild the activity view" }] } },
           { type: "custom", id: "t1", customType: "cockpit-session-task", timestamp: new Date(test.t0 + 1000).toISOString(), data: { action: "switch", title: "Activity view" } },
@@ -100,9 +107,12 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,edit,edit,edit,prompt,prompt,prompt,summary,summary,task") test.fail("history rows were " + kinds)
-        var prompt = state.activity.find(r => r.kind === "prompt")
+        if (kinds !== "edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,summary,summary,summary,task") test.fail("history rows were " + kinds)
+        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
+        if (!test.hasText("</font>&nbsp;&nbsp;fix(rail): keep focus") || !test.visibleText("Changes requested") || !test.hasText("1 blocker</font> \u00b7 1 nit")
+            || !test.visibleText("Focus is lost on reload.") || test.hasText("Reviewed PR #42"))
+          test.fail("a review card should show the PR, its verdict, the findings by severity and the one-line why")
         if (!test.visibleText("Activity view renders history")) test.fail("an ask's card should say its outcome as a short headline")
         var fold = page.rows.find(r => r.kind === "fold")
         if (!fold || fold.count !== 1 || test.hasText("Old thing done")) test.fail("a past day should fold to one row with its ask count")
@@ -282,6 +292,13 @@ ShellRoot {
         }
         if (w.steps === 6) w.dir = Qt.Key_J
         if (w.steps === 12) {
+          test.event({ type: "message_end", session: "gamma", message: { role: "assistant", timestamp: Date.now(), content: [
+            { type: "toolCall", id: "lw", name: "write", arguments: { path: "/h/notes/storage/reviews/pr-43.md",
+              content: "# PR #43 \u2014 feat: live review\n\n## Verdict\n\n**Approve.** Clean and tested.\n\n## Findings\n\nNone.\n" } }] } })
+          test.event({ type: "tool_execution_start", session: "gamma", toolName: "write", toolCallId: "lw", args: { path: "/h/notes/storage/reviews/pr-43.md" } })
+          test.event({ type: "tool_execution_end", session: "gamma", toolName: "write", toolCallId: "lw", result: { details: {} } })
+          var lr = page.cards.find(c => c.changes.some(e => e.review && e.review.pr === "43"))
+          if (!lr || lr.changes.slice(-1)[0].review.verdict !== "approve") test.fail("a review written live should become a review card: " + JSON.stringify(lr && lr.changes.map(e => e.review)))
           console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
         }
