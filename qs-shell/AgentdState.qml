@@ -787,6 +787,28 @@ Item {
              diff: lines.slice(0, 40).map(l => l.length > 200 ? l.slice(0, 200) : l),
              review: _isReview(path) && content ? _reviewDigest(String(content)) : null }
   }
+  // agentd can only replay transcripts of sessions it still tracks, so finished sessions' activity lives here.
+  property string activityStorePath: ""
+  property bool _activityStoreRead: false
+  FileView {
+    id: activityStore
+    path: root.activityStorePath
+    printErrors: false
+    onLoaded: {
+      try { root._noteActivity(JSON.parse(text())) } catch (_) {}
+      root._activityStoreRead = true
+    }
+    onLoadFailed: root._activityStoreRead = true
+  }
+  onActivityGenChanged: if (activityStorePath && _activityStoreRead) activitySave.restart()
+  Timer {
+    id: activitySave
+    interval: 1500
+    onTriggered: {
+      var since = Date.now() - 14 * 86400000
+      activityStore.setText(JSON.stringify(root.activity.filter(r => r.at >= since)))
+    }
+  }
   function _noteActivity(rows) {
     var list = activity, added = false
     for (var row of rows) {

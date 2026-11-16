@@ -373,12 +373,14 @@ ShellRoot {
       id: personalAgentd
       scope: "personal"
       selectedSession: win.modeReady && win.scopeMode === "personal" ? rail.selectedRaw : ""
+      activityStorePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/cockpit/activity-personal.json"
       configuredSockPaths: win.pathsFor("personal")
     }
     AgentdState {
       id: workAgentd
       scope: "lovable"
       selectedSession: win.modeReady && win.scopeMode === "work" ? rail.selectedRaw : ""
+      activityStorePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/cockpit/activity-lovable.json"
       configuredSockPaths: win.pathsFor("work")
     }
 
