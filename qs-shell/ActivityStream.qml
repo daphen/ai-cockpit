@@ -213,13 +213,14 @@ FocusScope {
     var want = {}
     for (var w of words((card.outcome || "") + " " + (card.ctx ? card.ctx.text : ""))) want[w] = true
     var trivial = t => !t || /^[\s{}()\[\];,]*$/.test(t) || /^(\/\/|#|\/\*|\*|--)/.test(t) || /^(import|from\s+\S+\s+import|use|#include)\b/.test(t)
+    var decl = /^\s*(export\s+|async\s+|default\s+|readonly\s+|required\s+|static\s+|pub\s+)*(function|def|fn|func|class|signal|property|struct|interface|type|enum|const|let|var)\b/
     var isTest = p => /(^|\/)(tests?|__tests__|spec)\/|[._-](test|spec)\.|(^|\/)test_[^/]*$/.test(String(p))
     var files = []
     for (var e of card.changes || [])
       for (var f of e.files || []) {
         if (f.covered) continue
         var file = files.find(x => x.path === f.path)
-        if (!file) files.push(file = { path: f.path, name: String(f.path).split("/").pop(), add: 0, del: 0, why: "", best: null, test: isTest(f.path) })
+        if (!file) files.push(file = { path: f.path, name: String(f.path).split("/").pop(), add: 0, del: 0, why: "", best: null, removed: [], test: isTest(f.path) })
         file.add += f.add; file.del += f.del
         if (e.why) file.why = headline(e.why)
         var hunk = []
@@ -230,6 +231,11 @@ FocusScope {
             for (var l of real) for (var w of words(l.text)) if (want[w]) hit[w] = true
             var score = 3 * Object.keys(hit).length + Math.min(real.length, 6) + (real.some(l => /\b(function|def|fn|func|class|signal|property|struct|interface|type)\b/.test(l.text)) ? 2 : 0)
             if (!file.best || score > file.best.score) file.best = { score: score, lines: real }
+            if (real.every(l => l.sign === "-")) {
+              var decls = real.filter(l => decl.test(l.text))
+              var lead = Math.min(...decls.map(l => l.text.search(/\S/)))
+              for (var d of decls) if (d.text.search(/\S/) === lead) file.removed.push(d)
+            }
           }
           hunk = []
         }
@@ -243,11 +249,13 @@ FocusScope {
     if (!files.length) return null
     var score = x => x.best ? x.best.score : -1
     files.sort((a, b) => (a.test - b.test) || (score(b) - score(a)))
-    var top = files[0].best, lines = top ? top.lines.slice(0, 5) : []
+    var top = files[0].best, gone = top && top.lines.every(l => l.sign === "-") && files[0].removed.length
+    if (gone) top = { lines: files[0].removed.map(l => Object.assign({}, l, { text: l.text.trim().replace(/\s*[{:=]\s*$/, "") })) }
+    var lines = top ? top.lines.slice(0, 5) : []
     var indent = lines.length ? Math.min(...lines.map(l => l.text.search(/\S|$/))) : 0
     return { files: files.slice(0, 4), more: files.length - 4, path: files[0].path,
              lines: lines.map(l => Object.assign({}, l, { text: l.text.slice(indent) })),
-             moreLines: top ? top.lines.length - lines.length : 0 }
+             moreLines: top ? top.lines.length - lines.length : 0, removedList: !!gone }
   }
 
   function relPath(sid, path) {
@@ -721,7 +729,7 @@ FocusScope {
                   Text {
                     x: 12
                     visible: index === 0 && cardBox.glance.moreLines > 0
-                    text: "\u22ef " + cardBox.glance.moreLines + " more lines"
+                    text: "\u22ef " + cardBox.glance.moreLines + (cardBox.glance.removedList ? " more removed" : " more lines")
                     color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
                     topPadding: 2; bottomPadding: 4
                   }

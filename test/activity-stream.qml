@@ -79,6 +79,13 @@ ShellRoot {
           { type: "message", id: "gq", timestamp: new Date(test.t0 - 107000).toISOString(), message: { role: "user", timestamp: test.t0 - 107000,
             content: [{ type: "text", text: "Where are we on the branch?" }] } },
           { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "text", text: "\u27e2 Nothing on the branch has changed since last week" }] } },
+          { type: "message", id: "gd", timestamp: new Date(test.t0 - 105000).toISOString(), message: { role: "user", timestamp: test.t0 - 105000,
+            content: [{ type: "text", text: "Drop the loader" }] } },
+          { type: "message", id: "gd1", message: { role: "assistant", timestamp: test.t0 - 104000, content: [
+            { type: "toolCall", id: "ed", name: "edit", arguments: { path: "/r/Loader.qml", edits: [] } }] } },
+          { type: "message", id: "gdr", message: { role: "toolResult", toolCallId: "ed", timestamp: test.t0 - 103500, details: { diff:
+            "  4 ctx\n- 5   readonly property int legacyDepth: 3\n- 6   function loadLegacy(path) {\n- 7     var deepBodyLine = path.split(1)\n- 8     return deepBodyLine\n- 9   }\n-10   signal legacyLoaded()\n 11 ctx" } } },
+          { type: "message", id: "gd2", message: { role: "assistant", timestamp: test.t0 - 103000, content: [{ type: "text", text: "\u27e2 Dropped the legacy loader." }] } },
           { type: "message", id: "u1", timestamp: new Date(test.t0).toISOString(), message: { role: "user", timestamp: test.t0,
             content: [{ type: "text", text: "\u21c4 nixos (user-approved)\nBuild the activity view" }] } },
           { type: "custom", id: "t1", customType: "cockpit-session-task", timestamp: new Date(test.t0 + 1000).toISOString(), data: { action: "switch", title: "Activity view" } },
@@ -110,14 +117,16 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,prompt,summary,summary,summary,summary,task") test.fail("history rows were " + kinds)
-        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Where are we on the branch?")
+        if (kinds !== "edit,edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,prompt,prompt,summary,summary,summary,summary,summary,task") test.fail("history rows were " + kinds)
+        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Where are we on the branch?" && r.text !== "Drop the loader")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
         if (!test.hasText("</font>&nbsp;&nbsp;fix(rail): keep focus") || !test.visibleText("Changes requested") || !test.hasText("1 blocker</font> \u00b7 1 nit")
             || !test.visibleText("Focus is lost on reload.") || test.hasText("Reviewed PR #42"))
           test.fail("a review card should show the PR, its verdict, the findings by severity and the one-line why")
         if (!test.hasText("Nothing on the branch has changed since last week"))
           test.fail("an ask answered without any edits should still be a card with its outcome")
+        if (!test.hasText("loadLegacy") || !test.hasText("legacyLoaded") || !test.hasText("legacyDepth") || test.hasText("deepBodyLine"))
+          test.fail("a change that only removed code should list what was removed, not show the first lines of it")
         if (!test.visibleText("Activity view renders history")) test.fail("an ask's card should say its outcome as a short headline")
         var fold = page.rows.find(r => r.kind === "fold")
         if (!fold || fold.count !== 1 || test.hasText("Old thing done")) test.fail("a past day should fold to one row with its ask count")
@@ -263,6 +272,7 @@ ShellRoot {
       } else if (stage === 7) {
         var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0)
         lv.contentY = lv.contentHeight - lv.height
+        lv.contentY = Math.max(1, Math.min(lv.contentY, lv.contentY + test.codeFlick.mapToItem(page, 0, 0).y - 100))
         var x0 = test.codeFlick.contentX, y0 = lv.contentY, p = test.codeFlick.mapToItem(page, 50, 10)
         input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 0, 120, 0)
         if (lv.contentHeight <= lv.height) test.fail("the feed must overflow for this check, got " + lv.contentHeight + " in " + lv.height)
