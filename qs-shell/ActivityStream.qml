@@ -554,12 +554,20 @@ FocusScope {
         }
       }
 
-      Rectangle {
+      Item {
         visible: row.kind === "who" || row.kind === "card" || row.kind === "change"
-        x: 0; width: 3; radius: 1.5
+        // One continuous bar per session run: only its first and last rows show rounded ends.
+        readonly property bool runEnd: { var n = root.rows[row.index + 1]; return !n || (n.kind !== "card" && n.kind !== "change") }
+        x: 0; width: 3; clip: true
         y: row.kind === "who" ? 14 : 0
         height: parent.height - y
-        color: root.hueFor(row.entry.sid || "")
+        Rectangle {
+          objectName: "sessionBar"
+          width: 3; radius: 1.5
+          y: row.kind === "who" ? 0 : -2
+          height: parent.height - y + (parent.runEnd ? 0 : 2)
+          color: root.hueFor(row.entry.sid || "")
+        }
         opacity: 0.7
       }
 
