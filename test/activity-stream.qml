@@ -77,7 +77,7 @@ ShellRoot {
           { type: "message", id: "grr", message: { role: "toolResult", toolCallId: "ew", timestamp: test.t0 - 108500 } },
           { type: "message", id: "gr2", message: { role: "assistant", timestamp: test.t0 - 108000, content: [{ type: "text", text: "\u27e2 Reviewed PR #42 and wrote the review (request changes, 2 findings)." }] } },
           { type: "message", id: "gq", timestamp: new Date(test.t0 - 107000).toISOString(), message: { role: "user", timestamp: test.t0 - 107000,
-            content: [{ type: "text", text: "Where are we on the branch?" }] } },
+            content: [{ type: "text", text: "Ok so. Hm, where are we on the branch?" }] } },
           { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "text", text: "\u27e2 Answer only; nothing on the branch has changed since last week." }] } },
           { type: "message", id: "gd", timestamp: new Date(test.t0 - 105000).toISOString(), message: { role: "user", timestamp: test.t0 - 105000,
             content: [{ type: "text", text: "Drop the loader" }] } },
@@ -118,13 +118,13 @@ ShellRoot {
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
         if (kinds !== "edit,edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,prompt,prompt,summary,summary,summary,summary,summary,task") test.fail("history rows were " + kinds)
-        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Where are we on the branch?" && r.text !== "Drop the loader")
+        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Ok so. Hm, where are we on the branch?" && r.text !== "Drop the loader")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
         if (!test.hasText("</font>&nbsp;&nbsp;fix(rail): keep focus") || !test.visibleText("Changes requested") || !test.hasText("1 blocker</font> \u00b7 1 nit")
             || !test.visibleText("Focus is lost on reload.") || test.hasText("Reviewed PR #42"))
           test.fail("a review card should show the PR, its verdict, the findings by severity and the one-line why")
-        if (!test.hasText("Answer only; nothing on the branch has changed since last week"))
-          test.fail("an ask answered without any edits should still be a card with its outcome, and a two-word lead-in must not swallow it")
+        if (!test.visibleText("Where are we on the branch?") || !test.visibleText("Answer only; nothing on the branch has changed since last week"))
+          test.fail("an ask answered without edits should headline its question, then its answer")
         if (!test.hasText("loadLegacy") || !test.hasText("legacyLoaded") || !test.hasText("legacyDepth") || test.hasText("deepBodyLine"))
           test.fail("a change that only removed code should list what was removed, not show the first lines of it")
         var removedCode = test.find(page, i => i.visible && String(i.text || "").indexOf("legacyDepth") >= 0)

@@ -454,6 +454,12 @@ FocusScope {
     var head = parts[0].split(/\s+/).length < 3 && parts.length > 2 ? parts[0] + parts[1] + parts[2] : parts[0]
     return head.replace(/\.$/, "")
   }
+  function question(t) {
+    var parts = String(t || "").replace(/\s+/g, " ").match(/[^.?!]+[.?!]*/g) || []
+    var q = parts.filter(x => /\?\s*$/.test(x)).pop() || parts[0] || ""
+    q = q.trim().replace(/^(?:(?:hm+|so|ok(?:ay)?|well|yeah|right|and|but|also)\b[,.]?\s*)+/i, "")
+    return q.split(" ").length < 3 ? "" : q.charAt(0).toUpperCase() + q.slice(1)
+  }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
   function select(i) {
@@ -585,6 +591,7 @@ FocusScope {
         readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
           : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
         readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
+        readonly property string question: files.length || review ? "" : root.question(ctx.text)
         readonly property var glance: row.kind === "card" && !review ? root.snippet(row.entry) : null
         readonly property string done: open ? root.tidy(row.entry.outcome || last.why) : root.headline(row.entry.outcome || last.why)
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
@@ -616,12 +623,21 @@ FocusScope {
             id: cardHead
             width: parent.width
             text: cardBox.review ? '<font color="' + root.metaColor + '">#' + cardBox.review.pr + "</font>&nbsp;&nbsp;" + root.esc(cardBox.review.title || "Review")
-              : root.esc(cardBox.done || cardBox.asked)
+              : root.esc(!cardBox.open && cardBox.question || cardBox.done || cardBox.asked)
             textFormat: Text.StyledText
             wrapMode: Text.Wrap; maximumLineCount: cardBox.open ? 8 : 1; elide: Text.ElideRight
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
             color: root.contentColor
             font.family: root.bodyFont; font.pixelSize: root.fsBody
+          }
+          Text {
+            width: parent.width
+            visible: !cardBox.open && cardBox.question !== "" && cardBox.done !== ""
+            text: cardBox.done
+            textFormat: Text.PlainText
+            elide: Text.ElideRight; maximumLineCount: 1
+            color: Theme.fg_secondary
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta
           }
           Row {
             objectName: "reviewRow"
