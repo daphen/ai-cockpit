@@ -382,14 +382,21 @@ FocusScope {
         else c.files.push({ path: f.path, add: f.add, del: f.del })
       }
     }
+    // An ask answered without edits (the orchestrator's usual work) is still a card.
+    for (var m of marks) {
+      if (m.kind === "summary") continue
+      var ctx = { text: m.text, from: m.kind === "task" ? "task" : m.from || "you", at: m.at }, k = "card:" + m.sid + ":" + m.at + ":" + m.text
+      if (!byKey[k]) { byKey[k] = { kind: "card", key: k, sid: m.sid, ctx: ctx, at: m.at, changes: [], files: [], outcome: "" }; out.push(byKey[k]) }
+    }
     for (var c of out) {
       var end = Infinity, best = null
       for (var r of marks) if (r.sid === c.sid && r.kind !== "summary" && r.at > c.ctx.at && r.at < end) end = r.at
       for (var r of marks) if (r.sid === c.sid && r.kind === "summary" && r.at >= c.ctx.at && r.at < end && (!best || r.at > best.at)) best = r
       c.outcome = best ? best.text : ""
+      if (best && !c.changes.length) c.at = best.at
       c.jid = c.key + ":" + c.changes.length + ":" + (best ? 1 : 0)
     }
-    return out.sort((a, b) => a.at - b.at)
+    return out.filter(c => c.changes.length || c.outcome).sort((a, b) => a.at - b.at)
   }
   property string openKey: ""
   // Focus never resizes a row: only Enter does.

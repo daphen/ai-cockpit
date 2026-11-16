@@ -76,6 +76,9 @@ ShellRoot {
               content: "# PR #42 \u2014 fix(rail): keep focus\n\nfeat \u00b7 +3/-1\n\n## Verdict\n\n**Request changes.** Focus is lost on reload. More detail here.\n\n## Findings\n\n### Blocker \u00b7 `a.qml:1`\n\nx\n\n### Nit \u00b7 `b.qml:2`\n\ny\n\n## Verification\n\n### Blocker in prose does not count\n" } }] } },
           { type: "message", id: "grr", message: { role: "toolResult", toolCallId: "ew", timestamp: test.t0 - 108500 } },
           { type: "message", id: "gr2", message: { role: "assistant", timestamp: test.t0 - 108000, content: [{ type: "text", text: "\u27e2 Reviewed PR #42 and wrote the review (request changes, 2 findings)." }] } },
+          { type: "message", id: "gq", timestamp: new Date(test.t0 - 107000).toISOString(), message: { role: "user", timestamp: test.t0 - 107000,
+            content: [{ type: "text", text: "Where are we on the branch?" }] } },
+          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "text", text: "\u27e2 Nothing on the branch has changed since last week" }] } },
           { type: "message", id: "u1", timestamp: new Date(test.t0).toISOString(), message: { role: "user", timestamp: test.t0,
             content: [{ type: "text", text: "\u21c4 nixos (user-approved)\nBuild the activity view" }] } },
           { type: "custom", id: "t1", customType: "cockpit-session-task", timestamp: new Date(test.t0 + 1000).toISOString(), data: { action: "switch", title: "Activity view" } },
@@ -107,12 +110,14 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,summary,summary,summary,task") test.fail("history rows were " + kinds)
-        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42")
+        if (kinds !== "edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,prompt,summary,summary,summary,summary,task") test.fail("history rows were " + kinds)
+        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Where are we on the branch?")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
         if (!test.hasText("</font>&nbsp;&nbsp;fix(rail): keep focus") || !test.visibleText("Changes requested") || !test.hasText("1 blocker</font> \u00b7 1 nit")
             || !test.visibleText("Focus is lost on reload.") || test.hasText("Reviewed PR #42"))
           test.fail("a review card should show the PR, its verdict, the findings by severity and the one-line why")
+        if (!test.hasText("Nothing on the branch has changed since last week"))
+          test.fail("an ask answered without any edits should still be a card with its outcome")
         if (!test.visibleText("Activity view renders history")) test.fail("an ask's card should say its outcome as a short headline")
         var fold = page.rows.find(r => r.kind === "fold")
         if (!fold || fold.count !== 1 || test.hasText("Old thing done")) test.fail("a past day should fold to one row with its ask count")
