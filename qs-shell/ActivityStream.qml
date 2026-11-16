@@ -415,6 +415,12 @@ FocusScope {
     var out = [], day = "", sid = "", shown = cards.filter(c => !importantOnly || !minor(c) || c.key === openKey)
     var counts = {}
     for (var c of shown) counts[dayLabel(c.at)] = (counts[dayLabel(c.at)] || 0) + 1
+    var lastAt = {}
+    for (c of shown) lastAt[dayLabel(c.at) + c.sid] = Math.max(lastAt[dayLabel(c.at) + c.sid] || 0, c.at)
+    shown.sort((a, b) => {
+      var da = dayLabel(a.at), db = dayLabel(b.at)
+      return da !== db ? a.at - b.at : (lastAt[da + a.sid] - lastAt[db + b.sid]) || a.at - b.at
+    })
     for (c of shown) {
       var label = dayLabel(c.at), past = label !== "Today"
       if (label !== day) {
@@ -503,7 +509,8 @@ FocusScope {
 
   ListView {
     id: list
-    width: Math.min(parent.width - 64, 1400)
+    objectName: "activityList"
+    width: Math.min(parent.width - 64, 960)
     height: parent.height
     anchors.horizontalCenter: parent.horizontalCenter
     clip: true
@@ -605,7 +612,8 @@ FocusScope {
         readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
           : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
         readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
-        readonly property string question: files.length || review ? "" : root.question(ctx.text)
+        readonly property string relay: ctx.from && ctx.from !== "you" && ctx.from !== "task" ? ctx.from : ""
+        readonly property string question: files.length || review || relay ? "" : root.question(ctx.text)
         readonly property var glance: row.kind === "card" && !review ? root.snippet(row.entry) : null
         readonly property string done: open ? root.tidy(row.entry.outcome || last.why) : root.headline(row.entry.outcome || last.why)
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
@@ -637,7 +645,21 @@ FocusScope {
             id: cardHead
             width: parent.width
             text: cardBox.review ? '<font color="' + root.metaColor + '">#' + cardBox.review.pr + "</font>&nbsp;&nbsp;" + root.esc(cardBox.review.title || "Review")
-              : root.esc(!cardBox.open && cardBox.question || cardBox.done || cardBox.asked)
+              : root.esc(!cardBox.open && cardBox.question || cardBox.relay && !cardBox.files.length && row.entry.lead && root.tidy(row.entry.lead).replace(/\.$/, "") || cardBox.done || cardBox.asked)
+            leftPadding: relayChip.visible ? relayChip.width + 8 : 0
+            PillSurface {
+              id: relayChip
+              objectName: "relayChip"
+              visible: cardBox.relay !== ""
+              y: (cardHead.lineHeight - height) / 2
+              width: relayText.implicitWidth + 14; height: relayText.implicitHeight + 4; radius: height / 2
+              Text {
+                id: relayText
+                anchors.centerIn: parent
+                text: cardBox.relay
+                color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
+              }
+            }
             textFormat: Text.StyledText
             wrapMode: Text.Wrap; maximumLineCount: cardBox.open ? 8 : 1; elide: Text.ElideRight
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4

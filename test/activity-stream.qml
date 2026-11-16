@@ -86,6 +86,9 @@ ShellRoot {
           { type: "message", id: "gdr", message: { role: "toolResult", toolCallId: "ed", timestamp: test.t0 - 103500, details: { diff:
             "  4 ctx\n- 5   readonly property int legacyDepth: 3\n- 6   function loadLegacy(path) {\n- 7     var deepBodyLine = path.split(1)\n- 8     return deepBodyLine\n- 9   }\n-10   signal legacyLoaded()\n 11 ctx" } } },
           { type: "message", id: "gd2", message: { role: "assistant", timestamp: test.t0 - 103000, content: [{ type: "text", text: "\u27e2 Dropped the legacy loader." }] } },
+          { type: "message", id: "gc", timestamp: new Date(test.t0 - 102000).toISOString(), message: { role: "user", timestamp: test.t0 - 102000,
+            content: [{ type: "text", text: "\u21c4 coordinator\ncoordinator: posted PR #9 as a comment (head abc1234)." }] } },
+          { type: "message", id: "gc1", message: { role: "assistant", timestamp: test.t0 - 101000, content: [{ type: "text", text: "3 of 4 reviews are now posted.\n\n\u27e2 The reviewer will post the rest." }] } },
           { type: "message", id: "u1", timestamp: new Date(test.t0).toISOString(), message: { role: "user", timestamp: test.t0,
             content: [{ type: "text", text: "\u21c4 nixos (user-approved)\nBuild the activity view" }] } },
           { type: "custom", id: "t1", customType: "cockpit-session-task", timestamp: new Date(test.t0 + 1000).toISOString(), data: { action: "switch", title: "Activity view" } },
@@ -117,8 +120,8 @@ ShellRoot {
         var asked = test.sent.filter(m => m.type === "get_entries").map(m => m.session).sort().join(",")
         if (asked !== "alpha,beta,gamma") test.fail("history was requested for " + asked)
         var kinds = state.activity.map(r => r.kind).sort().join(",")
-        if (kinds !== "edit,edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,prompt,prompt,summary,summary,summary,summary,summary,task") test.fail("history rows were " + kinds)
-        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Ok so. Hm, where are we on the branch?" && r.text !== "Drop the loader")
+        if (kinds !== "edit,edit,edit,edit,edit,edit,edit,prompt,prompt,prompt,prompt,prompt,prompt,prompt,summary,summary,summary,summary,summary,summary,task") test.fail("history rows were " + kinds)
+        var prompt = state.activity.find(r => r.kind === "prompt" && r.text !== "Review PR 42" && r.text !== "Ok so. Hm, where are we on the branch?" && r.text !== "Drop the loader" && r.from !== "coordinator")
         if (prompt.from !== "nixos" || prompt.text !== "Build the activity view") test.fail("relayed prompt lost its sender: " + JSON.stringify(prompt))
         if (!test.hasText("</font>&nbsp;&nbsp;fix(rail): keep focus") || !test.visibleText("Changes requested") || !test.hasText("1 blocker</font> \u00b7 1 nit")
             || !test.visibleText("Focus is lost on reload.") || test.hasText("Reviewed PR #42"))
@@ -126,6 +129,10 @@ ShellRoot {
         var end = test.find(page, i => i.visible && i.objectName === "activityEnd")
         var newest = page.cards.reduce((n, c) => Math.max(n, c.at), 0)
         if (!end || end.text !== "Up to date \u00b7 latest " + page.clock(newest)) test.fail("the end of the list should say it is the latest activity and when that was, got " + (end && end.text))
+        var chip = test.find(page, i => i.visible && i.objectName === "relayChip")
+        if (!chip || !test.visibleText("coordinator") || !test.visibleText("3 of 4 reviews are now posted") || test.hasText("posted PR #9"))
+          test.fail("a relayed ask should show its sender as a chip and the reply as its headline, not the relayed text")
+        if (test.find(page, i => i.objectName === "activityList").width > 960) test.fail("the activity column should stay narrow enough to read")
         if (!test.visibleText("Where are we on the branch?") || !test.visibleText("No change: the branch still sits at last week's merge"))
           test.fail("an ask answered without edits should headline its question, then the answer's own first line, not its closing note")
         if (!test.hasText("loadLegacy") || !test.hasText("legacyLoaded") || !test.hasText("legacyDepth") || test.hasText("deepBodyLine"))
@@ -324,6 +331,13 @@ ShellRoot {
           test.event({ type: "tool_execution_end", session: "gamma", toolName: "write", toolCallId: "lw", result: { details: {} } })
           var lr = page.cards.find(c => c.changes.some(e => e.review && e.review.pr === "43"))
           if (!lr || lr.changes.slice(-1)[0].review.verdict !== "approve") test.fail("a review written live should become a review card: " + JSON.stringify(lr && lr.changes.map(e => e.review)))
+          test.event({ type: "message_end", session: "alpha", message: { role: "user", timestamp: Date.now(), content: [{ type: "text", text: "One more thing" }] } })
+          test.event({ type: "message_end", session: "alpha", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Did one more thing." }] } })
+          var heads = {}
+          for (var hr of page.rows.filter(r => r.kind === "who")) heads[hr.sid] = (heads[hr.sid] || 0) + 1
+          if (Object.values(heads).some(n => n > 1)) test.fail("each session should head one block per day, got " + JSON.stringify(heads))
+          var last = page.rows.filter(r => r.kind === "card").pop()
+          if (!last || last.sid !== "alpha") test.fail("the session with the newest activity should be the last block")
           console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
         }
