@@ -12,7 +12,7 @@ import Heidr
 ShellRoot {
   FloatingWindow {
     id: win
-    readonly property color ground: Theme.mode === "dark" ? Qt.tint(Theme.bgDim, Qt.alpha(Theme.fg, 0.03)) : Qt.darker(Theme.bgDim, 1.04)
+    readonly property color ground: Theme.mode === "dark" ? Qt.tint(Theme.bgDim, Qt.alpha(Theme.fg, 0.03)) : Theme.bgDim
     readonly property string instanceName: Quickshell.env("COCKPIT_INSTANCE") || "main"
     readonly property string startupMode: {
       var s = Quickshell.env("COCKPIT_SCOPE") || Quickshell.env("HEIDR_SCOPE") || "personal"
