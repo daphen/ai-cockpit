@@ -583,7 +583,6 @@ FocusScope {
         readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
         readonly property var glance: row.kind === "card" && !review ? root.snippet(row.entry) : null
         readonly property string done: open ? root.tidy(row.entry.outcome || last.why) : root.headline(row.entry.outcome || last.why)
-        opacity: dim ? 0.5 : 1
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)

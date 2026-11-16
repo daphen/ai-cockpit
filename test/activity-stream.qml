@@ -162,6 +162,8 @@ ShellRoot {
         scored[shellFix.jid] = { key: 0.2 }
         page.jev = scored
         if (test.visibleText("f.txt")) test.fail("a minor ask should shrink to one line")
+        for (var up = test.find(page, i => i.visible && String(i.text || "").indexOf("Fix via shell") >= 0); up && up !== page; up = up.parent)
+          if (up.opacity !== 1) test.fail("a minor ask should shrink, not fade: its text must stay readable")
         page.forceActiveFocus(); test.key(Qt.Key_F)
         if (test.visibleText("Fix via shell") || !test.visibleText("Activity view renders history")) test.fail("f should hide minor asks and keep important ones")
         test.key(Qt.Key_F)
