@@ -713,7 +713,6 @@ FocusScope {
                       width: glanceCol.width
                       height: (root.fsMeta - 2) * 1.65
                       color: "transparent"
-                      opacity: modelData.sign === "-" ? 0.55 : 1
                       Rectangle { x: 1; width: 2; height: parent.height; color: modelData.sign === "-" ? Theme.red : Theme.green }
                       Text {
                         x: 12; width: parent.width - 24
