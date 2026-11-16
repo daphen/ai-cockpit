@@ -442,11 +442,6 @@ FocusScope {
   function stop(kind) { return kind === "card" || kind === "change" || kind === "fold" }
   // A "Scope: " prefix (commit-subject style) is a label, not the headline.
   function headline(t) { return tidy(t).replace(/^[\w./-]+(\s[\w./-]+){0,2}:\s+(?=\S)/, "").split(/;\s|:\s|\.\s/)[0].replace(/\.$/, "") }
-  function hueFor(sid) {
-    var p = [Theme.sky, Theme.green, Theme.yellow, Theme.electric, Theme.syntaxKeyword, Theme.syntaxFunction], h = 0
-    for (var i = 0; i < sid.length; i++) h = (h * 31 + sid.charCodeAt(i)) >>> 0
-    return p[h % p.length]
-  }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
   function select(i) {
@@ -485,16 +480,6 @@ FocusScope {
     var f = itemIndex >= 0 ? files[itemIndex] : files.find(x => !x.covered) || files[0]
     if (f.diff.length && !byClick) { enterCode(files.indexOf(f)); return }
     fileRequested(currentRow.sid, f.path, f.line || 1)
-  }
-
-  component Orb: ThinkingOrb {
-    required property string sid
-    readonly property var colors: root.rail ? root.rail.fleetActivityColors(sid) : []
-    running: false
-    activityColors: colors
-    glow: colors.length ? colors[0] : "#999999"
-    seedKey: sid
-    idleBlur: 1
   }
 
   ListView {
@@ -561,28 +546,10 @@ FocusScope {
         }
       }
 
-      Item {
-        visible: row.kind === "who" || row.kind === "card" || row.kind === "change"
-        // One continuous bar per session run: only its first and last rows show rounded ends.
-        readonly property bool runEnd: { var n = root.rows[row.index + 1]; return !n || (n.kind !== "card" && n.kind !== "change") }
-        x: 0; width: 3; clip: true
-        y: row.kind === "who" ? 14 : 0
-        height: parent.height - y
-        Rectangle {
-          objectName: "sessionBar"
-          width: 3; radius: 1.5
-          y: row.kind === "who" ? 0 : -2
-          height: parent.height - y + (parent.runEnd ? 0 : 2)
-          color: root.hueFor(row.entry.sid || "")
-        }
-        opacity: 0.7
-      }
-
       Row {
         visible: row.kind === "who"
         x: 14; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
         spacing: 10
-        Orb { sid: row.kind === "who" ? row.entry.sid : ""; running: false; width: 16; height: 16; anchors.verticalCenter: parent.verticalCenter }
         Text {
           text: row.entry.sid || ""; textFormat: Text.PlainText
           color: root.contentColor
