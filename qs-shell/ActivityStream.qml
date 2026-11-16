@@ -449,7 +449,11 @@ FocusScope {
 
   function stop(kind) { return kind === "card" || kind === "change" || kind === "fold" }
   // A "Scope: " prefix (commit-subject style) is a label, not the headline.
-  function headline(t) { return tidy(t).replace(/^[\w./-]+(\s[\w./-]+){0,2}:\s+(?=\S)/, "").split(/;\s|:\s|\.\s/)[0].replace(/\.$/, "") }
+  function headline(t) {
+    var parts = tidy(t).replace(/^[\w./-]+(\s[\w./-]+){0,2}:\s+(?=\S)/, "").split(/(;\s|:\s|\.\s)/)
+    var head = parts[0].split(/\s+/).length < 3 && parts.length > 2 ? parts[0] + parts[1] + parts[2] : parts[0]
+    return head.replace(/\.$/, "")
+  }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
   function select(i) {

@@ -78,7 +78,7 @@ ShellRoot {
           { type: "message", id: "gr2", message: { role: "assistant", timestamp: test.t0 - 108000, content: [{ type: "text", text: "\u27e2 Reviewed PR #42 and wrote the review (request changes, 2 findings)." }] } },
           { type: "message", id: "gq", timestamp: new Date(test.t0 - 107000).toISOString(), message: { role: "user", timestamp: test.t0 - 107000,
             content: [{ type: "text", text: "Where are we on the branch?" }] } },
-          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "text", text: "\u27e2 Nothing on the branch has changed since last week" }] } },
+          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "text", text: "\u27e2 Answer only; nothing on the branch has changed since last week." }] } },
           { type: "message", id: "gd", timestamp: new Date(test.t0 - 105000).toISOString(), message: { role: "user", timestamp: test.t0 - 105000,
             content: [{ type: "text", text: "Drop the loader" }] } },
           { type: "message", id: "gd1", message: { role: "assistant", timestamp: test.t0 - 104000, content: [
@@ -123,8 +123,8 @@ ShellRoot {
         if (!test.hasText("</font>&nbsp;&nbsp;fix(rail): keep focus") || !test.visibleText("Changes requested") || !test.hasText("1 blocker</font> \u00b7 1 nit")
             || !test.visibleText("Focus is lost on reload.") || test.hasText("Reviewed PR #42"))
           test.fail("a review card should show the PR, its verdict, the findings by severity and the one-line why")
-        if (!test.hasText("Nothing on the branch has changed since last week"))
-          test.fail("an ask answered without any edits should still be a card with its outcome")
+        if (!test.hasText("Answer only; nothing on the branch has changed since last week"))
+          test.fail("an ask answered without any edits should still be a card with its outcome, and a two-word lead-in must not swallow it")
         if (!test.hasText("loadLegacy") || !test.hasText("legacyLoaded") || !test.hasText("legacyDepth") || test.hasText("deepBodyLine"))
           test.fail("a change that only removed code should list what was removed, not show the first lines of it")
         var removedCode = test.find(page, i => i.visible && String(i.text || "").indexOf("legacyDepth") >= 0)
