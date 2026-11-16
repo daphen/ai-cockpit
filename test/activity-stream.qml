@@ -78,7 +78,7 @@ ShellRoot {
           { type: "message", id: "gr2", message: { role: "assistant", timestamp: test.t0 - 108000, content: [{ type: "text", text: "\u27e2 Reviewed PR #42 and wrote the review (request changes, 2 findings)." }] } },
           { type: "message", id: "gq", timestamp: new Date(test.t0 - 107000).toISOString(), message: { role: "user", timestamp: test.t0 - 107000,
             content: [{ type: "text", text: "Ok so. Hm, where are we on the branch?" }] } },
-          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "text", text: "**No change:** the branch still sits at last week's merge.\n\nDetails follow.\n\n\u27e2 Answer only; nothing on the branch has changed since last week." }] } },
+          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "thinking", thinking: "Weighing the branch state" }, { type: "text", text: "**No change:** the branch still sits at last week's merge.\n\nDetails follow.\n\n\u27e2 Answer only; nothing on the branch has changed since last week." }] } },
           { type: "message", id: "gd", timestamp: new Date(test.t0 - 105000).toISOString(), message: { role: "user", timestamp: test.t0 - 105000,
             content: [{ type: "text", text: "Drop the loader" }] } },
           { type: "message", id: "gd1", message: { role: "assistant", timestamp: test.t0 - 104000, content: [
