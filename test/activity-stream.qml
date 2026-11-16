@@ -143,6 +143,9 @@ ShellRoot {
         test.event({ type: "tool_execution_start", session: "beta", toolName: "edit", toolCallId: "live1", args: { path: "/r/Live.qml", edits: [] } })
         test.event({ type: "tool_execution_end", session: "beta", toolName: "read", toolCallId: "rd1", result: { details: {} } })
         test.event({ type: "tool_execution_end", session: "beta", toolName: "edit", toolCallId: "live1", result: { details: { diff: "+ 1 a" + "_".repeat(400) } } })
+        var live = page.cards.find(c => c.sid === "beta"), js = Object.assign({}, page.jev); js[live.jid] = { key: 0.1 }; page.jev = js
+        test.find(page, i => String(i).indexOf("QQuickListView") === 0).forceLayout()
+        if (!test.hasText("a" + "_".repeat(100))) test.fail("a card still being worked on must keep showing its code, not be dimmed as minor")
         test.event({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Beta shipped (`abc1234`)." }] } })
       } else if (stage === 4) {
         if (!test.visibleText("Beta shipped")) test.fail("the live ask's outcome is not on its card")

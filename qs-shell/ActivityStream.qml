@@ -30,13 +30,15 @@ FocusScope {
   property var jev: ({})
   property var jevAsked: ({})
   property bool importantOnly: false
-  function minor(e) { var s = jev[e.jid]; return !!s && s.key < 0.5 }
+  // An ask still being worked on is never judged: each new edit would re-score it and flip its preview.
+  function working(e) { return !e.outcome && !!agentd && agentd.isBusy(e.sid) }
+  function minor(e) { var s = jev[e.jid]; return !working(e) && !!s && s.key < 0.5 }
   function jevNext() {
     if (jevRun.running || !visible) return
     var batch = []
     for (var i = cards.length - 1; i >= 0 && batch.length < 8; i--) {
       var e = cards[i]
-      if (!(e.jid in jev) && !jevAsked[e.jid]) batch.push(e)
+      if (!working(e) && !(e.jid in jev) && !jevAsked[e.jid]) batch.push(e)
     }
     if (!batch.length) return
     for (var b of batch) jevAsked[b.jid] = true
