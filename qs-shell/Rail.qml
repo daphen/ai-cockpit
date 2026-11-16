@@ -1584,7 +1584,7 @@ Item {
   readonly property color silverAccent: Theme.mode === "light" ? "#6F777C" : "#C2C8CC"
   readonly property color mintAccent: Theme.mode === "light" ? "#3F8C69" : "#86D7B0"
   readonly property color goldAccent: Theme.mode === "light" ? "#9A6500" : "#F2C572"
-  readonly property color codePanelColor: Qt.alpha(Theme.fg, Theme.mode === "light" ? 0.04 : 0.05)
+  readonly property color codePanelColor: Theme.mode === "light" ? "#FFFFFF" : Qt.alpha(Theme.fg, 0.05)
   readonly property color userCardTop: Theme.mode === "light" ? "#FFFFFF" : Qt.lighter(Theme.surface0, 1.25)
   readonly property color userCardBottom: Theme.mode === "light" ? "#FDFDFD" : Qt.lighter(Theme.surface0, 1.2)
 

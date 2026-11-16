@@ -431,7 +431,8 @@ FocusScope {
   readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
 
   function stop(kind) { return kind === "card" || kind === "change" || kind === "fold" }
-  function headline(t) { return tidy(t).split(/;\s|:\s|\.\s/)[0].replace(/\.$/, "") }
+  // A "Scope: " prefix (commit-subject style) is a label, not the headline.
+  function headline(t) { return tidy(t).replace(/^[\w./-]+(\s[\w./-]+){0,2}:\s+(?=\S)/, "").split(/;\s|:\s|\.\s/)[0].replace(/\.$/, "") }
   function hueFor(sid) {
     var p = [Theme.sky, Theme.green, Theme.yellow, Theme.electric, Theme.syntaxKeyword, Theme.syntaxFunction], h = 0
     for (var i = 0; i < sid.length; i++) h = (h * 31 + sid.charCodeAt(i)) >>> 0
@@ -631,7 +632,9 @@ FocusScope {
             visible: !cardBox.dim && !cardBox.open && !!cardBox.glance
             height: visible ? glanceCol.implicitHeight + 14 : 0
             radius: 10
-            color: Qt.alpha(Theme.fg, 0.035)
+            objectName: "glanceBox"
+            color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
+            border.width: 1; border.color: Qt.alpha(Theme.fg, 0.07)
             clip: true
             readonly property string language: root.rail && cardBox.glance ? root.rail.codeLanguage(cardBox.glance.path) : ""
             Column {
@@ -673,8 +676,9 @@ FocusScope {
                       required property var modelData
                       width: glanceCol.width
                       height: (root.fsMeta - 2) * 1.65
-                      color: modelData.sign === "-" ? Theme.diffRemovedBg : "transparent"
-                      Rectangle { width: 2; height: parent.height; visible: modelData.sign === "+"; color: Theme.green }
+                      color: "transparent"
+                      opacity: modelData.sign === "-" ? 0.55 : 1
+                      Rectangle { x: 1; width: 2; height: parent.height; color: modelData.sign === "-" ? Theme.red : Theme.green }
                       Text {
                         x: 12; width: parent.width - 24
                         anchors.verticalCenter: parent.verticalCenter

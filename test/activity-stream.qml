@@ -86,7 +86,7 @@ ShellRoot {
           { type: "message", id: "g0", timestamp: new Date(test.t0 - 3 * 86400000).toISOString(), message: { role: "user", timestamp: test.t0 - 3 * 86400000,
             content: [{ type: "text", text: "Old ask" }] } },
           { type: "message", id: "g01", message: { role: "assistant", timestamp: test.t0 - 3 * 86400000 + 500, content: [
-            { type: "text", text: "Hook the cockpit check into Older so the old thing runs." },
+            { type: "text", text: "Older: hook the cockpit check into Older so the old thing runs." },
             { type: "toolCall", id: "eo", name: "edit", arguments: { path: "/r/Older.qml", edits: [] } },
             { type: "toolCall", id: "et", name: "edit", arguments: { path: "/r/test/older.test.qml", edits: [] } }] } },
           { type: "message", id: "rt", message: { role: "toolResult", toolCallId: "et", timestamp: test.t0 - 3 * 86400000 + 600, details: { diff: "+ 1 expect(checkCockpit()).toBe(done) // old thing check cockpit" } } },
@@ -112,7 +112,7 @@ ShellRoot {
         var names = []; test.find(page, i => { if (i.visible && (i.text === "Older.qml" || i.text === "older.test.qml")) names.push(i.text); return false })
         names = names.filter((n, k) => names.indexOf(n) === k)
         if (names.join() !== "Older.qml,older.test.qml") test.fail("each file should be listed, source before tests: " + names)
-        if (!test.visibleText("Hook the cockpit check into Older so the old thing runs")) test.fail("each file should say what was done in it")
+        if (!test.visibleText("hook the cockpit check into Older so the old thing runs")) test.fail("each file should say what was done in it")
         page.openDays = ({})
         if (!test.find(page, i => i.visible && i.color !== undefined && i.width === 3 && Qt.colorEqual(i.color, page.hueFor("gamma"))))
           test.fail("a session's cards should carry its colour bar")
@@ -122,6 +122,10 @@ ShellRoot {
         if (!test.visibleText("Rail.qml") || !test.visibleText("New.qml") || !test.visibleText("The rail needs a hook so the page can open files") || !test.hasText('</font>&nbsp;y:&nbsp;<font'))
           test.fail("a folded card should show at a glance what changed: the file and the declaration it added")
         if (!test.visibleText("Fix via shell")) test.fail("a commit made outside the edit tool is missing")
+        var themeWas = Theme.mode; Theme.mode = "light"
+        var gbox = test.find(page, i => i.visible && i.objectName === "glanceBox")
+        if (!gbox || !Qt.colorEqual(gbox.color, "#ffffff")) test.fail("code previews should sit on white in light mode")
+        Theme.mode = themeWas
         if (test.visibleText("init")) test.fail("a commit no session was active before belongs to nobody, not to whichever session sits in that repo")
         var work = page.cards.find(c => c.ctx.text === "Activity view"), shellFix = page.cards.find(c => c.changes.some(e => e.commit))
         var scored = {}
