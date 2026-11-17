@@ -20,7 +20,10 @@ FocusScope {
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
     var item = i >= 0 ? list.itemAtIndex(i) : null
-    return item && root.stop(item.entry) ? item.restDot.mapToItem(root, 4, 4) : null
+    if (!item || !root.stop(item.entry)) return null
+    // The new cursor's point is where it lands once the scroll that reveals it finishes.
+    var p = item.restDot.mapToItem(root, 4, 4), ahead = !key && scroller._glide.running ? scroller._glide.to - list.contentY : 0
+    return Qt.point(p.x, p.y - ahead)
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
