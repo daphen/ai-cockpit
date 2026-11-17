@@ -75,6 +75,8 @@ FocusScope {
           focusRight: () => (focusRequested("right"), "list"),
           down: () => (move(1, stop), "list"),
           up: () => (move(-1, stop), "list"),
+          halfDown: () => (half(1), "list"),
+          halfUp: () => (half(-1), "list"),
           nextCard: () => (move(1, heading), "list"),
           prevCard: () => (move(-1, heading), "list"),
           g: () => (edge(false), "list"),
@@ -92,7 +94,7 @@ FocusScope {
   function eventOf(e) {
     var k = e.key, shift = e.modifiers & Qt.ShiftModifier
     if (e.modifiers & Qt.ControlModifier)
-      return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight" })[k] || ""
+      return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight", [Qt.Key_D]: "halfDown", [Qt.Key_U]: "halfUp" })[k] || ""
     return ({ [Qt.Key_J]: shift ? "nextCard" : "down", [Qt.Key_Down]: "down", [Qt.Key_K]: shift ? "prevCard" : "up", [Qt.Key_Up]: "up",
               [Qt.Key_Return]: "enter", [Qt.Key_Enter]: "enter", [Qt.Key_Space]: "space",
               [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter", [Qt.Key_I]: "compose" })[k] || ""
@@ -411,6 +413,19 @@ FocusScope {
   function move(delta, ok) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
       if (ok(rows[i])) { select(i); return }
+  }
+  // Half a screen on, landing on the first change at or past that point.
+  function half(dir) {
+    var from = list.itemAtIndex(cursor)
+    if (!from) return
+    var target = from.y + dir * list.height / 2, pick = -1
+    for (var i = cursor + dir; i >= 0 && i < rows.length; i += dir) {
+      if (!stop(rows[i])) continue
+      pick = i
+      var it = list.itemAtIndex(i)
+      if (!it || (dir > 0 ? it.y >= target : it.y <= target)) break
+    }
+    if (pick >= 0) select(pick)
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {

@@ -230,6 +230,14 @@ ShellRoot {
         if (composed !== 1) test.fail("i should ask to focus the rail's input")
         test.key(Qt.Key_S)
         if (test.opened[4] !== "gamma") test.fail("s did not open the card's session: " + test.opened)
+        var lvh = test.find(page, i => String(i).indexOf("QQuickListView") === 0)
+        page.select(page.rows.findIndex(r => page.stop(r)))
+        var y0 = lvh.itemAtIndex(page.cursor).y, c0 = page.cursor
+        test.key(Qt.Key_D, Qt.ControlModifier)
+        var y1 = lvh.itemAtIndex(page.cursor).y
+        if (page.cursor <= c0 || (y1 - y0 < lvh.height / 2 && page.rows.slice(page.cursor + 1).some(r => page.stop(r)))) test.fail("ctrl-d should move about half a screen down, " + y0 + " -> " + y1 + " of " + lvh.height)
+        test.key(Qt.Key_U, Qt.ControlModifier)
+        if (page.cursor !== c0) test.fail("ctrl-u should come back up, got " + page.cursor + " not " + c0)
       } else if (stage === 5) {
         page.anchors.fill = undefined; page.width = 1100; page.height = 360
         test.key(Qt.Key_G, Qt.ShiftModifier)
