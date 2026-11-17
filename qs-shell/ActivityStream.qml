@@ -62,7 +62,7 @@ FocusScope {
   Timer { id: jevAgain; interval: 800; onTriggered: root.jevNext() }
   onChangesChanged: jevAgain.restart()
 
-  property string mode: "list"
+  property string mode: machine.initial
   property int file: 0
   readonly property bool inCode: mode === "code" || mode === "visual" || mode === "visualLine"
   readonly property bool manyFiles: !!currentRow && currentRow.kind === "change" && currentRow.files.length > 1
@@ -72,10 +72,10 @@ FocusScope {
   property int visLine: 0
   property int visCol: 0
   property string pending: ""
-  onCursorKeyChanged: go("list")
+  onCursorKeyChanged: mode = machine.initial
   function codeRows() {
-    var f = currentRow && inCode ? currentRow.files[file] : null, out = [], last = 0
-    for (var l of f ? f.diff : []) {
+    var f = currentRow && currentRow.files ? currentRow.files[file] : null, out = [], last = 0
+    for (var l of f && f.diff || []) {
       var m = l.match(/^([+\- ])\s*(\d*)\s?(.*)$/)
       if (m && m[2]) last = +m[2]
       out.push({ text: l === "\u22ef" || !m ? "" : m[3].replace(/\t/g, "    "), line: m && m[2] ? +m[2] : last + 1 })
@@ -83,10 +83,11 @@ FocusScope {
     return out
   }
   function enterCode(fi) {
-    file = fi; go("code")
+    file = fi
     var rs = codeRows(), first = currentRow.files[fi].diff.findIndex(l => /^[+-]/.test(l))
     codeLine = Math.max(0, first)
     codeCol = Math.max(0, (rs[codeLine] || { text: "" }).text.search(/\S/))
+    return "code"
   }
   function selRange(i) {
     if (mode !== "visual" && mode !== "visualLine") return null
@@ -96,30 +97,64 @@ FocusScope {
     if (mode === "visualLine") return [0, Infinity]
     return [i === a.l ? a.c : 0, i === b.l ? b.c + 1 : Infinity]
   }
-  // Keyboard state machine.
-  //   list               j/k between cards; Enter unfolds a card or steps into a change
-  //   files              j/k pick one file of a change that touched several
-  //   code               a vim caret in that file's diff
-  //   visual, visualLine a selection in it; y copies it
-  // A state maps each event to a next state (a string), an action, or "chord" (wait for
-  // gg / yy). Code states also take every caret motion; files drops to list for the rest.
-  readonly property var machine: ({
-    list: {
-      down: () => move(1), up: () => move(-1), left: () => codeShift(-1), right: () => codeShift(1),
-      g: () => edge(false), bottom: () => edge(true), enter: () => open(), back: () => collapse(),
-      session: () => { if (currentRow) sessionRequested(currentRow.sid) },
-      filter: () => { importantOnly = !importantOnly }
-    },
-    files: {
-      back: "list", enter: () => open(), space: () => open(),
-      down: () => { file = Math.min(currentRow.files.length - 1, file + 1) }, up: () => { file = Math.max(0, file - 1) },
-      left: () => codeShift(-1), right: () => codeShift(1)
-    },
-    code:       { back: "files", visual: "visual", visualLine: "visualLine", g: "chord", y: "chord", yankLine: () => yank(), enter: () => openLine() },
-    visual:     { back: "code", visual: "code", visualLine: "visualLine", g: "chord", y: () => yankSelection(), enter: () => openLine() },
-    visualLine: { back: "code", visual: "visual", visualLine: "code", g: "chord", y: () => yankSelection(), enter: () => openLine() }
-  })
-  readonly property var chords: ({ gg: "top", yy: "yankLine" })
+  // list   ─Enter→  files  ─Enter→  code  ─v / V→  visual · visualLine
+  //        ←Esc──          ←Esc──         ←Esc───
+  // Each event maps to a next state, or to a handler that does its work and returns one.
+  readonly property var machine: {
+    var focus = {
+      focusLeft: () => (focusRequested("left"), mode),
+      focusRight: () => (focusRequested("right"), mode)
+    }
+    var caret = state => {
+      var on = { enter: () => (openLine(), state), g: e => e.was === "g" ? (moveCaret(motions.top), state) : (pending = "g", state) }
+      for (var m in motions) on[m] = (fn => () => (moveCaret(fn), state))(motions[m])
+      return on
+    }
+    var list = Object.assign({}, focus, {
+      down: () => (move(1), "list"),
+      up: () => (move(-1), "list"),
+      left: () => (codeShift(-1), "list"),
+      right: () => (codeShift(1), "list"),
+      g: () => (edge(false), "list"),
+      bottom: () => (edge(true), "list"),
+      enter: () => open(),
+      tap: () => open(),
+      tapFile: () => open(true),
+      back: () => (collapse(), "list"),
+      session: () => (currentRow && sessionRequested(currentRow.sid), "list"),
+      filter: () => (importantOnly = !importantOnly, "list")
+    })
+    var files = Object.assign({}, focus, {
+      down: () => (file = Math.min(currentRow.files.length - 1, file + 1), "files"),
+      up: () => (file = Math.max(0, file - 1), "files"),
+      left: () => (codeShift(-1), "files"),
+      right: () => (codeShift(1), "files"),
+      enter: () => open(),
+      space: () => open(),
+      tapFile: () => open(true),
+      back: "list"
+    })
+    for (var ev in list) if (!(ev in files)) files[ev] = (fn => e => (mode = "list", fn(e)))(list[ev])
+    return {
+      initial: "list",
+      states: {
+        list: { on: list },
+        files: { on: files },
+        code: { modal: true, on: Object.assign({}, focus, caret("code"), {
+          back: () => manyFiles ? "files" : "list",
+          visual: () => (startSelection(), "visual"),
+          visualLine: () => (startSelection(), "visualLine"),
+          y: e => e.was === "y" ? (yank(), "code") : (pending = "y", "code")
+        }) },
+        visual: { modal: true, on: Object.assign({}, focus, caret("visual"), {
+          back: "code", visual: "code", visualLine: "visualLine", y: () => (yank(), endSelection(), "code")
+        }) },
+        visualLine: { modal: true, on: Object.assign({}, focus, caret("visualLine"), {
+          back: "code", visual: "visual", visualLine: "code", y: () => (yank(), endSelection(), "code")
+        }) }
+      }
+    }
+  }
   function eventOf(e) {
     var k = e.key, shift = e.modifiers & Qt.ShiftModifier
     if (e.modifiers & Qt.ControlModifier)
@@ -132,26 +167,19 @@ FocusScope {
               [Qt.Key_0]: "lineStart", [Qt.Key_AsciiCircum]: "firstChar", [Qt.Key_Dollar]: "lineEnd",
               [Qt.Key_W]: "word", [Qt.Key_E]: "wordEnd", [Qt.Key_B]: "wordBack" })[k] || ""
   }
-  Keys.onPressed: event => { if (send(eventOf(event))) event.accepted = true }
-  function send(ev) {
-    if (pending) { ev = chords[pending + ev] || ev; pending = "" }
-    if (ev === "focusLeft" || ev === "focusRight") { focusRequested(ev === "focusLeft" ? "left" : "right"); return true }
-    var step = machine[mode][ev]
-    if (step === undefined && inCode && motions[ev]) step = () => moveCaret(motions[ev])
-    if (step === "chord") { pending = ev; return true }
-    if (typeof step === "string") { go(step); return true }
-    if (step) return step() !== false
-    if (mode === "files") { go("list"); return send(ev) }
-    return inCode
-  }
-  function go(next) {
-    if (next === "files" && !manyFiles) next = "list"
-    if (mode === "code" && (next === "visual" || next === "visualLine")) { visLine = codeLine; visCol = codeCol }
+  Keys.onPressed: event => { if (send({ type: eventOf(event) })) event.accepted = true }
+  function send(event) {
+    var state = machine.states[mode], transition = state.on[event.type]
+    event.was = pending
     pending = ""
-    mode = next
+    if (typeof transition === "function") mode = transition(event)
+    else if (transition) mode = transition
+    return !!transition || !!state.modal
   }
+  function startSelection() { visLine = codeLine; visCol = codeCol }
+  function endSelection() { codeLine = Math.min(visLine, codeLine) }
   function collapse() {
-    if (!openKey) return false
+    if (!openKey) return
     var k = openKey
     openKey = ""
     cursorKey = k
@@ -165,7 +193,6 @@ FocusScope {
     }
     yanked(out.join("\n"))
   }
-  function yankSelection() { yank(); codeLine = Math.min(visLine, codeLine); go("code") }
 
   // Caret motions: (position, rows) → position; moveCaret clamps the result to the text.
   readonly property var motions: {
@@ -507,23 +534,25 @@ FocusScope {
       if (stop(rows[i].kind)) { select(i); return }
     }
   }
+  // Enter on the focused row; returns the state to be in afterwards.
   function open(byClick) {
     if (currentRow && currentRow.kind === "fold") {
       var d = Object.assign({}, openDays); d[currentRow.text] = !d[currentRow.text]; openDays = d
-      return
+      return "list"
     }
     if (currentRow && currentRow.kind === "card") {
       openKey = currentRow.key
       var i = rows.findIndex(r => r.key === openKey) + 1
       if (rows[i] && rows[i].kind === "change") select(i)
-      return
+      return "list"
     }
-    if (!currentRow || currentRow.kind !== "change") return
+    if (!currentRow || currentRow.kind !== "change") return mode
     var files = currentRow.files
-    if (mode === "list" && files.length > 1) { file = Math.max(0, files.findIndex(x => !x.covered)); go("files"); return }
+    if (mode === "list" && files.length > 1) { file = Math.max(0, files.findIndex(x => !x.covered)); return "files" }
     var f = mode === "files" ? files[file] : files.find(x => !x.covered) || files[0]
-    if (f.diff.length && !byClick) { enterCode(files.indexOf(f)); return }
+    if (f.diff.length && !byClick) return enterCode(files.indexOf(f))
     fileRequested(currentRow.sid, f.path, f.line || 1)
+    return mode
   }
 
   ListView {
@@ -590,7 +619,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: foldHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.open() } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tap" }) } }
         Rectangle {
           id: foldDot
           x: 12 - width / 2; anchors.verticalCenter: parent.verticalCenter
@@ -640,7 +669,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.open() } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tap" }) } }
         Rectangle {
           id: cardDot
           z: 2
@@ -869,7 +898,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: changeHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.open(true) } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tapFile" }) } }
 
         Rectangle {
           id: cursorDot
