@@ -83,6 +83,8 @@ QtObject {
   }
   function _glideTo(y) {
     y = Math.max(view.originY, Math.min(_bottomY(), y))
+    // Retargeting mid-scroll keeps its speed instead of easing in from rest again.
+    _glide.easing.type = _glide.running ? Easing.OutSine : Easing.InOutSine
     _glide.stop()
     if (Math.abs(y - view.contentY) < 1) return
     _glide.to = y

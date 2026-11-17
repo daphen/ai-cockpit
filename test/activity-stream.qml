@@ -269,8 +269,10 @@ ShellRoot {
           if (Object.values(heads).some(n => n > 1)) test.fail("each session should head one block per day, got " + JSON.stringify(heads))
           var last = page.rows.filter(r => r.kind === "card").pop()
           if (!last || last.sid !== "alpha") test.fail("the session with the newest activity should be the last block")
-          console.log("PASS: activity is one card per ask with its outcome and files, each headed by its closing outcome with one change per file beneath, j/k walking changes and J/K outcomes without resizing, commits made outside the edit tool, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
-        Qt.quit()
+          test.key(Qt.Key_G); test.key(Qt.Key_J); test.key(Qt.Key_J); test.key(Qt.Key_J); test.key(Qt.Key_J)
+          test.walk = { burst: page.cursorPoint() }
+          stage = 7
+          return
         }
         var dest = page.cursor, step = w.dir === Qt.Key_K ? -1 : 1
         for (dest += step; dest >= 0 && dest < page.rows.length && !page.stop(page.rows[dest]); dest += step);
@@ -279,6 +281,11 @@ ShellRoot {
         test.key(w.dir); w.steps++
         w.aim = page.cursorPoint()
         return
+      } else if (stage === 7) {
+        var rest = page.cursorPoint()
+        if (!rest || Math.abs(test.walk.burst.y - rest.y) > 1) test.fail("after quick j presses the dot was sent to " + test.walk.burst.y + " but the row came to rest at " + (rest && rest.y))
+          console.log("PASS: activity is one card per ask with its outcome and files, each headed by its closing outcome with one change per file beneath, j/k walking changes and J/K outcomes without resizing, the dot aiming where rows land even when moving quickly, commits made outside the edit tool, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
+        Qt.quit()
       }
       stage++
     }

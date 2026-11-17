@@ -800,6 +800,7 @@ ShellRoot {
               const dx = to.x - from.x, dy = to.y - from.y
               glideTail.width = Math.min(140, Math.hypot(dx, dy) * 0.2)
               glideTail.rotation = Math.atan2(dy, dx) * 180 / Math.PI
+              glideX.easing.type = glideY.easing.type = flying ? Easing.OutSine : Easing.InOutSine
               glideX.from = from.x; glideX.to = to.x
               glideY.from = from.y; glideY.to = to.y
               caretGlide.start()
