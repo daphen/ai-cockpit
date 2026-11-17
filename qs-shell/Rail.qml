@@ -68,7 +68,11 @@ Item {
   function cursorPoint(key) {
     const i = view === "chat" && key.startsWith("f:") ? _feedIndexOf(key.slice(2)) : -1
     const it = i >= 0 ? feedView.itemAtIndex(i) : null
-    return it ? it.restDot.mapToItem(rail, it.restDot.width / 2, it.restDot.height / 2) : null
+    if (!it) return null
+    // The current row's point is where it lands once the scroll that reveals it finishes.
+    const p = it.restDot.mapToItem(rail, it.restDot.width / 2, it.restDot.height / 2)
+    const ahead = key === cursorKey && feedScroll._glide.running ? feedScroll._glide.to - feedView.contentY : 0
+    return Qt.point(p.x, p.y - ahead)
   }
 
   property bool caretHeld: false   // a focus glide is still flying to this caret
