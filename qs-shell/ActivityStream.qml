@@ -229,7 +229,121 @@ FocusScope {
     codeCol = Math.max(0, Math.min(rs[codeLine].text.length - 1, p.c))
   }
   signal codeShift(int dir)
-  FontMetrics { id: codeMetrics; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
+  // A file's diff: hunk-nvim-style signs, syntax colour, sideways scroll. Inline it is a
+  // preview; floating (active) it fills its height, scrolls both ways and shows the caret.
+  component DiffView: Rectangle {
+    id: dv
+    property var view
+    property var lines: []
+    property string language: ""
+    property bool active: false
+    property bool shiftable: false
+    property int fontSize: 12
+    readonly property int lineCount: lines.length
+    readonly property real adv: dvMetrics.advanceWidth("0")
+    // Added lines in a hunk that also removed lines are "changed" (yellow sign).
+    readonly property var changed: {
+      var out = [], start = 0
+      for (var i = 0; i <= lines.length; i++) {
+        var c = i < lines.length ? lines[i].charAt(0) : " "
+        if (c === "+" || c === "-") continue
+        var removes = lines.slice(start, i).some(l => l.charAt(0) === "-")
+        for (var k = start; k < i; k++) out[k] = removes
+        start = i + 1
+      }
+      return out
+    }
+    implicitHeight: diffCol.implicitHeight + 12
+    radius: 12
+    clip: true
+    FontMetrics { id: dvMetrics; font.family: Theme.fontFamily; font.pixelSize: dv.fontSize }
+    function reveal() {
+      var it = rep.itemAt(view.codeLine)
+      if (!dv.active || !it) return
+      var y = diffCol.y + it.y, h = it.height
+      if (y < codeFlick.contentY + 2 * h) codeFlick.contentY = Math.max(0, y - 4 * h)
+      else if (y + h > codeFlick.contentY + codeFlick.height - 2 * h) codeFlick.contentY = Math.min(codeFlick.contentHeight - codeFlick.height, y + 5 * h - codeFlick.height)
+      var x = 10 + (6 + view.codeCol) * adv
+      if (x < codeFlick.contentX + 30) codeFlick.contentX = Math.max(0, x - 60)
+      else if (x + 30 > codeFlick.contentX + codeFlick.width) codeFlick.contentX = Math.min(codeFlick.contentWidth - codeFlick.width, x - codeFlick.width + 60)
+    }
+    Connections {
+      target: dv.view
+      enabled: dv.active
+      function onCodeLineChanged() { dv.reveal() }
+      function onCodeColChanged() { dv.reveal() }
+    }
+    onActiveChanged: if (active) Qt.callLater(reveal)
+    Flickable {
+      id: codeFlick
+      anchors.fill: parent
+      flickableDirection: dv.active ? Flickable.HorizontalAndVerticalFlick : Flickable.HorizontalFlick
+      boundsBehavior: Flickable.StopAtBounds
+      contentWidth: Math.max(width, 22 + dv.adv * (6 + dv.lines.reduce((n, l) => Math.max(n, l.replace(/^[+\- ]\d*\s?/, "").replace(/\t/g, "    ").length), 0)))
+      contentHeight: Math.max(height, diffCol.implicitHeight + 12)
+      ScrollFeel { flick: codeFlick }
+      NumberAnimation { id: codeGlide; target: codeFlick; property: "contentX"; duration: 120; easing.type: Easing.OutCubic }
+      Connections {
+        target: dv.view
+        enabled: dv.shiftable
+        function onCodeShift(dir) {
+          codeGlide.stop()
+          codeGlide.to = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX + dir * codeFlick.width / 2))
+          codeGlide.start()
+        }
+      }
+      Column {
+        id: diffCol
+        width: codeFlick.contentWidth
+        y: 6
+        Repeater {
+          id: rep
+          model: dv.lines
+          delegate: Rectangle {
+            required property string modelData
+            required property int index
+            readonly property var parts: modelData.match(/^([+\- ])\s*(\d*)\s?(.*)$/) || ["", " ", "", modelData]
+            readonly property string sign: parts[1]
+            readonly property bool caretHere: dv.active && dv.view.codeLine === index
+            readonly property var sel: dv.active ? dv.view.selRange(index) : null
+            width: diffCol.width
+            height: diffLine.implicitHeight + 3
+            color: sign === "-" ? Theme.diffRemovedBg : "transparent"
+            Rectangle {
+              visible: !!parent.sel
+              x: diffLine.x + 6 * dv.adv + (parent.sel ? parent.sel[0] : 0) * dv.adv
+              width: parent.sel ? Math.max(dv.adv, (Math.min(parent.sel[1], diffLine.text === "\u22ef" ? 0 : parent.parts[3].replace(/\t/g, "    ").length) - parent.sel[0]) * dv.adv) : 0
+              height: parent.height
+              color: Qt.alpha(Theme.cursor, 0.25)
+            }
+            Rectangle {
+              visible: parent.caretHere
+              x: diffLine.x + (6 + dv.view.codeCol) * dv.adv
+              width: dv.adv; height: parent.height
+              color: Qt.alpha(Theme.cursor, 0.6)
+            }
+            Rectangle { width: 2; height: parent.height; visible: parent.sign === "+"; color: dv.changed[parent.index] ? Theme.yellow : Theme.green }
+            Text {
+              id: diffLine
+              x: 10; width: parent.width - 16
+              anchors.bottom: parent.bottom; anchors.bottomMargin: 1
+              textFormat: Text.StyledText
+              text: modelData === "\u22ef" ? "\u22ef"
+                : '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + (sign === "-" ? "" : parts[2])).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
+                  + (sign === "-" ? '<font color="' + Theme.red + '">' + dv.view.esc(parts[3]).replace(/\t/g, "    ").replace(/ /g, "&nbsp;") + "</font>"
+                    : dv.view.rail ? dv.view.rail.highlightCode(parts[3], dv.language) : dv.view.esc(parts[3]))
+                    .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
+              color: modelData === "\u22ef" ? dv.view.metaColor : Theme.fg
+              font.family: Theme.fontFamily
+              font.pixelSize: dv.fontSize
+              wrapMode: Text.NoWrap; maximumLineCount: 1
+            }
+          }
+        }
+      }
+    }
+  }
+
   Rectangle { anchors.fill: parent; color: root.color }
   TapHandler { onTapped: root.forceActiveFocus() }
 
@@ -940,24 +1054,11 @@ FocusScope {
               required property int index
               readonly property var diff: modelData.diff || []
               readonly property int shown: {
-                if (root.inCode && root.file === index) return diff.length
                 var left = 40, files = row.entry.files || []
                 for (var j = 0; j < index; j++) left -= Math.min(left, (files[j].diff || []).length)
                 return Math.min(left, diff.length)
               }
               readonly property string language: root.rail ? root.rail.codeLanguage(modelData.path) : ""
-              // hunk-nvim's look: added lines in a hunk that also removed lines are "changed" (yellow sign).
-              readonly property var changed: {
-                var out = [], start = 0
-                for (var i = 0; i <= diff.length; i++) {
-                  var c = i < diff.length ? diff[i].charAt(0) : " "
-                  if (c === "+" || c === "-") continue
-                  var removes = diff.slice(start, i).some(l => l.charAt(0) === "-")
-                  for (var k = start; k < i; k++) out[k] = removes
-                  start = i + 1
-                }
-                return out
-              }
               readonly property bool picked: row.current && root.picking && root.file === index
               onPickedChanged: if (picked) Qt.callLater(() => scroller.revealSpan(fileBlock.mapToItem(list.contentItem, 0, 0).y - 8, fileBlock.height + 16))
               width: changeCol.width
@@ -997,99 +1098,22 @@ FocusScope {
                   Text { text: "-" + fileBlock.modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
                 }
               }
-              Rectangle {
+              DiffView {
                 visible: fileBlock.shown > 0
                 width: parent.width
-                height: visible ? diffCol.implicitHeight + 12 : 0
-                radius: 12
+                height: visible ? implicitHeight : 0
+                view: root
+                lines: fileBlock.diff.slice(0, fileBlock.shown)
+                language: fileBlock.language
+                fontSize: root.fsMeta - 2
+                shiftable: row.current && (!root.picking || root.file === fileBlock.index)
                 color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
-                clip: true
-                Flickable {
-                  id: codeFlick
-                  anchors.fill: parent
-                  flickableDirection: Flickable.HorizontalFlick
-                  boundsBehavior: Flickable.StopAtBounds
-                  contentWidth: Math.max(width, 22 + codeMetrics.advanceWidth("0") * (6 + fileBlock.diff.slice(0, fileBlock.shown)
-                    .reduce((n, l) => Math.max(n, l.replace(/^[+\- ]\d*\s?/, "").replace(/\t/g, "    ").length), 0)))
-                  contentHeight: height
-                  ScrollFeel { flick: codeFlick }
-                  readonly property real caretX: row.current && root.inCode && root.file === fileBlock.index ? 10 + (6 + root.codeCol) * codeMetrics.advanceWidth("0") : -1
-                  onCaretXChanged: {
-                    if (caretX < 0) return
-                    codeGlide.stop()
-                    if (caretX < contentX + 30) contentX = Math.max(0, caretX - 60)
-                    else if (caretX + 30 > contentX + width) contentX = Math.min(contentWidth - width, caretX - width + 60)
-                  }
-                  NumberAnimation { id: codeGlide; target: codeFlick; property: "contentX"; duration: 120; easing.type: Easing.OutCubic }
-                  Connections {
-                    target: root
-                    enabled: row.current && (!root.picking || root.file === fileBlock.index)
-                    function onCodeShift(dir) {
-                      codeGlide.stop()
-                      codeGlide.to = Math.max(0, Math.min(codeFlick.contentWidth - codeFlick.width, codeFlick.contentX + dir * codeFlick.width / 2))
-                      codeGlide.start()
-                    }
-                  }
-                Column {
-                  id: diffCol
-                  width: codeFlick.contentWidth
-                  y: 6
-                  Repeater {
-                    model: fileBlock.diff.slice(0, fileBlock.shown)
-                    delegate: Rectangle {
-                      required property string modelData
-                      required property int index
-                      readonly property var parts: modelData.match(/^([+\- ])\s*(\d*)\s?(.*)$/) || ["", " ", "", modelData]
-                      readonly property string sign: parts[1]
-                      width: diffCol.width
-                      height: diffLine.implicitHeight + 3
-                      color: sign === "-" ? Theme.diffRemovedBg : "transparent"
-                      readonly property bool inCode: row.current && root.inCode && root.file === fileBlock.index
-                      readonly property bool caretHere: inCode && root.codeLine === index
-                      readonly property var sel: inCode ? root.selRange(index) : null
-                      readonly property real adv: codeMetrics.advanceWidth("0")
-                      onCaretHereChanged: if (caretHere) Qt.callLater(() => { var q = mapToItem(list.contentItem, 0, 0); scroller.revealSpan(q.y - 24, height + 48) })
-                      Rectangle {
-                        visible: !!parent.sel
-                        x: diffLine.x + 6 * parent.adv + (parent.sel ? parent.sel[0] : 0) * parent.adv
-                        width: parent.sel ? Math.max(parent.adv, (Math.min(parent.sel[1], diffLine.text === "\u22ef" ? 0 : parent.parts[3].replace(/\t/g, "    ").length) - parent.sel[0]) * parent.adv) : 0
-                        height: parent.height
-                        color: Qt.alpha(Theme.cursor, 0.25)
-                      }
-                      Rectangle {
-                        visible: parent.caretHere
-                        x: diffLine.x + (6 + root.codeCol) * parent.adv
-                        width: parent.adv; height: parent.height
-                        color: Qt.alpha(Theme.cursor, 0.6)
-                      }
-                      Rectangle { width: 2; height: parent.height; visible: parent.sign === "+"; color: fileBlock.changed[parent.index] ? Theme.yellow : Theme.green }
-                      Text {
-                        id: diffLine
-                        x: 10; width: parent.width - 16
-                        anchors.bottom: parent.bottom; anchors.bottomMargin: 1
-                        textFormat: Text.StyledText
-                        text: modelData === "\u22ef" ? "\u22ef"
-                          : '<font color="' + Qt.alpha(Theme.fg_muted, 0.75) + '">' + ("    " + (sign === "-" ? "" : parts[2])).slice(-4).replace(/ /g, "&nbsp;") + "&nbsp;&nbsp;</font>"
-                            + (sign === "-" ? '<font color="' + Theme.red + '">' + root.esc(parts[3]).replace(/\t/g, "    ").replace(/ /g, "&nbsp;") + "</font>"
-                              : root.rail ? root.rail.highlightCode(parts[3], fileBlock.language) : root.esc(parts[3]))
-                              .replace(/^[ \t]+/, ws => ws.replace(/\t/g, "    ").replace(/ /g, "&nbsp;"))
-                        color: modelData === "\u22ef" ? root.metaColor : Theme.fg
-                        font.family: Theme.fontFamily
-                        font.pixelSize: root.fsMeta - 2
-                        wrapMode: Text.NoWrap; maximumLineCount: 1
-                      }
-                    }
-                  }
-                }
-                }
               }
               Text {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
-                readonly property bool inCode: root.inCode && root.file === fileBlock.index
-                visible: fileBlock.diff.length > 0 && (inCode || !root.inCode) && (!root.picking || fileBlock.picked)
+                visible: fileBlock.diff.length > 0 && (!root.picking || fileBlock.picked)
                 x: 10
-                text: inCode ? (root.mode !== "code" ? (root.mode === "visualLine" ? "VISUAL LINE" : "VISUAL") + " \u00b7 y yanks \u00b7 Esc" : "hjkl w b e 0 ^ $ gg G \u00b7 v V y yy \u00b7 Enter opens this line \u00b7 Esc leaves")
-                  : (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (!root.picking && row.entry.files.length > 1 ? "Enter picks a file" : "Enter steps into the code")
+                text: (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (!root.picking && row.entry.files.length > 1 ? "Enter picks a file" : "Enter steps into the code")
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }
@@ -1110,6 +1134,72 @@ FocusScope {
       text: "No code changes yet"
       color: root.metaColor
       font.family: root.bodyFont; font.pixelSize: root.fsBody
+    }
+  }
+
+  Item {
+    id: codeFloat
+    anchors.fill: parent
+    z: 10
+    visible: root.inCode
+    opacity: visible ? 1 : 0
+    Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+    readonly property var entry: root.inCode && root.currentRow && root.currentRow.files ? root.currentRow.files[root.file] : null
+    Rectangle {
+      anchors.fill: parent
+      color: Qt.alpha(root.color, 0.75)
+      TapHandler { onTapped: { while (root.inCode) root.send({ type: "back" }) } }
+    }
+    Rectangle {
+      objectName: "codeFloat"
+      readonly property int lineCount: panelDiff.lineCount
+      width: Math.min(parent.width - 96, 1400); height: Math.min(parent.height - 64, panelDiff.implicitHeight + 104)
+      anchors.centerIn: parent
+      scale: root.inCode ? 1 : 0.97
+      Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+      radius: 16
+      color: Qt.tint(root.color, root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05))
+      border.width: 1; border.color: Qt.alpha(Theme.fg, 0.12)
+      TapHandler {}
+      Item {
+        id: floatHead
+        x: 20; y: 14; width: parent.width - 40; height: 26
+        Icon { id: floatIcon; name: "file-content"; width: 13; height: 13; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
+        Text {
+          anchors { left: floatIcon.right; leftMargin: 8; right: floatCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+          readonly property string rel: codeFloat.entry ? root.relPath(root.currentRow.sid, codeFloat.entry.path) : ""
+          readonly property int cut: rel.lastIndexOf("/") + 1
+          textFormat: Text.StyledText
+          text: '<font color="' + root.metaColor + '">' + root.esc(rel.slice(0, cut)) + '</font>' + root.esc(rel.slice(cut))
+          elide: Text.ElideLeft
+          color: root.contentColor
+          font.family: Theme.fontFamily; font.pixelSize: root.fsMeta; font.weight: 500
+        }
+        Row {
+          id: floatCounts
+          anchors { right: parent.right; verticalCenter: parent.verticalCenter }
+          spacing: 10
+          Text { text: codeFloat.entry ? "+" + codeFloat.entry.add : ""; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
+          Text { text: codeFloat.entry ? "-" + codeFloat.entry.del : ""; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
+        }
+      }
+      DiffView {
+        id: panelDiff
+        anchors { left: parent.left; right: parent.right; top: floatHead.bottom; bottom: floatHint.top; margins: 12; topMargin: 10 }
+        view: root
+        active: root.inCode
+        lines: codeFloat.entry ? codeFloat.entry.diff || [] : []
+        language: codeFloat.entry && root.rail ? root.rail.codeLanguage(codeFloat.entry.path) : ""
+        fontSize: root.fsMeta - 1
+        color: "transparent"
+      }
+      Text {
+        id: floatHint
+        x: 20; anchors.bottom: parent.bottom; anchors.bottomMargin: 12
+        text: root.mode === "code" ? "hjkl w b e 0 ^ $ gg G \u00b7 v V y yy \u00b7 Enter opens this line \u00b7 Esc closes"
+          : (root.mode === "visualLine" ? "VISUAL LINE" : "VISUAL") + " \u00b7 y yanks \u00b7 Esc"
+        color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
+      }
     }
   }
 }

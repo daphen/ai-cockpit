@@ -220,6 +220,9 @@ ShellRoot {
         if (test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("unfolding one card should fold the other")
         test.key(Qt.Key_Return)
         if (page.codeLine !== 1 || page.codeCol !== 0) test.fail("the code cursor should start on the first changed line: " + [page.codeLine, page.codeCol])
+        var panel = test.find(page, i => i.objectName === "codeFloat")
+        if (!panel || !panel.visible || panel.width < page.width * 0.8 || panel.lineCount !== page.currentRow.files[page.file].diff.length)
+          test.fail("stepping into code should open it in a large floating panel with every line: " + (panel && [panel.visible, panel.width, page.width, panel.lineCount]))
         var at2 = (l, c, what) => { if (page.codeLine !== l || page.codeCol !== c) test.fail(what + ": cursor at " + [page.codeLine, page.codeCol] + ", wanted " + [l, c]) }
         test.key(Qt.Key_W); at2(1, 2, "w")
         test.key(Qt.Key_W); at2(1, 4, "w again")
@@ -243,6 +246,7 @@ ShellRoot {
         test.key(Qt.Key_J); test.key(Qt.Key_Return)
         if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("Enter on a code line should open it at that line, got " + test.opened)
         test.key(Qt.Key_Escape)
+        if (test.find(page, i => i.objectName === "codeFloat" && i.visible)) test.fail("Esc should close the floating code panel")
         if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("the focused change should show its full diff, the change with its context")
         if (!test.hasText('</font>x&nbsp;<font color="' + Theme.syntaxOperator + '">=</font>&nbsp;<font color="' + Theme.syntaxNumber + '">1</font>&nbsp;<i><font color="' + Theme.syntaxComment + '">//&nbsp;set</font></i>'))
           test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
