@@ -306,9 +306,9 @@ FocusScope {
     return out.slice(-200)
   }
   // One card per ask: its outcome (the agent's closing line) plus every file it touched.
+  // Follows activityGen through `changes`; reading it here too ran this and `rows` twice per update.
   readonly property var cards: {
     if (!agentd) return []
-    agentd.activityGen
     var marks = agentd.activity.filter(r => r.kind === "summary" || r.kind === "prompt" || (r.kind === "task" && r.action === "switch"))
     var byKey = {}, out = []
     for (var e of changes) {
@@ -329,10 +329,16 @@ FocusScope {
       var ctx = { text: m.text, from: m.kind === "task" ? "task" : m.from || "you", at: m.at }, k = "card:" + m.sid + ":" + m.at + ":" + m.text
       if (!byKey[k]) { byKey[k] = { kind: "card", key: k, sid: m.sid, ctx: ctx, at: m.at, changes: [], files: [], outcome: "" }; out.push(byKey[k]) }
     }
+    var marksBy = {}
+    for (var mk of marks) (marksBy[mk.sid] = marksBy[mk.sid] || []).push(mk)
+    for (var sid in marksBy) marksBy[sid].sort((x, y) => x.at - y.at)
     for (var c of out) {
-      var end = Infinity, best = null
-      for (var r of marks) if (r.sid === c.sid && r.kind !== "summary" && r.at > c.ctx.at && r.at < end) end = r.at
-      for (var r of marks) if (r.sid === c.sid && r.kind === "summary" && r.at >= c.ctx.at && r.at < end && (!best || r.at > best.at)) best = r
+      // The outcome is the last summary between this ask and the session's next ask.
+      var best = null, own = marksBy[c.sid] || [], lo = 0, hi = own.length
+      while (lo < hi) { var mid = (lo + hi) >> 1; if (own[mid].at < c.ctx.at) lo = mid + 1; else hi = mid }
+      var end = Infinity
+      for (var i = lo; i < own.length && own[i].at < end; i++) if (own[i].kind !== "summary" && own[i].at > c.ctx.at) end = own[i].at
+      for (i = lo; i < own.length && own[i].at < end; i++) if (own[i].kind === "summary" && (!best || own[i].at > best.at)) best = own[i]
       c.outcome = best ? best.text : ""
       if (best && !c.changes.length) c.at = best.at
       c.jid = c.key + ":" + c.changes.length + ":" + (best ? 1 : 0)
@@ -344,17 +350,21 @@ FocusScope {
   readonly property var rows: {
     var out = [], day = "", sid = "", shown = cards.filter(c => !importantOnly || !minor(c))
     // Ordered by when the ask was made, so a card never moves once shown; new work only appends.
-    var start = c => c.ctx.at || c.changes.reduce((m, e) => Math.min(m, e.at), c.at)
-    var counts = {}
-    for (var c of shown) counts[dayLabel(start(c))] = (counts[dayLabel(start(c))] || 0) + 1
-    shown.sort((a, b) => start(a) - start(b))
+    var counts = {}, startOf = new Map(), labelOf = new Map(), dayNames = new Map(), open = openDays
+    for (var c of shown) {
+      var st = c.ctx.at || c.changes.reduce((m, e) => Math.min(m, e.at), c.at), midnight = new Date(st).setHours(0, 0, 0, 0)
+      if (!dayNames.has(midnight)) dayNames.set(midnight, dayLabel(st))
+      startOf.set(c, st); labelOf.set(c, dayNames.get(midnight))
+      counts[labelOf.get(c)] = (counts[labelOf.get(c)] || 0) + 1
+    }
+    shown.sort((a, b) => startOf.get(a) - startOf.get(b))
     for (c of shown) {
-      var label = dayLabel(start(c)), past = label !== "Today"
+      var label = labelOf.get(c), past = label !== "Today"
       if (label !== day) {
-        out.push({ kind: past ? "fold" : "day", key: "day:" + label, text: label, count: counts[label], open: !!openDays[label] })
+        out.push({ kind: past ? "fold" : "day", key: "day:" + label, text: label, count: counts[label], open: !!open[label] })
         day = label; sid = ""
       }
-      if (past && !openDays[label]) continue
+      if (past && !open[label]) continue
       if (c.sid !== sid) { out.push({ kind: "who", key: "who:" + c.key, sid: c.sid }); sid = c.sid }
       var g = c.changes.some(e => e.review) ? null : snippet(c), why = ""
       var code = g ? g.files.filter(x => !x.test) : []
