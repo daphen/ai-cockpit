@@ -151,6 +151,6 @@ QtObject {
     _stick = false
     var top = _glide.running ? _glide.to : view.contentY
     if (y < top) _glideTo(y)
-    else if (y + h > top + view.height) _glideTo(Math.max(y, y + h - view.height))
+    else if (y + h > top + view.height) _glideTo(Math.min(y, y + h - view.height))
   }
 }

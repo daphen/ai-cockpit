@@ -250,6 +250,8 @@ ShellRoot {
           if (top < -1 || (bottom > lv.height + 1 && top > 1)) test.fail("step " + w.steps + ": the landed row is off screen at " + [top, bottom])
           if (w.top >= 0 && w.top + item.height <= lv.height && Math.abs(top - w.top) > 1 && page.cursor !== page.rows.length - 1)
             test.fail("step " + w.steps + ": the viewport jumped — the landed row moved from " + w.top + " to " + top + " though it fit where it was")
+          if (w.dir === Qt.Key_J && w.top + item.height > lv.height + 1 && item.height < lv.height && bottom < lv.height - 40 && page.cursor !== page.rows.length - 1)
+            test.fail("step " + w.steps + ": moving down should scroll just enough to show the row at the bottom, it landed at " + [top, bottom] + " of " + lv.height)
           var rest = page.cursorPoint()
           if (w.aim && rest && Math.abs(w.aim.y - rest.y) > 1) test.fail("step " + w.steps + ": the dot was sent to " + w.aim.y + " but the row came to rest at " + rest.y)
         }
