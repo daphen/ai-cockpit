@@ -35,7 +35,7 @@ Item {
   function send() {
     var lua = '(function() local p=' + JSON.stringify(request.file.path) + '; local alt=' + JSON.stringify(request.file.alternate || "")
       + '; if vim.fn.filereadable(p)~=1 and alt~="" then p=alt end'
-      + '; vim.cmd("silent! edit! " .. vim.fn.fnameescape(p)); vim.bo.readonly=true'
+      + '; vim.cmd("silent! edit " .. vim.fn.fnameescape(p)); if not vim.bo.modified then vim.cmd("silent! edit!") end'
       + '; pcall(vim.api.nvim_win_set_cursor, 0, {' + request.line + ', 0}); vim.cmd("normal! zz"); return "" end)()'
     opener.command = ["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"]
     opener.running = true
@@ -45,8 +45,9 @@ Item {
     id: server
     running: peek.warm
     command: ["nvim", "--headless", "--listen", peek.socket, "-c",
-      "lua local f = " + JSON.stringify(peek.closeFile) + "; vim.fn.writefile({}, f); vim.o.swapfile = false; vim.opt.shortmess:append('IA')"
-        + "; vim.keymap.set('n', 'q', function() vim.fn.writefile({tostring(vim.uv.hrtime())}, f) end)"]
+      "lua local f = " + JSON.stringify(peek.closeFile) + "; vim.fn.writefile({}, f); vim.o.swapfile = false; vim.o.hidden = true; vim.opt.shortmess:append('IA')"
+        + "; vim.keymap.set('n', 'q', function() if vim.bo.modified then vim.notify('Unsaved changes: :w to save, :e! to drop', vim.log.levels.WARN) return end"
+        + " vim.fn.writefile({tostring(vim.uv.hrtime())}, f) end)"]
     environment: ({ COCKPIT_COCKPIT: null, HEIDR_COCKPIT: null, NVIM: null, NVIM_LISTEN_ADDRESS: null,
                     COCKPIT_NVIM_SOCK: null, TERM: "xterm-256color", COLORTERM: "truecolor" })
     // A reload starts the new peek before the old one exits, so the socket can be briefly taken.
