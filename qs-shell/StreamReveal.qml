@@ -9,6 +9,8 @@ QtObject {
   property bool live: false
   property real arrivedAt: 0
   property bool snapOnEnd: false
+  // Waits, blank, while something above is still typing, so two blocks never type at once.
+  property bool hold: false
   property Item fade: null
   property int shown: 0
   property bool typingOn: false
@@ -20,7 +22,8 @@ QtObject {
   }
   function sync() {
     typing.stop()
-    if (typingOn && !(snapOnEnd && !live) && full.length > shown) {
+    if (typingOn && hold) shown = 0
+    else if (typingOn && !(snapOnEnd && !live) && full.length > shown) {
       typing.from = shown; typing.to = full.length
       // Once the message is complete, the rest catches up fast so the next tool is not held behind it.
       typing.duration = live ? Math.max(160, Math.min(1200, (full.length - shown) * 4)) : Math.max(120, Math.min(300, (full.length - shown) * 2))
@@ -32,6 +35,7 @@ QtObject {
   onShownChanged: paint()
   onFullChanged: sync()
   onLiveChanged: sync()
+  onHoldChanged: sync()
   Component.onCompleted: {
     typingOn = live || (arrivedAt > 0 && Date.now() - arrivedAt < 3000)
     if (typingOn) shown = 0

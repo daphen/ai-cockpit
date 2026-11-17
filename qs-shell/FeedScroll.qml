@@ -51,6 +51,14 @@ QtObject {
     // "bottom" lands one header short and returnToBounds clamps the difference.
     return view.originY + Math.max(0, view.contentHeight - view.height)
   }
+  // A switch or send lands instantly while its rows realize; growth after that glides.
+  property real _snapUntil: 0
+  function _followEnd() {
+    if (!view || !chatVisible || view.count <= 0) return
+    var li = view.itemAtIndex(view.count - 1)
+    if (Date.now() < _snapUntil || (li && li.y + li.height > view.contentHeight + 0.5)) _pin()
+    else _glideTo(_bottomY())
+  }
   function _pin() {
     if (!view || !chatVisible || view.count <= 0) return
     _glide.stop()
@@ -69,7 +77,8 @@ QtObject {
   readonly property Connections _follow: Connections {
     target: sm.view
     enabled: sm.chatVisible && sm._stick
-    function onContentHeightChanged() { sm._pin() }
+    function onContentHeightChanged() { sm._followEnd() }
+    function onOriginYChanged() { sm._followEnd() }
     function onHeightChanged() { sm._pin() }
   }
 
@@ -80,6 +89,8 @@ QtObject {
   // Keyboard reveals glide with the focus dot's timing (shell.qml caretGlide); anything else takes over immediately.
   readonly property NumberAnimation _glide: NumberAnimation {
     target: sm.view; property: "contentY"; duration: 180; easing.type: Easing.InOutSine
+    // Growth can land after the target was taken; a following glide always ends exactly at the bottom.
+    onFinished: if (sm._stick && sm.view && Math.abs(sm.view.contentY - sm._bottomY()) > 0.5) sm._glideTo(sm._bottomY())
   }
   function _glideTo(y) {
     y = Math.max(view.originY, Math.min(_bottomY(), y))
@@ -113,7 +124,7 @@ QtObject {
       _pendingCursor = false
       wantCursorAtEnd(true)
     }
-    if (_stick) _pin()
+    if (_stick) _followEnd()
   }
 
   // Stay where the caller is about to put us. Used when switching to a session whose
@@ -127,6 +138,7 @@ QtObject {
   function toEnd() {
     _stick = true
     _pendingCursor = true
+    _snapUntil = Date.now() + 600
     _pin()
   }
 

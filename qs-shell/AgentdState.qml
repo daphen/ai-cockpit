@@ -1311,6 +1311,7 @@ Item {
       } else if (t === "message_update" && m.assistantMessageEvent) {
         var delta = m.assistantMessageEvent
         if (delta.type === "text_start") {
+          _finishLiveThink(sid)
           var start = _liveText(sid)
           if (start.text.length) start.text += "\n\n"
         } else if (delta.type === "text_delta") {
@@ -1325,6 +1326,7 @@ Item {
           thought.text = (heading ? heading[1] : "thinking").replace(/\s+/g, " ").trim().slice(0, 90)
           feedGen++
         } else if (delta.type === "toolcall_start" || delta.type === "toolcall_delta") {
+          if (delta.type === "toolcall_start") _finishLiveThink(sid)
           var call = delta.partial && delta.partial.content ? delta.partial.content[Number(delta.contentIndex) || 0] : null
           if (call && call.name) {
             _setFeedValue(sid, "toolcall-preview", { kind: "cmd", tool: call.name, id: "toolcall-preview",

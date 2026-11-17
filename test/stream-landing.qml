@@ -45,6 +45,22 @@ ShellRoot {
     for (var c of item.children || []) cards(c, out)
     return out
   }
+  property int overlap: 0
+  property int thinkFrames: 0
+  function proseReveals(item, out) {
+    if (!item) return out
+    if (item.reveal !== undefined && item.parts !== undefined && item.reveal) out.push(item.reveal)
+    for (var c of item.children || []) proseReveals(c, out)
+    return out
+  }
+  Timer {
+    interval: 16; repeat: true; running: test.phase >= 4 && test.phase < 12
+    onTriggered: {
+      if (rail.thinkTyping <= 0) return
+      test.thinkFrames++
+      if (test.proseReveals(rail, []).some(r => r.text.length > 0 && r.shown < r.full.length)) test.overlap++
+    }
+  }
   function toolCard() { return cards(rail, []).find(c => !c.isUser && rail.turnProse(c.turn.items).length === 0 && rail.activityEntries(c.turn.items).length > 0) }
   Timer {
     interval: 120; repeat: true; running: true
@@ -79,13 +95,14 @@ ShellRoot {
         event({type:"agent_end"})
         event({type:"roster",sessions:[{id:"worker",name:"worker",cwd:"/tmp",status:"idle"}]})
       } else if (p === 12) {
+        check(overlap === 0, "the reply typed while the reasoning above it was still typing (" + overlap + " frames)")
         check(rail.proseTyping === 0 && toolCard() && toolCard().opacity === 1, "once the reply has typed out, the tool card should be shown (typing=" + rail.proseTyping + ")")
         before = rail.probeCardCreates
         event(transcript(true))
       } else if (p === 16) {
         var recreated = rail.probeCardCreates - before
         check(recreated === 0, "landing the transcript recreated " + recreated + " already-shown cards, replaying their fade-in")
-        console.log("PASS: a tool card waits for the reply above it to finish typing, and landing the transcript recreates no card")
+        console.log("PASS: the reply waits for the reasoning, a tool card waits for the reply above it to finish typing, and landing the transcript recreates no card")
         Qt.quit()
       }
     }

@@ -2961,6 +2961,7 @@ Item {
   // the delegates persist and their bindings just update in place.
   ListModel { id: feedModel; dynamicRoles: true }
   property int proseTyping: 0
+  property int thinkTyping: 0
   property bool _feedReset: false     // session switch → rebuild rather than reconcile
   function _turnSig(t) {
     if (!t) return ""
@@ -5773,6 +5774,11 @@ Item {
           full: String((typeof expanded !== "undefined" && expanded && entry.full) ? entry.full : (entry.text || ""))
           live: entry.liveThink === true
           arrivedAt: Number(entry.arrivedAt || 0)
+          property bool counted: false
+          function track() { if (counted !== revealing) { rail.thinkTyping += revealing ? 1 : -1; counted = revealing } }
+          onRevealingChanged: track()
+          Component.onCompleted: track()
+          Component.onDestruction: if (counted) rail.thinkTyping--
         }
         text: reveal.text
         color: mutedColor
@@ -6082,6 +6088,7 @@ Item {
       spacing: rail.bodyLeading
       readonly property StreamReveal reveal: StreamReveal {
         full: String(entry.text || ""); live: entry.liveText === true; arrivedAt: Number(entry.arrivedAt || 0)
+        hold: rail.thinkTyping > 0
         property bool counted: false
         function track() { if (counted !== revealing) { rail.proseTyping += revealing ? 1 : -1; counted = revealing } }
         onRevealingChanged: track()
