@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as Controls
 import Quickshell.Io
 import QsLib
 
@@ -18,7 +19,7 @@ FocusScope {
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
     var item = i >= 0 ? list.itemAtIndex(i) : null
-    return item && root.stop(item.kind) ? item.restDot.mapToItem(root, 4, 4) : null
+    return item && root.stop(item.entry) ? item.restDot.mapToItem(root, 4, 4) : null
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
@@ -62,15 +63,7 @@ FocusScope {
   onChangesChanged: jevAgain.restart()
 
   property string mode: machine.initial
-  // The focused file of the focused card; Enter opens it.
-  property int file: 0
-  // A dimmed card shows no files, so only its top file is reachable, by Enter.
-  readonly property var focusFiles: {
-    var g = currentRow && currentRow.kind === "card" ? snippet(currentRow) : null
-    return !g ? [] : minor(currentRow) ? g.files.slice(0, 1) : g.files
-  }
-  onCursorKeyChanged: file = 0
-  // One state: j/k walk the files of each card, then on to the next card; J/K jump card to card.
+  // One state: j/k step change by change, J/K outcome by outcome.
   // Each event maps to a next state, or to a handler that does its work and returns one.
   readonly property var machine: ({
     initial: "list",
@@ -79,10 +72,10 @@ FocusScope {
         on: {
           focusLeft: () => (focusRequested("left"), "list"),
           focusRight: () => (focusRequested("right"), "list"),
-          down: () => (file < focusFiles.length - 1 ? file++ : move(1), "list"),
-          up: () => (file > 0 ? file-- : (move(-1), file = Math.max(0, focusFiles.length - 1)), "list"),
-          nextCard: () => (move(1), "list"),
-          prevCard: () => (move(-1), "list"),
+          down: () => (move(1, stop), "list"),
+          up: () => (move(-1, stop), "list"),
+          nextCard: () => (move(1, heading), "list"),
+          prevCard: () => (move(-1, heading), "list"),
           g: () => (edge(false), "list"),
           bottom: () => (edge(true), "list"),
           enter: () => open(),
@@ -332,7 +325,6 @@ FocusScope {
       for (var r of marks) if (r.sid === c.sid && r.kind !== "summary" && r.at > c.ctx.at && r.at < end) end = r.at
       for (var r of marks) if (r.sid === c.sid && r.kind === "summary" && r.at >= c.ctx.at && r.at < end && (!best || r.at > best.at)) best = r
       c.outcome = best ? best.text : ""
-      c.lead = best && best.lead || ""
       if (best && !c.changes.length) c.at = best.at
       c.jid = c.key + ":" + c.changes.length + ":" + (best ? 1 : 0)
     }
@@ -359,7 +351,18 @@ FocusScope {
       }
       if (past && !openDays[label]) continue
       if (c.sid !== sid) { out.push({ kind: "who", key: "who:" + c.key, sid: c.sid }); sid = c.sid }
+      var g = c.changes.some(e => e.review) ? null : snippet(c), why = ""
+      c.bare = !g || minor(c)
+      c.top = g ? g.files[0] : null
       out.push(c)
+      if (c.bare) continue
+      var code = g.files.filter(x => !x.test), tests = g.files.filter(x => x.test)
+      for (var x of code) {
+        out.push({ kind: "file", key: c.key + "\x1f" + x.path, sid: c.sid, at: c.at, f: x, why: x.why === why ? "" : x.why })
+        why = x.why
+      }
+      if (tests.length)
+        out.push({ kind: "file", key: c.key + "\x1ftests", sid: c.sid, at: c.at, tests: tests, f: tests[0], why: "" })
     }
     return out
   }
@@ -379,25 +382,19 @@ FocusScope {
   readonly property int cursor: {
     var i = rows.findIndex(r => r.key === cursorKey)
     if (i >= 0) return i
-    for (i = rows.length - 1; i >= 0 && !stop(rows[i].kind); i--);
+    for (i = rows.length - 1; i >= 0 && !stop(rows[i]); i--);
     return i
   }
   readonly property var currentRow: cursor >= 0 ? rows[cursor] : null
 
-  function stop(kind) { return kind === "card" || kind === "fold" }
+  function stop(r) { return r.kind === "file" || r.kind === "fold" || (r.kind === "card" && r.bare) }
+  function heading(r) { return r.kind === "card" || r.kind === "fold" }
   // A "Scope: " prefix (commit-subject style) is a label, not the headline.
   function headline(t) {
     var parts = tidy(t).replace(/^[\w./-]+(\s[\w./-]+){0,2}:\s+(?=\S)/, "").split(/(;\s|:\s|\.\s)/)
     var head = parts[0].split(/\s+/).length < 3 && parts.length > 2 ? parts[0] + parts[1] + parts[2] : parts[0]
     return head.replace(/\.$/, "")
   }
-  function question(t) {
-    var parts = String(t || "").replace(/\s+/g, " ").match(/[^.?!]+[.?!]*/g) || []
-    var q = parts.filter(x => /\?\s*$/.test(x)).pop() || parts[0] || ""
-    q = q.trim().replace(/^(?:(?:hm+|so|ok(?:ay)?|well|yeah|right|and|but|also)\b[,.]?\s*)+/i, "")
-    return q.split(" ").length < 3 ? "" : /^\S*[:\/]/.test(q) ? q : q.charAt(0).toUpperCase() + q.slice(1)
-  }
-  function sentence(t) { var c = tidy(t); return (c.match(/^.*?[.!?](?=\s|$)/) || [c])[0].replace(/\.$/, "") }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
   function select(i) {
@@ -406,17 +403,17 @@ FocusScope {
   }
   function showRow(i) {
     var last = rows.length - 1
-    while (last > i && !stop(rows[last].kind)) last--
+    while (last > i && !stop(rows[last])) last--
     scroller.cursorMoved(i, i === last)
   }
-  function move(delta) {
+  function move(delta, ok) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (stop(rows[i].kind)) { select(i); return }
+      if (ok(rows[i])) { select(i); return }
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {
       var i = last ? rows.length - 1 - n : n
-      if (stop(rows[i].kind)) { select(i); return }
+      if (stop(rows[i])) { select(i); return }
     }
   }
   // Enter folds a past day open or shut, or opens the focused file; returns the next state.
@@ -424,7 +421,7 @@ FocusScope {
     if (currentRow && currentRow.kind === "fold") {
       var d = Object.assign({}, openDays); d[currentRow.text] = !d[currentRow.text]; openDays = d
     }
-    var f = focusFiles[file]
+    var f = currentRow && (currentRow.kind === "file" ? currentRow.f : currentRow.top)
     if (f) fileRequested(currentRow.sid, f.path, f.line)
     return "list"
   }
@@ -434,7 +431,7 @@ FocusScope {
   ListView {
     id: list
     objectName: "activityList"
-    width: Math.min(parent.width - 64, 960)
+    width: parent.width - 48
     height: parent.height
     anchors.horizontalCenter: parent.horizontalCenter
     clip: true
@@ -475,11 +472,9 @@ FocusScope {
       readonly property var entry: root.rows[index] || ({ kind: "day", files: [], diff: [] })
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
-      readonly property Item restDot: kind === "fold" ? foldDot : cardDot
-      // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
-      onHeightChanged: if (current) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
+      readonly property Item restDot: kind === "fold" ? foldDot : kind === "file" ? fileDot : cardDot
       width: list.width
-      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : cardBox.height + 2
+      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "file" ? fileBox.height + 4 : cardBox.height + 2
 
       CapLabel {
         visible: row.kind === "day"
@@ -529,21 +524,20 @@ FocusScope {
         height: visible ? cardCol.implicitHeight + 16 : 0
         radius: 12
         readonly property bool dim: root.minor(row.entry)
-        readonly property var files: row.entry.files || []
         readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
         readonly property var ctx: row.entry.ctx || ({ text: "" })
         readonly property string asked: !ctx.text ? "" : ctx.from === "task" ? ctx.text
           : (ctx.from && ctx.from !== "you" ? ctx.from + ": " : "") + "\u201c" + ctx.text + "\u201d"
         readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
         readonly property string relay: ctx.from && ctx.from !== "you" && ctx.from !== "task" ? ctx.from : ""
-        readonly property string question: files.length || review || relay ? "" : root.question(ctx.text)
-        readonly property string answer: question && row.entry.lead ? root.sentence(row.entry.lead) : ""
-        readonly property var glance: row.kind === "card" && !review ? root.snippet(row.entry) : null
-        readonly property string done: root.headline(row.entry.outcome || last.why)
+        readonly property string done: row.entry.outcome ? root.tidy(row.entry.outcome).replace(/\.$/, "") : root.headline(last.why)
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
+        Controls.ToolTip.visible: cardHover.hovered && cardBox.asked !== ""
+        Controls.ToolTip.delay: 500
+        Controls.ToolTip.text: cardBox.asked
         TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tap" }) } }
         Rectangle {
           id: cardDot
@@ -570,7 +564,7 @@ FocusScope {
             objectName: "cardHead"
             width: parent.width
             text: cardBox.review ? '<font color="' + root.metaColor + '">#' + cardBox.review.pr + "</font>&nbsp;&nbsp;" + root.esc(cardBox.review.title || "Review")
-              : root.esc(cardBox.answer || cardBox.relay && !cardBox.files.length && row.entry.lead && root.tidy(row.entry.lead).replace(/\.$/, "") || cardBox.done || cardBox.asked)
+              : root.esc(cardBox.done || cardBox.asked)
             leftPadding: relayChip.visible ? relayChip.width + 8 : 0
             PillSurface {
               id: relayChip
@@ -586,19 +580,10 @@ FocusScope {
               }
             }
             textFormat: Text.StyledText
-            wrapMode: Text.Wrap; maximumLineCount: 1; elide: Text.ElideRight
+            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
-            color: root.contentColor
+            color: cardBox.dim ? root.metaColor : root.contentColor
             font.family: root.bodyFont; font.pixelSize: root.fsBody
-          }
-          Text {
-            width: parent.width
-            visible: cardBox.answer !== ""
-            text: cardBox.question
-            textFormat: Text.PlainText
-            elide: Text.ElideRight; maximumLineCount: 1
-            color: root.metaColor
-            font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
           }
           Row {
             objectName: "reviewRow"
@@ -642,101 +627,91 @@ FocusScope {
               font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
             }
           }
-          Rectangle {
-            id: glanceBox
-            width: parent.width
-            visible: !cardBox.dim && !!cardBox.glance
-            height: visible ? glanceCol.implicitHeight + 14 : 0
-            radius: 10
-            objectName: "glanceBox"
-            color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
-            border.width: 1; border.color: Qt.alpha(Theme.fg, 0.07)
-            clip: true
-            Column {
-              id: glanceCol
-              y: 7
-              width: parent.width
-              Repeater {
-                model: cardBox.glance ? cardBox.glance.files : []
-                delegate: Column {
-                  id: gFile
-                  required property var modelData
-                  required property int index
-                  readonly property bool picked: index === (row.current ? root.file : 0)
-                  readonly property string language: root.rail ? root.rail.codeLanguage(modelData.path) : ""
-                  width: glanceCol.width
-                  Item {
-                    x: 6; width: parent.width - 12; height: 22
-                    Rectangle {
-                      visible: row.current && gFile.picked
-                      anchors.fill: parent; radius: 6
-                      color: Qt.alpha(Theme.fg, 0.07)
-                      Rectangle { width: 3; height: parent.height - 8; radius: 1.5; x: 1; anchors.verticalCenter: parent.verticalCenter; color: Theme.cursor }
-                    }
-                    TapHandler { onTapped: { root.select(row.index); root.file = gFile.index; root.forceActiveFocus(); root.send({ type: "tap" }) } }
-                    Icon { id: gIcon; x: 6; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
-                    Text {
-                      id: gName
-                      anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
-                      text: modelData.name; textFormat: Text.PlainText
-                      color: Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
-                    }
-                    Text {
-                      anchors { left: gName.right; leftMargin: 12; right: gCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-                      text: modelData.why; textFormat: Text.PlainText
-                      elide: Text.ElideRight; maximumLineCount: 1
-                      color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
-                    }
-                    Row {
-                      id: gCounts
-                      anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
-                      spacing: 8
-                      Text { visible: modelData.add > 0; text: "+" + modelData.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
-                      Text { visible: modelData.del > 0; text: "\u2212" + modelData.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
-                    }
-                  }
-                  // Every file's snippet gets the card's tallest height, so moving between files never resizes the card.
-                  Column {
-                    visible: gFile.picked
-                    width: glanceCol.width
-                    height: visible ? cardBox.glance.rows * (root.fsMeta - 2) * 1.65 : 0
-                    Repeater {
-                      model: gFile.modelData.lines
-                      delegate: Rectangle {
-                        required property var modelData
-                        width: glanceCol.width
-                        height: (root.fsMeta - 2) * 1.65
-                        color: "transparent"
-                        Rectangle { x: 1; width: 2; height: parent.height; color: modelData.sign === "-" ? Theme.red : Theme.green }
-                        Text {
-                          x: 12; width: parent.width - 24
-                          anchors.verticalCenter: parent.verticalCenter
-                          textFormat: Text.StyledText
-                          text: root.rail ? root.rail.highlightCode(modelData.text, gFile.language) : root.esc(modelData.text)
-                          elide: Text.ElideRight; maximumLineCount: 1
-                          color: Theme.fg
-                          font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
-                        }
-                      }
-                    }
-                    Text {
-                      x: 12
-                      visible: gFile.modelData.moreLines > 0
-                      height: (root.fsMeta - 2) * 1.65; verticalAlignment: Text.AlignVCenter
-                      text: "\u22ef " + gFile.modelData.moreLines + (gFile.modelData.removedList ? " more removed" : " more lines")
-                      color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
-                    }
-                  }
-                }
-              }
+        }
+      }
+
+      // One change: a file, its own reason, and the few lines that say what changed.
+      Rectangle {
+        id: fileBox
+        objectName: "glanceBox"
+        visible: row.kind === "file"
+        readonly property var f: row.entry.f || ({ name: "", lines: [], add: 0, del: 0 })
+        readonly property var tests: row.entry.tests || null
+        readonly property string language: root.rail && visible ? root.rail.codeLanguage(f.path) : ""
+        readonly property real lineH: (root.fsMeta - 2) * 1.65
+        x: 32; y: 2
+        width: parent.width - x
+        height: visible ? fileCol.implicitHeight + 12 : 0
+        radius: 10
+        color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
+        border.width: 1
+        border.color: row.current ? (root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.3)) : fileHover.hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
+        HoverHandler { id: fileHover; cursorShape: Qt.PointingHandCursor }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tap" }) } }
+        Rectangle {
+          id: fileDot
+          z: 2
+          x: -20; y: 6 + 11 - height / 2
+          width: 8; height: 8; radius: 4
+          color: Theme.cursor
+          visible: row.current && !root.caretHeld
+        }
+        Column {
+          id: fileCol
+          y: 6
+          width: parent.width
+          Item {
+            x: 6; width: parent.width - 12; height: 22
+            Icon { id: gIcon; x: 6; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
+            Text {
+              id: gName
+              anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
+              text: fileBox.tests ? fileBox.tests.length + (fileBox.tests.length === 1 ? " test file" : " test files") : fileBox.f.name
+              textFormat: Text.PlainText
+              color: fileBox.tests ? root.metaColor : Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
+            }
+            Text {
+              anchors { left: gName.right; leftMargin: 12; right: gCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
+              text: fileBox.tests ? fileBox.tests.map(t => t.name).join(", ") : row.entry.why || ""
+              textFormat: Text.PlainText
+              elide: Text.ElideRight; maximumLineCount: 1
+              color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
+            }
+            Row {
+              id: gCounts
+              readonly property int add: fileBox.tests ? fileBox.tests.reduce((n, t) => n + t.add, 0) : fileBox.f.add
+              readonly property int del: fileBox.tests ? fileBox.tests.reduce((n, t) => n + t.del, 0) : fileBox.f.del
+              anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+              spacing: 8
+              Text { visible: gCounts.add > 0; text: "+" + gCounts.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+              Text { visible: gCounts.del > 0; text: "\u2212" + gCounts.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+            }
+          }
+          Repeater {
+            model: fileBox.tests ? [] : fileBox.f.lines
+            delegate: Rectangle {
+              required property var modelData
+              width: fileCol.width
+              height: fileBox.lineH
+              color: "transparent"
+              Rectangle { x: 1; width: 2; height: parent.height; color: modelData.sign === "-" ? Theme.red : Theme.green }
               Text {
-                x: 12
-                visible: !!cardBox.glance && cardBox.glance.more > 0
-                text: cardBox.glance ? "and " + cardBox.glance.more + " more " + (cardBox.glance.more === 1 ? "file" : "files") : ""
-                color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
-                topPadding: 2
+                x: 12; width: parent.width - 24
+                anchors.verticalCenter: parent.verticalCenter
+                textFormat: Text.StyledText
+                text: root.rail ? root.rail.highlightCode(modelData.text, fileBox.language) : root.esc(modelData.text)
+                elide: Text.ElideRight; maximumLineCount: 1
+                color: Theme.fg
+                font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
               }
             }
+          }
+          Text {
+            x: 12
+            visible: !fileBox.tests && fileBox.f.moreLines > 0
+            height: visible ? fileBox.lineH : 0; verticalAlignment: Text.AlignVCenter
+            text: "\u22ef " + fileBox.f.moreLines + (fileBox.f.removedList ? " more removed" : " more lines")
+            color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
           }
         }
       }
