@@ -62,43 +62,39 @@ FocusScope {
   onChangesChanged: jevAgain.restart()
 
   property string mode: machine.initial
-  property int file: 0
-  readonly property bool manyFiles: !!currentRow && currentRow.kind === "change" && currentRow.files.length > 1
-  readonly property bool picking: mode === "files" && manyFiles
   onCursorKeyChanged: mode = machine.initial
-  // list  ─Enter on a change with several files→  files  ─Esc→  list
+  // One state: j/k walk cards and, inside an unfolded card, its files; J/K jump card to card.
   // Each event maps to a next state, or to a handler that does its work and returns one.
-  readonly property var machine: {
-    var list = {
-      focusLeft: () => (focusRequested("left"), "list"),
-      focusRight: () => (focusRequested("right"), "list"),
-      down: () => (move(1), "list"),
-      up: () => (move(-1), "list"),
-      left: () => (codeShift(-1), "list"),
-      right: () => (codeShift(1), "list"),
-      g: () => (edge(false), "list"),
-      bottom: () => (edge(true), "list"),
-      enter: () => open(),
-      tap: () => open(),
-      back: () => (collapse(), "list"),
-      session: () => (currentRow && sessionRequested(currentRow.sid), "list"),
-      filter: () => (importantOnly = !importantOnly, "list")
+  readonly property var machine: ({
+    initial: "list",
+    states: {
+      list: {
+        on: {
+          focusLeft: () => (focusRequested("left"), "list"),
+          focusRight: () => (focusRequested("right"), "list"),
+          down: () => (move(1), "list"),
+          up: () => (move(-1), "list"),
+          nextCard: () => (move(1, true), "list"),
+          prevCard: () => (move(-1, true), "list"),
+          left: () => (codeShift(-1), "list"),
+          right: () => (codeShift(1), "list"),
+          g: () => (edge(false), "list"),
+          bottom: () => (edge(true), "list"),
+          enter: () => open(),
+          space: () => open(),
+          tap: () => open(),
+          back: () => (collapse(), "list"),
+          session: () => (currentRow && sessionRequested(currentRow.sid), "list"),
+          filter: () => (importantOnly = !importantOnly, "list")
+        }
+      }
     }
-    var files = {
-      down: () => (file = Math.min(currentRow.files.length - 1, file + 1), "files"),
-      up: () => (file = Math.max(0, file - 1), "files"),
-      enter: () => open(),
-      space: () => open(),
-      back: "list"
-    }
-    for (var ev in list) if (!(ev in files)) files[ev] = (fn => e => (mode = "list", fn(e)))(list[ev])
-    return { initial: "list", states: { list: { on: list }, files: { on: files } } }
-  }
+  })
   function eventOf(e) {
     var k = e.key, shift = e.modifiers & Qt.ShiftModifier
     if (e.modifiers & Qt.ControlModifier)
       return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight" })[k] || ""
-    return ({ [Qt.Key_J]: "down", [Qt.Key_Down]: "down", [Qt.Key_K]: "up", [Qt.Key_Up]: "up",
+    return ({ [Qt.Key_J]: shift ? "nextCard" : "down", [Qt.Key_Down]: "down", [Qt.Key_K]: shift ? "prevCard" : "up", [Qt.Key_Up]: "up",
               [Qt.Key_H]: "left", [Qt.Key_Left]: "left", [Qt.Key_L]: "right", [Qt.Key_Right]: "right",
               [Qt.Key_Return]: "enter", [Qt.Key_Enter]: "enter", [Qt.Key_Space]: "space", [Qt.Key_Escape]: "back",
               [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter" })[k] || ""
@@ -376,7 +372,7 @@ FocusScope {
         pf.add += e.files[0].add; pf.del += e.files[0].del
         var ed = e.files[0].diff
         pf.diff = pf.diff.concat(pf.diff.length && ed.length ? ["\u22ef"] : []).concat(ed).slice(0, 80)
-        prev.edits = (prev.edits || 1) + 1; prev.at = e.at
+        prev.at = e.at
         if (!prev.why) prev.why = e.why
         continue
       }
@@ -442,8 +438,27 @@ FocusScope {
       if (past && !openDays[label]) continue
       if (c.sid !== sid) { out.push({ kind: "who", key: "who:" + c.key, sid: c.sid }); sid = c.sid }
       out.push(c)
-      if (c.key === openKey) for (var e of c.changes) out.push(Object.assign({ kind: "change" }, e))
+      if (c.key === openKey) out.push(...fileRows(c))
     }
+    return out
+  }
+  // An unfolded card is one row per file it touched: every reason, and the edits' diffs in order.
+  function fileRows(c) {
+    var byPath = {}, out = []
+    for (var e of c.changes) for (var f of e.files) {
+      if (f.covered && c.changes.some(o => !o.commit && o.files.some(x => x.path === f.path))) continue
+      var r = byPath[f.path]
+      if (!r) {
+        r = byPath[f.path] = { kind: "change", key: c.key + ":file:" + f.path, sid: c.sid, at: e.at, whys: [], whole: true,
+                               files: [{ path: f.path, add: 0, del: 0, line: f.line || 1, diff: [] }] }
+        out.push(r)
+      }
+      var g = r.files[0], why = e.why ? (e.commit ? "Committed: " : "") + e.why : ""
+      g.add += f.add; g.del += f.del; r.at = Math.max(r.at, e.at); r.whole = r.whole && !!e.whole
+      if ((f.diff || []).length) g.diff = g.diff.concat(g.diff.length ? ["\u22ef"] : []).concat(f.diff).slice(0, 120)
+      if (why && r.whys.indexOf(why) < 0) r.whys.push(why)
+    }
+    for (var r of out) r.why = r.whys.join("\n")
     return out
   }
   // Updated in place so the view keeps its scroll position when rows arrive.
@@ -491,9 +506,9 @@ FocusScope {
     while (last > i && !stop(rows[last].kind)) last--
     scroller.cursorMoved(i, i === last)
   }
-  function move(delta) {
+  function move(delta, cardsOnly) {
     for (var i = cursor + delta; i >= 0 && i < rows.length; i += delta)
-      if (stop(rows[i].kind)) { select(i); return }
+      if (cardsOnly ? rows[i].kind === "card" || rows[i].kind === "fold" : stop(rows[i].kind)) { select(i); return }
   }
   function edge(last) {
     for (var n = 0; n < rows.length; n++) {
@@ -513,12 +528,8 @@ FocusScope {
       if (rows[i] && rows[i].kind === "change") select(i)
       return "list"
     }
-    if (!currentRow || currentRow.kind !== "change") return mode
-    var files = currentRow.files
-    if (mode === "list" && files.length > 1) { file = Math.max(0, files.findIndex(x => !x.covered)); return "files" }
-    var f = mode === "files" ? files[file] : files.find(x => !x.covered) || files[0]
-    fileRequested(currentRow.sid, f.path, f.line || 1)
-    return mode
+    if (currentRow && currentRow.kind === "change") fileRequested(currentRow.sid, currentRow.files[0].path, currentRow.files[0].line)
+    return "list"
   }
 
 
@@ -892,7 +903,7 @@ FocusScope {
             id: whyText
             visible: !!row.entry.why
             width: parent.width
-            text: (row.entry.commit ? "Committed: " : "") + (row.entry.why || "")
+            text: row.entry.why || ""
             textFormat: Text.PlainText
             color: Theme.fg_secondary
             font.family: root.bodyFont; font.pixelSize: root.fsMeta
@@ -906,25 +917,13 @@ FocusScope {
               required property var modelData
               required property int index
               readonly property var diff: modelData.diff || []
-              readonly property int shown: {
-                var left = 40, files = row.entry.files || []
-                for (var j = 0; j < index; j++) left -= Math.min(left, (files[j].diff || []).length)
-                return Math.min(left, diff.length)
-              }
+              readonly property int shown: Math.min(row.current ? 40 : 14, diff.length)
               readonly property string language: root.rail ? root.rail.codeLanguage(modelData.path) : ""
-              readonly property bool picked: row.current && root.picking && root.file === index
-              onPickedChanged: if (picked) Qt.callLater(() => scroller.revealSpan(fileBlock.mapToItem(list.contentItem, 0, 0).y - 8, fileBlock.height + 16))
               width: changeCol.width
               spacing: 6
               Item {
                 width: parent.width
                 height: 26
-                Rectangle {
-                  visible: fileBlock.picked
-                  x: filePill.x - 4; y: -4; width: filePill.width + 8; height: parent.height + 8
-                  radius: height / 2; color: "transparent"
-                  border.width: 1.5; border.color: root.rail ? root.rail.activeRing : Theme.fg
-                }
                 PillSurface {
                   id: filePill
                   readonly property string rel: root.relPath(row.entry.sid, fileBlock.modelData.path)
@@ -959,14 +958,14 @@ FocusScope {
                 lines: fileBlock.diff.slice(0, fileBlock.shown)
                 language: fileBlock.language
                 fontSize: root.fsMeta - 2
-                shiftable: row.current && (!root.picking || root.file === fileBlock.index)
+                shiftable: row.current
                 color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
               }
               Text {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
-                visible: fileBlock.diff.length > 0 && (!root.picking || fileBlock.picked)
+                visible: fileBlock.diff.length > 0 && row.current
                 x: 10
-                text: (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (!root.picking && row.entry.files.length > 1 ? "Enter picks a file" : "Enter opens the file \u00b7 q closes it")
+                text: (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + "Enter opens the file \u00b7 q closes it \u00b7 J/K next card"
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }
