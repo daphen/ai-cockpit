@@ -36,6 +36,8 @@ Item {
     var lua = '(function() local p=' + JSON.stringify(request.file.path) + '; local alt=' + JSON.stringify(request.file.alternate || "")
       + '; if vim.fn.filereadable(p)~=1 and alt~="" then p=alt end'
       + '; vim.cmd("silent! edit " .. vim.fn.fnameescape(p)); if not vim.bo.modified then vim.cmd("silent! edit!") end'
+      // lualine loads on the first file read and turns the status line back on.
+      + '; pcall(function() require("lualine").hide({ unhide = false }) end); vim.o.laststatus = 0'
       + '; pcall(vim.api.nvim_win_set_cursor, 0, {' + request.line + ', 0}); vim.cmd("normal! zz"); return "" end)()'
     opener.command = ["nvim", "--server", socket, "--remote-expr", "luaeval(" + JSON.stringify(lua) + ")"]
     opener.running = true
@@ -46,7 +48,6 @@ Item {
     running: peek.warm
     command: ["nvim", "--headless", "--listen", peek.socket, "-c",
       "lua local f = " + JSON.stringify(peek.closeFile) + "; vim.fn.writefile({}, f); vim.o.swapfile = false; vim.o.hidden = true; vim.opt.shortmess:append('IA')"
-        + "; vim.api.nvim_create_autocmd('VimEnter', { callback = function() vim.schedule(function() pcall(function() require('lualine').hide({ unhide = false }) end); vim.o.laststatus = 0 end) end })"
         + "; vim.keymap.set('n', 'q', function() if vim.bo.modified then vim.notify('Unsaved changes: :w to save, :e! to drop', vim.log.levels.WARN) return end"
         + " vim.fn.writefile({tostring(vim.uv.hrtime())}, f) end)"]
     environment: ({ COCKPIT_COCKPIT: null, HEIDR_COCKPIT: null, NVIM: null, NVIM_LISTEN_ADDRESS: null,
