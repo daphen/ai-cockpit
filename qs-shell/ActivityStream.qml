@@ -491,9 +491,10 @@ FocusScope {
       readonly property var entry: root.rows[index] || ({ kind: "day", files: [], diff: [] })
       readonly property string kind: entry.kind
       readonly property bool current: index === root.cursor && root.focused
+      readonly property real gap: kind === "card" && index > 0 && (root.rows[index - 1] || {}).kind === "file" ? 20 : 0
       readonly property Item restDot: kind === "fold" ? foldDot : kind === "file" ? fileDot : cardDot
       width: list.width
-      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "file" ? fileBox.height + 4 : cardBox.height + 2
+      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "file" ? fileBox.height + 4 : cardBox.height + 2 + gap
 
       CapLabel {
         visible: row.kind === "day"
@@ -537,7 +538,7 @@ FocusScope {
       Rectangle {
         id: cardBox
         visible: row.kind === "card"
-        y: 1
+        y: 1 + row.gap
         x: 8
         width: parent.width - 8
         height: visible ? cardCol.implicitHeight + 16 : 0
