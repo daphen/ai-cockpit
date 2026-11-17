@@ -513,8 +513,16 @@ ShellRoot {
             width: parent.width
             height: Math.round((parent.height - viewTabs.height - chin.implicitHeight) * win.termDpr) / win.termDpr
 
+            // Every tab sits in the same rounded panel, inset to line up with the tab row.
+            Item {
+              id: workPanel
+              readonly property real radius: 16
+              function px(v) { return Math.round(v * win.termDpr) / win.termDpr }
+              anchors { fill: parent; leftMargin: px(7); topMargin: px(2); bottomMargin: px(7) }
+            }
+            Rectangle { anchors.fill: workPanel; radius: workPanel.radius; color: Theme.bg }
             Crossfade {
-              anchors.fill: parent
+              anchors.fill: workPanel
               // Follow the picked tab, not the editor's report, so its text never shows first.
               showSecond: rail.workspaceTab === "dashboard"
               enterDuration: 100
@@ -588,7 +596,7 @@ ShellRoot {
             }
             Loader {
               id: studioPanel
-              anchors.fill: parent
+              anchors.fill: workPanel
               visible: win.studioActive
               enabled: visible
               active: !!win.studioRoot
@@ -598,10 +606,9 @@ ShellRoot {
             }
             ActivityStream {
               id: activityPage
-              anchors.fill: parent
+              anchors.fill: workPanel
               visible: win.activityActive
               enabled: visible
-              color: win.ground
               agentd: win.agentd
               rail: rail
               sessions: win.agentd.sessions
@@ -620,53 +627,41 @@ ShellRoot {
             PeekEditor {
               id: peek
               anchors.fill: parent
+              z: 3
               instanceName: rail.instanceName
               ground: win.ground
               onClosed: activityPage.forceActiveFocus()
             }
-            Canvas {
-              id: terminalCorner
-              anchors.right: parent.right
-              anchors.bottom: parent.bottom
-              width: paneLayout.terminalCornerRadius
-              height: paneLayout.terminalCornerRadius
-              z: 2
-              readonly property color maskColor: win.ground
-              onMaskColorChanged: requestPaint()
-              onPaint: {
-                var ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                ctx.fillStyle = terminalCorner.maskColor
-                ctx.beginPath()
-                ctx.moveTo(width, 0)
-                ctx.lineTo(width, height)
-                ctx.lineTo(0, height)
-                ctx.arc(0, 0, width, Math.PI / 2, 0, true)
-                ctx.closePath()
-                ctx.fill()
+            Repeater {
+              model: 4
+              delegate: Canvas {
+                required property int index
+                readonly property bool atRight: index % 2 === 1
+                readonly property bool atBottom: index > 1
+                readonly property color maskColor: win.ground
+                x: atRight ? workPanel.x + workPanel.width - width : workPanel.x
+                y: atBottom ? workPanel.y + workPanel.height - height : workPanel.y
+                width: workPanel.radius; height: workPanel.radius
+                z: 2
+                onMaskColorChanged: requestPaint()
+                onPaint: {
+                  var ctx = getContext("2d"), r = width
+                  var cx = atRight ? 0 : r, cy = atBottom ? 0 : r
+                  ctx.clearRect(0, 0, r, r)
+                  ctx.fillStyle = maskColor
+                  ctx.beginPath()
+                  ctx.rect(0, 0, r, r)
+                  ctx.arc(cx, cy, r, 0, 2 * Math.PI, true)
+                  ctx.fill("evenodd")
+                }
               }
             }
-            Canvas {
-              id: terminalTopCorner
-              anchors.right: parent.right
-              anchors.top: parent.top
-              width: paneLayout.terminalCornerRadius
-              height: paneLayout.terminalCornerRadius
+            Rectangle {
+              anchors.fill: workPanel
               z: 2
-              readonly property color maskColor: win.ground
-              onMaskColorChanged: requestPaint()
-              onPaint: {
-                var ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                ctx.fillStyle = terminalTopCorner.maskColor
-                ctx.beginPath()
-                ctx.moveTo(width, height)
-                ctx.lineTo(width, 0)
-                ctx.lineTo(0, 0)
-                ctx.arc(0, height, width, -Math.PI / 2, 0, false)
-                ctx.closePath()
-                ctx.fill()
-              }
+              radius: workPanel.radius
+              color: "transparent"
+              border.width: 1; border.color: Qt.alpha(Theme.fg, 0.08)
             }
           }
           // The cockpit statusline (fed by nvim's chin bridge) — sits flush with the

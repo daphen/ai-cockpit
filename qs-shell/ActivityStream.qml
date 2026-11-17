@@ -5,7 +5,6 @@ import QsLib
 
 FocusScope {
   id: root
-  property color color: Theme.bg
   property var agentd: null
   property var rail: null
   property var sessions: []
@@ -111,16 +110,7 @@ FocusScope {
   }
 
 
-  Rectangle { anchors.fill: parent; color: root.color }
-  // The same rounded editor-like panel as the Code tab, inset to line up with the tab row.
-  Rectangle {
-    id: panel
-    anchors { fill: parent; leftMargin: 7; topMargin: 2; bottomMargin: 7 }
-    // Concentric with the cards: card radius plus the gap to the panel edge.
-    radius: root.cardRadius + 8
-    color: Theme.bg
-    border.width: 1; border.color: Qt.alpha(Theme.fg, 0.08)
-  }
+  // Sits in the shell's rounded panel (radius 16): cards keep 8px corners 8px from its edge.
   TapHandler { onTapped: root.forceActiveFocus() }
 
   readonly property bool light: Theme.mode === "light"
@@ -449,7 +439,7 @@ FocusScope {
   ListView {
     id: list
     objectName: "activityList"
-    anchors { fill: panel; leftMargin: 17; rightMargin: 8; topMargin: 1; bottomMargin: 1 }
+    anchors { fill: parent; leftMargin: 17; rightMargin: 8; topMargin: 1; bottomMargin: 1 }
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }

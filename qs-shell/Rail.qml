@@ -2532,6 +2532,21 @@ Item {
     if (cur < rSize) { if (!rosterExpanded) cur = Math.max(cur - 1, 0); return }
     cur = Math.max(cur - 1, rSize)   // the roster opens only via Ctrl+T/Super+T
   }
+  // Half a screen on, landing on the first feed row at or past that point.
+  function halfMove(dir) {
+    if (view !== "chat" || cur < rSize) return
+    const at = i => feedView.itemAtIndex(i - rSize - _feedOffset)
+    const from = at(cur)
+    if (!from) return
+    const target = from.y + dir * feedView.height / 2
+    let i = cur
+    while (i + dir >= rSize && i + dir <= navTotal - 1) {
+      i += dir
+      const it = at(i)
+      if (!it || (dir > 0 ? it.y >= target : it.y <= target)) break
+    }
+    cur = i
+  }
 
   // Blink probes (debug): delegate/dot creations — streaming must not grow these.
   property int probeCardCreates: 0
@@ -2692,6 +2707,7 @@ Item {
       return true
     }
     if (ctrl && e.key === Qt.Key_K) return true
+    if (ctrl && (e.key === Qt.Key_D || e.key === Qt.Key_U)) { halfMove(e.key === Qt.Key_D ? 1 : -1); return true }
     // Arrows for the Deck d-pad: Down past the last row lands in the composer.
     if (!ctrl && e.key === Qt.Key_Down) {
       if (onTabs && navTotal > rSize) { rosterOverride = false; cur = navTotal - 1 }
