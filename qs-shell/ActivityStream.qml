@@ -14,7 +14,6 @@ FocusScope {
   signal sessionRequested(string sid)
   signal fileRequested(string sid, string path, int line)
   signal focusRequested(string direction)
-  signal yanked(string text)
 
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
@@ -64,53 +63,15 @@ FocusScope {
 
   property string mode: machine.initial
   property int file: 0
-  readonly property bool inCode: mode === "code" || mode === "visual" || mode === "visualLine"
   readonly property bool manyFiles: !!currentRow && currentRow.kind === "change" && currentRow.files.length > 1
-  readonly property bool picking: mode !== "list" && manyFiles
-  property int codeLine: 0
-  property int codeCol: 0
-  property int visLine: 0
-  property int visCol: 0
-  property string pending: ""
+  readonly property bool picking: mode === "files" && manyFiles
   onCursorKeyChanged: mode = machine.initial
-  function codeRows() {
-    var f = currentRow && currentRow.files ? currentRow.files[file] : null, out = [], last = 0
-    for (var l of f && f.diff || []) {
-      var m = l.match(/^([+\- ])\s*(\d*)\s?(.*)$/)
-      if (m && m[2]) last = +m[2]
-      out.push({ text: l === "\u22ef" || !m ? "" : m[3].replace(/\t/g, "    "), line: m && m[2] ? +m[2] : last + 1 })
-    }
-    return out
-  }
-  function enterCode(fi) {
-    file = fi
-    var rs = codeRows(), first = currentRow.files[fi].diff.findIndex(l => /^[+-]/.test(l))
-    codeLine = Math.max(0, first)
-    codeCol = Math.max(0, (rs[codeLine] || { text: "" }).text.search(/\S/))
-    return "code"
-  }
-  function selRange(i) {
-    if (mode !== "visual" && mode !== "visualLine") return null
-    var a = { l: visLine, c: visCol }, b = { l: codeLine, c: codeCol }
-    if (a.l > b.l || (a.l === b.l && a.c > b.c)) { var t = a; a = b; b = t }
-    if (i < a.l || i > b.l) return null
-    if (mode === "visualLine") return [0, Infinity]
-    return [i === a.l ? a.c : 0, i === b.l ? b.c + 1 : Infinity]
-  }
-  // list   ─Enter→  files  ─Enter→  code  ─v / V→  visual · visualLine
-  //        ←Esc──          ←Esc──         ←Esc───
+  // list  ─Enter on a change with several files→  files  ─Esc→  list
   // Each event maps to a next state, or to a handler that does its work and returns one.
   readonly property var machine: {
-    var focus = {
-      focusLeft: () => (focusRequested("left"), mode),
-      focusRight: () => (focusRequested("right"), mode)
-    }
-    var caret = state => {
-      var on = { enter: () => (openLine(), state), g: e => e.was === "g" ? (moveCaret(motions.top), state) : (pending = "g", state) }
-      for (var m in motions) on[m] = (fn => () => (moveCaret(fn), state))(motions[m])
-      return on
-    }
-    var list = Object.assign({}, focus, {
+    var list = {
+      focusLeft: () => (focusRequested("left"), "list"),
+      focusRight: () => (focusRequested("right"), "list"),
       down: () => (move(1), "list"),
       up: () => (move(-1), "list"),
       left: () => (codeShift(-1), "list"),
@@ -119,127 +80,51 @@ FocusScope {
       bottom: () => (edge(true), "list"),
       enter: () => open(),
       tap: () => open(),
-      tapFile: () => open(true),
       back: () => (collapse(), "list"),
       session: () => (currentRow && sessionRequested(currentRow.sid), "list"),
       filter: () => (importantOnly = !importantOnly, "list")
-    })
-    var files = Object.assign({}, focus, {
+    }
+    var files = {
       down: () => (file = Math.min(currentRow.files.length - 1, file + 1), "files"),
       up: () => (file = Math.max(0, file - 1), "files"),
-      left: () => (codeShift(-1), "files"),
-      right: () => (codeShift(1), "files"),
       enter: () => open(),
       space: () => open(),
-      tapFile: () => open(true),
       back: "list"
-    })
-    for (var ev in list) if (!(ev in files)) files[ev] = (fn => e => (mode = "list", fn(e)))(list[ev])
-    return {
-      initial: "list",
-      states: {
-        list: { on: list },
-        files: { on: files },
-        code: { modal: true, on: Object.assign({}, focus, caret("code"), {
-          back: () => manyFiles ? "files" : "list",
-          visual: () => (startSelection(), "visual"),
-          visualLine: () => (startSelection(), "visualLine"),
-          y: e => e.was === "y" ? (yank(), "code") : (pending = "y", "code")
-        }) },
-        visual: { modal: true, on: Object.assign({}, focus, caret("visual"), {
-          back: "code", visual: "code", visualLine: "visualLine", y: () => (yank(), endSelection(), "code")
-        }) },
-        visualLine: { modal: true, on: Object.assign({}, focus, caret("visualLine"), {
-          back: "code", visual: "visual", visualLine: "code", y: () => (yank(), endSelection(), "code")
-        }) }
-      }
     }
+    for (var ev in list) if (!(ev in files)) files[ev] = (fn => e => (mode = "list", fn(e)))(list[ev])
+    return { initial: "list", states: { list: { on: list }, files: { on: files } } }
   }
   function eventOf(e) {
     var k = e.key, shift = e.modifiers & Qt.ShiftModifier
     if (e.modifiers & Qt.ControlModifier)
-      return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight", [Qt.Key_D]: "halfDown", [Qt.Key_U]: "halfUp" })[k] || ""
+      return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight" })[k] || ""
     return ({ [Qt.Key_J]: "down", [Qt.Key_Down]: "down", [Qt.Key_K]: "up", [Qt.Key_Up]: "up",
               [Qt.Key_H]: "left", [Qt.Key_Left]: "left", [Qt.Key_L]: "right", [Qt.Key_Right]: "right",
               [Qt.Key_Return]: "enter", [Qt.Key_Enter]: "enter", [Qt.Key_Space]: "space", [Qt.Key_Escape]: "back",
-              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_V]: shift ? "visualLine" : "visual", [Qt.Key_Y]: "y",
-              [Qt.Key_S]: "session", [Qt.Key_F]: "filter",
-              [Qt.Key_0]: "lineStart", [Qt.Key_AsciiCircum]: "firstChar", [Qt.Key_Dollar]: "lineEnd",
-              [Qt.Key_W]: "word", [Qt.Key_E]: "wordEnd", [Qt.Key_B]: "wordBack" })[k] || ""
+              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter" })[k] || ""
   }
   Keys.onPressed: event => { if (send({ type: eventOf(event) })) event.accepted = true }
   function send(event) {
-    var state = machine.states[mode], transition = state.on[event.type]
-    event.was = pending
-    pending = ""
+    var transition = machine.states[mode].on[event.type]
     if (typeof transition === "function") mode = transition(event)
     else if (transition) mode = transition
-    return !!transition || !!state.modal
+    return !!transition
   }
-  function startSelection() { visLine = codeLine; visCol = codeCol }
-  function endSelection() { codeLine = Math.min(visLine, codeLine) }
   function collapse() {
     if (!openKey) return
     var k = openKey
     openKey = ""
     cursorKey = k
   }
-  function openLine() { fileRequested(currentRow.sid, currentRow.files[file].path, codeRows()[codeLine].line) }
-  function yank() {
-    var rs = codeRows(), out = []
-    for (var i = 0; i < rs.length; i++) {
-      var r = mode === "code" ? (i === codeLine ? [0, Infinity] : null) : selRange(i)
-      if (r) out.push(rs[i].text.slice(r[0], r[1]))
-    }
-    yanked(out.join("\n"))
-  }
-
-  // Caret motions: (position, rows) → position; moveCaret clamps the result to the text.
-  readonly property var motions: {
-    var len = (rs, l) => rs[l].text.length
-    var cls = (rs, q) => { var c = q.c < len(rs, q.l) ? rs[q.l].text[q.c] : "\n"; return /\s/.test(c) ? 0 : /\w/.test(c) ? 1 : 2 }
-    var next = (rs, q) => q.c < len(rs, q.l) ? { l: q.l, c: q.c + 1 } : q.l < rs.length - 1 ? { l: q.l + 1, c: 0 } : null
-    var prev = (rs, q) => q.c > 0 ? { l: q.l, c: q.c - 1 } : q.l > 0 ? { l: q.l - 1, c: len(rs, q.l - 1) } : null
-    var skipSpace = (rs, q, step) => { while (q && cls(rs, q) === 0) q = step(rs, q); return q }
-    var runEnd = (rs, q, step) => {
-      if (!q) return null
-      for (var n = step(rs, q), c = cls(rs, q); n && cls(rs, n) === c; n = step(rs, n)) q = n
-      return q
-    }
-    var half = () => Math.max(1, Math.floor(root.height / (2 * root.fsMeta * 1.5)))
-    return {
-      left: p => ({ l: p.l, c: p.c - 1 }),  right: p => ({ l: p.l, c: p.c + 1 }),
-      up: p => ({ l: p.l - 1, c: p.c }),    down: p => ({ l: p.l + 1, c: p.c }),
-      halfUp: p => ({ l: p.l - half(), c: p.c }), halfDown: p => ({ l: p.l + half(), c: p.c }),
-      lineStart: p => ({ l: p.l, c: 0 }),   lineEnd: p => ({ l: p.l, c: Infinity }),
-      firstChar: (p, rs) => ({ l: p.l, c: Math.max(0, rs[p.l].text.search(/\S/)) }),
-      top: () => ({ l: 0, c: 0 }),          bottom: (p, rs) => ({ l: rs.length - 1, c: 0 }),
-      word: (p, rs) => {
-        var c0 = cls(rs, p), q = p
-        while (q && c0 && cls(rs, q) === c0) q = next(rs, q)
-        return skipSpace(rs, q, next) || p
-      },
-      wordEnd: (p, rs) => runEnd(rs, skipSpace(rs, next(rs, p), next), next) || p,
-      wordBack: (p, rs) => runEnd(rs, skipSpace(rs, prev(rs, p), prev), prev) || p
-    }
-  }
-  function moveCaret(motion) {
-    var rs = codeRows(), p = motion({ l: codeLine, c: codeCol }, rs)
-    codeLine = Math.max(0, Math.min(rs.length - 1, p.l))
-    codeCol = Math.max(0, Math.min(rs[codeLine].text.length - 1, p.c))
-  }
   signal codeShift(int dir)
-  // A file's diff: hunk-nvim-style signs, syntax colour, sideways scroll. Inline it is a
-  // preview; floating (active) it fills its height, scrolls both ways and shows the caret.
+  // A file's diff: hunk-nvim-style signs, syntax colour, sideways scroll.
   component DiffView: Rectangle {
     id: dv
     property var view
     property var lines: []
     property string language: ""
-    property bool active: false
     property bool shiftable: false
     property int fontSize: 12
-    readonly property int lineCount: lines.length
     readonly property real adv: dvMetrics.advanceWidth("0")
     // Added lines in a hunk that also removed lines are "changed" (yellow sign).
     readonly property var changed: {
@@ -257,30 +142,13 @@ FocusScope {
     radius: 12
     clip: true
     FontMetrics { id: dvMetrics; font.family: Theme.fontFamily; font.pixelSize: dv.fontSize }
-    function reveal() {
-      var it = rep.itemAt(view.codeLine)
-      if (!dv.active || !it) return
-      var y = diffCol.y + it.y, h = it.height
-      if (y < codeFlick.contentY + 2 * h) codeFlick.contentY = Math.max(0, y - 4 * h)
-      else if (y + h > codeFlick.contentY + codeFlick.height - 2 * h) codeFlick.contentY = Math.min(codeFlick.contentHeight - codeFlick.height, y + 5 * h - codeFlick.height)
-      var x = 10 + (6 + view.codeCol) * adv
-      if (x < codeFlick.contentX + 30) codeFlick.contentX = Math.max(0, x - 60)
-      else if (x + 30 > codeFlick.contentX + codeFlick.width) codeFlick.contentX = Math.min(codeFlick.contentWidth - codeFlick.width, x - codeFlick.width + 60)
-    }
-    Connections {
-      target: dv.view
-      enabled: dv.active
-      function onCodeLineChanged() { dv.reveal() }
-      function onCodeColChanged() { dv.reveal() }
-    }
-    onActiveChanged: if (active) Qt.callLater(reveal)
     Flickable {
       id: codeFlick
       anchors.fill: parent
-      flickableDirection: dv.active ? Flickable.HorizontalAndVerticalFlick : Flickable.HorizontalFlick
+      flickableDirection: Flickable.HorizontalFlick
       boundsBehavior: Flickable.StopAtBounds
       contentWidth: Math.max(width, 22 + dv.adv * (6 + dv.lines.reduce((n, l) => Math.max(n, l.replace(/^[+\- ]\d*\s?/, "").replace(/\t/g, "    ").length), 0)))
-      contentHeight: Math.max(height, diffCol.implicitHeight + 12)
+      contentHeight: height
       ScrollFeel { flick: codeFlick }
       NumberAnimation { id: codeGlide; target: codeFlick; property: "contentX"; duration: 120; easing.type: Easing.OutCubic }
       Connections {
@@ -304,24 +172,9 @@ FocusScope {
             required property int index
             readonly property var parts: modelData.match(/^([+\- ])\s*(\d*)\s?(.*)$/) || ["", " ", "", modelData]
             readonly property string sign: parts[1]
-            readonly property bool caretHere: dv.active && dv.view.codeLine === index
-            readonly property var sel: dv.active ? dv.view.selRange(index) : null
             width: diffCol.width
             height: diffLine.implicitHeight + 3
             color: sign === "-" ? Theme.diffRemovedBg : "transparent"
-            Rectangle {
-              visible: !!parent.sel
-              x: diffLine.x + 6 * dv.adv + (parent.sel ? parent.sel[0] : 0) * dv.adv
-              width: parent.sel ? Math.max(dv.adv, (Math.min(parent.sel[1], diffLine.text === "\u22ef" ? 0 : parent.parts[3].replace(/\t/g, "    ").length) - parent.sel[0]) * dv.adv) : 0
-              height: parent.height
-              color: Qt.alpha(Theme.cursor, 0.25)
-            }
-            Rectangle {
-              visible: parent.caretHere
-              x: diffLine.x + (6 + dv.view.codeCol) * dv.adv
-              width: dv.adv; height: parent.height
-              color: Qt.alpha(Theme.cursor, 0.6)
-            }
             Rectangle { width: 2; height: parent.height; visible: parent.sign === "+"; color: dv.changed[parent.index] ? Theme.yellow : Theme.green }
             Text {
               id: diffLine
@@ -649,7 +502,7 @@ FocusScope {
     }
   }
   // Enter on the focused row; returns the state to be in afterwards.
-  function open(byClick) {
+  function open() {
     if (currentRow && currentRow.kind === "fold") {
       var d = Object.assign({}, openDays); d[currentRow.text] = !d[currentRow.text]; openDays = d
       return "list"
@@ -664,10 +517,10 @@ FocusScope {
     var files = currentRow.files
     if (mode === "list" && files.length > 1) { file = Math.max(0, files.findIndex(x => !x.covered)); return "files" }
     var f = mode === "files" ? files[file] : files.find(x => !x.covered) || files[0]
-    if (f.diff.length && !byClick) return enterCode(files.indexOf(f))
     fileRequested(currentRow.sid, f.path, f.line || 1)
     return mode
   }
+
 
   ListView {
     id: list
@@ -715,7 +568,7 @@ FocusScope {
       readonly property bool current: index === root.cursor && root.focused
       readonly property Item restDot: kind === "card" ? cardDot : kind === "fold" ? foldDot : cursorDot
       // Focus expands a row (full diff, longer outcome); scroll again once it has its new height.
-      onHeightChanged: if (current && !root.inCode) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
+      onHeightChanged: if (current) Qt.callLater(() => { if (row.current) root.showRow(row.index) })
       width: list.width
       height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "card" ? cardBox.height + 2 : changeBox.height + 6
 
@@ -1012,7 +865,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: changeHover; cursorShape: Qt.PointingHandCursor }
-        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tapFile" }) } }
+        TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tap" }) } }
 
         Rectangle {
           id: cursorDot
@@ -1113,7 +966,7 @@ FocusScope {
                 readonly property int hidden: fileBlock.diff.length - fileBlock.shown
                 visible: fileBlock.diff.length > 0 && (!root.picking || fileBlock.picked)
                 x: 10
-                text: (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (!root.picking && row.entry.files.length > 1 ? "Enter picks a file" : "Enter steps into the code")
+                text: (hidden > 0 ? "\u2026 " + hidden + " more lines \u00b7 " : "") + (!root.picking && row.entry.files.length > 1 ? "Enter picks a file" : "Enter opens the file \u00b7 q closes it")
                 color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
               }
             }
@@ -1134,72 +987,6 @@ FocusScope {
       text: "No code changes yet"
       color: root.metaColor
       font.family: root.bodyFont; font.pixelSize: root.fsBody
-    }
-  }
-
-  Item {
-    id: codeFloat
-    anchors.fill: parent
-    z: 10
-    visible: root.inCode
-    opacity: visible ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-    readonly property var entry: root.inCode && root.currentRow && root.currentRow.files ? root.currentRow.files[root.file] : null
-    Rectangle {
-      anchors.fill: parent
-      color: Qt.alpha(root.color, 0.75)
-      TapHandler { onTapped: { while (root.inCode) root.send({ type: "back" }) } }
-    }
-    Rectangle {
-      objectName: "codeFloat"
-      readonly property int lineCount: panelDiff.lineCount
-      width: Math.min(parent.width - 96, 1400); height: Math.min(parent.height - 64, panelDiff.implicitHeight + 104)
-      anchors.centerIn: parent
-      scale: root.inCode ? 1 : 0.97
-      Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
-      radius: 16
-      color: Qt.tint(root.color, root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05))
-      border.width: 1; border.color: Qt.alpha(Theme.fg, 0.12)
-      TapHandler {}
-      Item {
-        id: floatHead
-        x: 20; y: 14; width: parent.width - 40; height: 26
-        Icon { id: floatIcon; name: "file-content"; width: 13; height: 13; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
-        Text {
-          anchors { left: floatIcon.right; leftMargin: 8; right: floatCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-          readonly property string rel: codeFloat.entry ? root.relPath(root.currentRow.sid, codeFloat.entry.path) : ""
-          readonly property int cut: rel.lastIndexOf("/") + 1
-          textFormat: Text.StyledText
-          text: '<font color="' + root.metaColor + '">' + root.esc(rel.slice(0, cut)) + '</font>' + root.esc(rel.slice(cut))
-          elide: Text.ElideLeft
-          color: root.contentColor
-          font.family: Theme.fontFamily; font.pixelSize: root.fsMeta; font.weight: 500
-        }
-        Row {
-          id: floatCounts
-          anchors { right: parent.right; verticalCenter: parent.verticalCenter }
-          spacing: 10
-          Text { text: codeFloat.entry ? "+" + codeFloat.entry.add : ""; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
-          Text { text: codeFloat.entry ? "-" + codeFloat.entry.del : ""; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta }
-        }
-      }
-      DiffView {
-        id: panelDiff
-        anchors { left: parent.left; right: parent.right; top: floatHead.bottom; bottom: floatHint.top; margins: 12; topMargin: 10 }
-        view: root
-        active: root.inCode
-        lines: codeFloat.entry ? codeFloat.entry.diff || [] : []
-        language: codeFloat.entry && root.rail ? root.rail.codeLanguage(codeFloat.entry.path) : ""
-        fontSize: root.fsMeta - 1
-        color: "transparent"
-      }
-      Text {
-        id: floatHint
-        x: 20; anchors.bottom: parent.bottom; anchors.bottomMargin: 12
-        text: root.mode === "code" ? "hjkl w b e 0 ^ $ gg G \u00b7 v V y yy \u00b7 Enter opens this line \u00b7 Esc closes"
-          : (root.mode === "visualLine" ? "VISUAL LINE" : "VISUAL") + " \u00b7 y yanks \u00b7 Esc"
-        color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
-      }
     }
   }
 }

@@ -215,7 +215,7 @@ ShellRoot {
     FocusCache { nvimSocket: term.localNvimSocket }
     FocusCache { id: remoteFocus; nvimSocket: win.remoteEditorSocket }
 
-    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus || rail.activeFocus
+    readonly property bool windowFocused: term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus || peek.activeFocus || rail.activeFocus
     NotificationFocus {
       active: win.modeReady && win.windowFocused && !win.railCollapsed
       session: rail.selectedRaw
@@ -237,7 +237,7 @@ ShellRoot {
       // Heal a pane/focus desync first: a QML hot-reload rebuilds the window tree and
       // can leave `pane` claiming the rail while the keyboard truly sits in the
       // terminal — the cross then answers "passed" and Ctrl+l goes dead. Reality wins.
-      if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
+      if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus || peek.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
       else if (rail.activeFocus && win.pane !== "rail") win.pane = "rail"
       if (dir === "right") {
         if (win.railCollapsed) return "passed"
@@ -265,7 +265,7 @@ ShellRoot {
         // Report reality, not the cached property: hot-reloads leave win.pane stale
         // ("rail" while the keyboard truly sits in the terminal), and Super+T's
         // "already on the rail?" check then hopped cockpits straight from the terminal.
-        if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
+        if ((term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus || peek.activeFocus) && win.pane !== "nvim") win.pane = "nvim"
         return win.pane
       }
       function title(): string      { return win.title }   // cockpit-ipc instance routing
@@ -439,7 +439,7 @@ ShellRoot {
                   width: (viewRow.width - (viewTabs.tabs.length - 1) * viewRow.spacing) / viewTabs.tabs.length
                   height: parent.height
                   readonly property bool active: viewTabs.current === view
-                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus)
+                  readonly property bool focusMark: active && (term.activeFocus || dashboard.activeFocus || studioPanel.activeFocus || activityPage.activeFocus || peek.activeFocus)
                   readonly property color ink: active || viewTabHover.hovered ? rail.palette.fg : rail.palette.muted
                   LightKey {
                     anchors.fill: parent
@@ -606,11 +606,22 @@ ShellRoot {
               rail: rail
               sessions: win.agentd.sessions
               onSessionRequested: sid => { win.pane = "rail"; rail.jumpToSession(sid) }
-              onFileRequested: (sid, path, line) => { rail.openSessionFile(sid, path, line); win.pane = "nvim" }
+              onFileRequested: (sid, path, line) => {
+                var local = rail.localSessionFile(sid, path)
+                if (local) peek.show(local, line)
+                else { rail.openSessionFile(sid, path, line); win.pane = "nvim" }
+              }
               onFocusRequested: direction => win.tryFocus(direction)
-              onYanked: text => rail.copyText(text)
+              onVisibleChanged: if (visible) peek.warm = true; else peek.hide()
               caretHeld: glideCaret.holding
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
+            }
+            PeekEditor {
+              id: peek
+              anchors.fill: parent
+              instanceName: rail.instanceName
+              ground: win.ground
+              onClosed: activityPage.forceActiveFocus()
             }
             Canvas {
               id: terminalCorner
@@ -725,7 +736,7 @@ ShellRoot {
           objectName: "focusGlideCaret"
           z: 100
           visible: caretGlide.running
-          readonly property string owner: term.activeFocus ? "nvim" : dashboard.activeFocus ? "dashboard" : activityPage.activeFocus ? "activity"
+          readonly property string owner: term.activeFocus ? "nvim" : dashboard.activeFocus ? "dashboard" : activityPage.activeFocus || peek.activeFocus ? "activity"
             : rail.composerField.activeFocus ? "composer" : rail.activeFocus ? "rail" : ""
           property string settled: ""
           property string settledKey: ""

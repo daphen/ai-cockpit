@@ -1423,8 +1423,7 @@ Item {
     if (!keepFocus) focusNvim()
   }
 
-  function openInNvim(path, baseCwd, line, column) {
-    if (!path || !String(path).length || !nvimSock.length) return
+  function _resolveFile(path, baseCwd) {
     var p = String(path), alternate = ""
     if (p.indexOf("~/") === 0) p = Quickshell.env("HOME") + p.substring(1)
     if (p.charAt(0) !== "/") {
@@ -1435,9 +1434,19 @@ Item {
         p = Quickshell.env("HOME") + "/personal/notes/storage/" + p
       } else p = repoPath
     }
-    var vault = Quickshell.env("HOME") + "/personal/notes/storage"
-    var inVault = p.indexOf(vault + "/") === 0
-    var socket = inVault ? localNvimSock : _editorSocket(p)
+    var inVault = p.indexOf(Quickshell.env("HOME") + "/personal/notes/storage/") === 0
+    return { path: p, alternate: alternate, inVault: inVault, socket: inVault ? localNvimSock : _editorSocket(p) }
+  }
+  // A session's file as this machine sees it, or null when it lives on a VM.
+  function localSessionFile(sid, path) {
+    if (!path || !String(path).length) return null
+    var f = _resolveFile(path, _sessionCwdOf(sid))
+    return f.socket === localNvimSock ? f : null
+  }
+  function openInNvim(path, baseCwd, line, column) {
+    if (!path || !String(path).length || !nvimSock.length) return
+    var f = _resolveFile(path, baseCwd), p = f.path, alternate = f.alternate, inVault = f.inVault
+    var socket = f.socket
     if (!socket) { feedbackPill.show("VM editor is connecting"); return }
     editorRequested(socket)
     _requestTab(inVault ? "vault" : "code")
