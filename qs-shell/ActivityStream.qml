@@ -62,13 +62,11 @@ FocusScope {
   Timer { id: jevAgain; interval: 800; onTriggered: root.jevNext() }
   onChangesChanged: jevAgain.restart()
 
-  // Keyboard modes, each layered on the one before; Esc steps back one layer.
-  // list: j/k move between rows · files: j/k pick a file of the focused change
-  // code: a vim cursor in that file's diff · visual / visualLine: a selection in it
   property string mode: "list"
   property int file: 0
   readonly property bool inCode: mode === "code" || mode === "visual" || mode === "visualLine"
-  readonly property bool picking: mode !== "list" && !!currentRow && currentRow.kind === "change" && currentRow.files.length > 1
+  readonly property bool manyFiles: !!currentRow && currentRow.kind === "change" && currentRow.files.length > 1
+  readonly property bool picking: mode !== "list" && manyFiles
   property int codeLine: 0
   property int codeCol: 0
   property int visLine: 0
@@ -98,8 +96,30 @@ FocusScope {
     if (mode === "visualLine") return [0, Infinity]
     return [i === a.l ? a.c : 0, i === b.l ? b.c + 1 : Infinity]
   }
-  // The keyboard is a state machine: eventOf names a key, and the current state's
-  // table maps that event to the next state, or to an action that may return one.
+  // Keyboard state machine.
+  //   list               j/k between cards; Enter unfolds a card or steps into a change
+  //   files              j/k pick one file of a change that touched several
+  //   code               a vim caret in that file's diff
+  //   visual, visualLine a selection in it; y copies it
+  // A state maps each event to a next state (a string), an action, or "chord" (wait for
+  // gg / yy). Code states also take every caret motion; files drops to list for the rest.
+  readonly property var machine: ({
+    list: {
+      down: () => move(1), up: () => move(-1), left: () => codeShift(-1), right: () => codeShift(1),
+      g: () => edge(false), bottom: () => edge(true), enter: () => open(), back: () => collapse(),
+      session: () => { if (currentRow) sessionRequested(currentRow.sid) },
+      filter: () => { importantOnly = !importantOnly }
+    },
+    files: {
+      back: "list", enter: () => open(), space: () => open(),
+      down: () => { file = Math.min(currentRow.files.length - 1, file + 1) }, up: () => { file = Math.max(0, file - 1) },
+      left: () => codeShift(-1), right: () => codeShift(1)
+    },
+    code:       { back: "files", visual: "visual", visualLine: "visualLine", g: "chord", y: "chord", yankLine: () => yank(), enter: () => openLine() },
+    visual:     { back: "code", visual: "code", visualLine: "visualLine", g: "chord", y: () => yankSelection(), enter: () => openLine() },
+    visualLine: { back: "code", visual: "visual", visualLine: "code", g: "chord", y: () => yankSelection(), enter: () => openLine() }
+  })
+  readonly property var chords: ({ gg: "top", yy: "yankLine" })
   function eventOf(e) {
     var k = e.key, shift = e.modifiers & Qt.ShiftModifier
     if (e.modifiers & Qt.ControlModifier)
@@ -107,102 +127,79 @@ FocusScope {
     return ({ [Qt.Key_J]: "down", [Qt.Key_Down]: "down", [Qt.Key_K]: "up", [Qt.Key_Up]: "up",
               [Qt.Key_H]: "left", [Qt.Key_Left]: "left", [Qt.Key_L]: "right", [Qt.Key_Right]: "right",
               [Qt.Key_Return]: "enter", [Qt.Key_Enter]: "enter", [Qt.Key_Space]: "space", [Qt.Key_Escape]: "back",
-              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter",
-              [Qt.Key_V]: shift ? "visualLine" : "visual", [Qt.Key_Y]: "yank",
+              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_V]: shift ? "visualLine" : "visual", [Qt.Key_Y]: "y",
+              [Qt.Key_S]: "session", [Qt.Key_F]: "filter",
               [Qt.Key_0]: "lineStart", [Qt.Key_AsciiCircum]: "firstChar", [Qt.Key_Dollar]: "lineEnd",
               [Qt.Key_W]: "word", [Qt.Key_E]: "wordEnd", [Qt.Key_B]: "wordBack" })[k] || ""
   }
-  readonly property var machine: {
-    var focus = { focusLeft: () => focusRequested("left"), focusRight: () => focusRequested("right") }
-    var caretMoves = {}
-    for (var m of ["down", "up", "left", "right", "lineStart", "firstChar", "lineEnd", "word", "wordEnd", "wordBack", "halfDown", "halfUp", "bottom"])
-      caretMoves[m] = (name => () => caret(name))(m)
-    var inCode = Object.assign({}, focus, caretMoves, {
-      enter: () => fileRequested(currentRow.sid, currentRow.files[file].path, codeRows()[codeLine].line),
-      g: (ev, was) => { if (was === "g") caret("top"); else pending = "g" },
-      other: () => true
-    })
-    return {
-      list: Object.assign({}, focus, {
-        down: () => move(1), up: () => move(-1), left: () => codeShift(-1), right: () => codeShift(1),
-        g: () => edge(false), bottom: () => edge(true), enter: () => open(),
-        session: () => { if (currentRow) sessionRequested(currentRow.sid) },
-        filter: () => { importantOnly = !importantOnly },
-        back: () => { if (!openKey) return false; var k = openKey; openKey = ""; cursorKey = k }
-      }),
-      files: {
-        back: "list", enter: () => open(), space: () => open(),
-        down: () => { file = Math.min(currentRow.files.length - 1, file + 1) }, up: () => { file = Math.max(0, file - 1) },
-        left: () => codeShift(-1), right: () => codeShift(1),
-        other: ev => { go("list"); return send(ev) }
-      },
-      code: Object.assign({}, inCode, {
-        back: () => picking ? "files" : "list", visual: "visual", visualLine: "visualLine",
-        yank: (ev, was) => { if (was === "y") yank(); else pending = "y" }
-      }),
-      visual: Object.assign({}, inCode, { back: "code", visual: "code", visualLine: "visualLine", yank: () => yank() }),
-      visualLine: Object.assign({}, inCode, { back: "code", visual: "visual", visualLine: "code", yank: () => yank() })
-    }
-  }
+  Keys.onPressed: event => { if (send(eventOf(event))) event.accepted = true }
   function send(ev) {
-    var table = machine[mode], step = ev in table ? table[ev] : table.other, was = pending
-    if (step === undefined) return false
-    pending = ""
-    var next = typeof step === "function" ? step(ev, was) : step
-    if (typeof next === "string") go(next)
-    return next !== false
+    if (pending) { ev = chords[pending + ev] || ev; pending = "" }
+    if (ev === "focusLeft" || ev === "focusRight") { focusRequested(ev === "focusLeft" ? "left" : "right"); return true }
+    var step = machine[mode][ev]
+    if (step === undefined && inCode && motions[ev]) step = () => moveCaret(motions[ev])
+    if (step === "chord") { pending = ev; return true }
+    if (typeof step === "string") { go(step); return true }
+    if (step) return step() !== false
+    if (mode === "files") { go("list"); return send(ev) }
+    return inCode
   }
   function go(next) {
+    if (next === "files" && !manyFiles) next = "list"
     if (mode === "code" && (next === "visual" || next === "visualLine")) { visLine = codeLine; visCol = codeCol }
     pending = ""
     mode = next
   }
-  Keys.onPressed: event => { if (send(eventOf(event))) event.accepted = true }
+  function collapse() {
+    if (!openKey) return false
+    var k = openKey
+    openKey = ""
+    cursorKey = k
+  }
+  function openLine() { fileRequested(currentRow.sid, currentRow.files[file].path, codeRows()[codeLine].line) }
   function yank() {
-    var rs = codeRows(), out = [], visual = mode !== "code"
+    var rs = codeRows(), out = []
     for (var i = 0; i < rs.length; i++) {
-      var r = visual ? selRange(i) : i === codeLine ? [0, Infinity] : null
+      var r = mode === "code" ? (i === codeLine ? [0, Infinity] : null) : selRange(i)
       if (r) out.push(rs[i].text.slice(r[0], r[1]))
     }
     yanked(out.join("\n"))
-    if (!visual) return
-    codeLine = Math.min(visLine, codeLine)
-    return "code"
   }
-  function caret(name) {
-    var rs = codeRows(), p = { l: codeLine, c: codeCol }
-    var len = l => rs[l].text.length
-    var ch = q => q.c < len(q.l) ? rs[q.l].text[q.c] : "\n"
-    var cls = c => /\s/.test(c) ? 0 : /\w/.test(c) ? 1 : 2
-    var next = q => q.c < len(q.l) ? { l: q.l, c: q.c + 1 } : q.l < rs.length - 1 ? { l: q.l + 1, c: 0 } : null
-    var prev = q => q.c > 0 ? { l: q.l, c: q.c - 1 } : q.l > 0 ? { l: q.l - 1, c: len(q.l - 1) } : null
-    var half = Math.max(1, Math.floor(height / (2 * fsMeta * 1.5))), q
-    if (name === "halfDown" || name === "halfUp") p.l += (name === "halfDown" ? 1 : -1) * half
-    else if (name === "left") p.c--
-    else if (name === "right") p.c++
-    else if (name === "down") p.l++
-    else if (name === "up") p.l--
-    else if (name === "lineStart") p.c = 0
-    else if (name === "firstChar") p.c = Math.max(0, rs[p.l].text.search(/\S/))
-    else if (name === "lineEnd") p.c = Infinity
-    else if (name === "top") p = { l: 0, c: 0 }
-    else if (name === "bottom") p = { l: rs.length - 1, c: 0 }
-    else if (name === "word") {
-      var c0 = cls(ch(p)); q = p
-      while (q && c0 && cls(ch(q)) === c0) q = next(q)
-      while (q && cls(ch(q)) === 0) q = next(q)
-      if (q) p = q
-    } else if (name === "wordEnd") {
-      q = next(p)
-      while (q && cls(ch(q)) === 0) q = next(q)
-      if (q) { var c1 = cls(ch(q)); for (var n = next(q); n && cls(ch(n)) === c1; n = next(n)) q = n; p = q }
-    } else if (name === "wordBack") {
-      q = prev(p)
-      while (q && cls(ch(q)) === 0) q = prev(q)
-      if (q) { var c2 = cls(ch(q)); for (var n2 = prev(q); n2 && cls(ch(n2)) === c2; n2 = prev(n2)) q = n2; p = q }
+  function yankSelection() { yank(); codeLine = Math.min(visLine, codeLine); go("code") }
+
+  // Caret motions: (position, rows) → position; moveCaret clamps the result to the text.
+  readonly property var motions: {
+    var len = (rs, l) => rs[l].text.length
+    var cls = (rs, q) => { var c = q.c < len(rs, q.l) ? rs[q.l].text[q.c] : "\n"; return /\s/.test(c) ? 0 : /\w/.test(c) ? 1 : 2 }
+    var next = (rs, q) => q.c < len(rs, q.l) ? { l: q.l, c: q.c + 1 } : q.l < rs.length - 1 ? { l: q.l + 1, c: 0 } : null
+    var prev = (rs, q) => q.c > 0 ? { l: q.l, c: q.c - 1 } : q.l > 0 ? { l: q.l - 1, c: len(rs, q.l - 1) } : null
+    var skipSpace = (rs, q, step) => { while (q && cls(rs, q) === 0) q = step(rs, q); return q }
+    var runEnd = (rs, q, step) => {
+      if (!q) return null
+      for (var n = step(rs, q), c = cls(rs, q); n && cls(rs, n) === c; n = step(rs, n)) q = n
+      return q
     }
+    var half = () => Math.max(1, Math.floor(root.height / (2 * root.fsMeta * 1.5)))
+    return {
+      left: p => ({ l: p.l, c: p.c - 1 }),  right: p => ({ l: p.l, c: p.c + 1 }),
+      up: p => ({ l: p.l - 1, c: p.c }),    down: p => ({ l: p.l + 1, c: p.c }),
+      halfUp: p => ({ l: p.l - half(), c: p.c }), halfDown: p => ({ l: p.l + half(), c: p.c }),
+      lineStart: p => ({ l: p.l, c: 0 }),   lineEnd: p => ({ l: p.l, c: Infinity }),
+      firstChar: (p, rs) => ({ l: p.l, c: Math.max(0, rs[p.l].text.search(/\S/)) }),
+      top: () => ({ l: 0, c: 0 }),          bottom: (p, rs) => ({ l: rs.length - 1, c: 0 }),
+      word: (p, rs) => {
+        var c0 = cls(rs, p), q = p
+        while (q && c0 && cls(rs, q) === c0) q = next(rs, q)
+        return skipSpace(rs, q, next) || p
+      },
+      wordEnd: (p, rs) => runEnd(rs, skipSpace(rs, next(rs, p), next), next) || p,
+      wordBack: (p, rs) => runEnd(rs, skipSpace(rs, prev(rs, p), prev), prev) || p
+    }
+  }
+  function moveCaret(motion) {
+    var rs = codeRows(), p = motion({ l: codeLine, c: codeCol }, rs)
     codeLine = Math.max(0, Math.min(rs.length - 1, p.l))
-    codeCol = Math.max(0, Math.min(len(codeLine) - 1, p.c))
+    codeCol = Math.max(0, Math.min(rs[codeLine].text.length - 1, p.c))
   }
   signal codeShift(int dir)
   FontMetrics { id: codeMetrics; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
