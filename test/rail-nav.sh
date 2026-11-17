@@ -74,7 +74,7 @@ cleanup
 rm -rf "$T"; mkdir -p "$T/qs-shell"
 # Symlink the REAL qml: a copy would silently test a snapshot. A separate config dir is
 # what keeps `qs ipc` unambiguous while the user's own Cockpit keeps running.
-for f in "$B"/qs-shell/*.qml; do ln -s "$f" "$T/qs-shell/$(basename "$f")"; done
+for f in "$B"/qs-shell/*.qml "$B"/qs-shell/*.js; do ln -s "$f" "$T/qs-shell/$(basename "$f")"; done
 
 say "start fake agentd"
 setsid nohup python3 "$B/test/fake-agentd.py" "$SOCK" > "$T/fake.log" 2>&1 < /dev/null &

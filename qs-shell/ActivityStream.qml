@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls as Controls
 import Quickshell.Io
 import QsLib
 
@@ -542,9 +541,7 @@ FocusScope {
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
-        Controls.ToolTip.visible: cardHover.hovered && cardBox.asked !== ""
-        Controls.ToolTip.delay: 500
-        Controls.ToolTip.text: cardBox.asked
+        RestTip { parent: root; handler: cardHover; text: cardBox.asked }
         TapHandler { onTapped: { root.select(row.index); root.forceActiveFocus(); root.send({ type: "tap" }) } }
         Rectangle {
           id: cardDot

@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
 import QsLib
@@ -158,9 +157,7 @@ Rectangle {
       maxWidth: Math.max(0, Math.min(chin.width / 2, right.x - left.x - leftMeta.implicitWidth - 14))
       elideMode: Text.ElideMiddle
       HoverHandler { id: fileHover }
-      Controls.ToolTip.visible: fileHover.hovered
-      Controls.ToolTip.delay: 500
-      Controls.ToolTip.text: String(chin.st.path || "")
+      RestTip { parent: chin; handler: fileHover; text: String(chin.st.path || ""); above: true }
     }
     Row {
       id: leftMeta

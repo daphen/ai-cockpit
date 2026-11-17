@@ -4,6 +4,7 @@ import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import QsLib
+import "PointerRest.js" as PointerRest
 import Heidr
 
 // Cockpit: nvim (librio terminal) left, the agent rail right.
@@ -395,6 +396,7 @@ ShellRoot {
       Item {
         id: paneLayout
         anchors.fill: parent
+        HoverHandler { onPointChanged: PointerRest.report(point.scenePosition) }
         readonly property real splitX: Math.round(width * 0.6 * win.termDpr) / win.termDpr
         readonly property real terminalCornerRadius: 8
 
