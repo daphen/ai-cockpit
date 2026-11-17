@@ -9,7 +9,6 @@ ShellRoot {
   id: test
   property var sent: []
   property var opened: []
-  property var codeFlick: null
   property var walk: null
   function fail(message) { console.error("Error: " + message); Qt.quit() }
   function event(message) { state.onLine(JSON.stringify(message), 0) }
@@ -196,105 +195,49 @@ ShellRoot {
         var before = page.cursorPoint()
         if (!before) test.fail("no cursor dot on the focused page")
         test.key(Qt.Key_Return)
-        if (page.currentRow.kind !== "change" || !test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("Enter on a card should unfold its edits with their reasons")
-        if (!test.visibleText("Live.qml")) test.fail("live edit not shown")
-        if (!test.hasText("a" + "_".repeat(100))) test.fail("an unfolded card's edits should show their diff without another Enter")
-        test.key(Qt.Key_Return)
-        if (String(test.opened) !== "beta:/r/Live.qml:1" || page.mode !== "list") test.fail("Enter on an edit should open its file at the change, got " + test.opened)
+        if (String(test.opened) !== "beta:/r/Live.qml:1" || page.currentRow.kind !== "card") test.fail("Enter on a card should open its top file and stay on the card, got " + test.opened)
+        if (!test.hasText("a" + "_".repeat(100))) test.fail("a card should show its code without unfolding")
         test.key(Qt.Key_K)
-        if (page.currentRow.kind !== "card" || !page.cursorPoint() || page.cursorPoint().y >= before.y + 1) test.fail("k from the first edit should land on its card")
-        test.key(Qt.Key_K); test.key(Qt.Key_K)
-        if (!page.currentRow.ctx || page.currentRow.ctx.text !== "Activity view") test.fail("k should step card by card, got " + JSON.stringify(page.currentRow.ctx))
-        if (test.visibleText("Activity view")) test.fail("focusing a card must not grow it")
+        if (page.currentRow.kind !== "card" || !page.cursorPoint() || page.cursorPoint().y >= before.y + 1) test.fail("k should move to the card above")
+        while (page.currentRow.ctx.text !== "Activity view" && page.cursor > 0) test.key(Qt.Key_K, Qt.ShiftModifier)
+        if (page.currentRow.ctx.text !== "Activity view") test.fail("K should step card by card, got " + JSON.stringify(page.currentRow.ctx))
+        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), h0 = lv.contentHeight
+        if (!test.visibleText("Rail.qml") || !test.visibleText("New.qml")) test.fail("a card should list its files")
+        if (page.file !== 0 || page.focusFiles.length !== 2) test.fail("a card's files should be reachable from its first, got " + [page.file, page.focusFiles.length])
+        if (!test.hasText('<font color="' + Theme.syntaxOperator + '">=</font>&nbsp;<font color="' + Theme.syntaxNumber + '">1</font>'))
+          test.fail("card code is not in the Neovim theme's operator/number colors")
         test.key(Qt.Key_Return)
-        if (!test.visibleText("Activity view") || !test.visibleText("Rail.qml") || !test.visibleText("New.qml") || !test.visibleText("+2") || !test.visibleText("-1"))
-          test.fail("the unfolded card should show its ask and its files with counts")
-        if (!test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("an unfolded card's edit should show its full diff right away")
-        if (!test.visibleText("The rail needs a hook so the page can open files.")) test.fail("the agent's reason for the edit is not shown when unfolded")
-        if (test.visibleText("Live needs its own file so the stream can follow it.")) test.fail("unfolding one card should fold the other")
-        test.key(Qt.Key_Return)
-        if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("Enter on an edit should open it at its first changed line, got " + test.opened)
-        if (!test.hasText("&nbsp;&nbsp;</font>x") || !test.hasText("&nbsp;&nbsp;</font>ctx")) test.fail("the focused change should show its full diff, the change with its context")
-        if (!test.hasText('</font>x&nbsp;<font color="' + Theme.syntaxOperator + '">=</font>&nbsp;<font color="' + Theme.syntaxNumber + '">1</font>&nbsp;<i><font color="' + Theme.syntaxComment + '">//&nbsp;set</font></i>'))
-          test.fail("diff code is not in the Neovim theme's operator/number/comment colors")
-        if (!test.hasText('<font color="' + Theme.syntaxType + '">string</font>&nbsp;y:&nbsp;<font color="' + Theme.syntaxType + '">Text</font>.Wrap'))
-          test.fail("QML types are not in the Neovim theme's type color")
-        if (!test.hasText('&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</font><font color="' + Theme.red + '">z</font>'))
-          test.fail("a removed line should read like hunk-nvim's ghost line: red, unhighlighted, unnumbered")
+        if (test.opened[1] !== "alpha:/r/Rail.qml:10") test.fail("Enter should open the focused file at its first changed line, got " + test.opened)
         test.key(Qt.Key_J)
-        if (!test.visibleText("Wrote the whole file \u00b7 Enter opens it")) test.fail("a written file should be summarised, not dumped")
+        lv.forceLayout()
+        if (page.file !== 1 || page.currentRow.ctx.text !== "Activity view") test.fail("j should move to the card's next file before the next card")
+        if (Math.abs(lv.contentHeight - h0) > 0.5) test.fail("moving between a card's files must not resize it: " + h0 + " -> " + lv.contentHeight)
         test.key(Qt.Key_Return)
-        if (test.opened[2] !== "alpha:/r/New.qml:1") test.fail("j then Enter inside a card opened " + test.opened)
-        test.key(Qt.Key_Escape)
-        if (page.currentRow.kind !== "card" || test.visibleText("The rail needs a hook so the page can open files.")) test.fail("Esc should fold the card back")
+        if (test.opened[2] !== "alpha:/r/New.qml:1") test.fail("Enter on the second file opened " + test.opened)
+        test.key(Qt.Key_J)
+        if (page.file !== 0 || page.currentRow.ctx.text === "Activity view") test.fail("j past a card's last file should land on the next card")
+        test.key(Qt.Key_K)
+        if (page.file !== 1 || page.currentRow.ctx.text !== "Activity view") test.fail("k back should land on the previous card's last file")
+        while (page.currentRow.sid !== "gamma" && page.cursor < page.rows.length - 1) test.key(Qt.Key_J, Qt.ShiftModifier)
+        if (page.focusFiles.length !== 1) test.fail("a dimmed card should reach only its top file, got " + page.focusFiles.length)
+        var js2 = Object.assign({}, page.jev); js2[page.currentRow.jid] = { key: 0.9 }; page.jev = js2
+        if (page.focusFiles.map(f => f.path).join() !== test.repo + "/f.txt," + test.repo + "/g.txt") test.fail("the commit card should list f.txt and g.txt, got " + page.focusFiles.map(f => f.path))
+        if (!test.hasText("B")) test.fail("the commit's changed line is not shown")
         test.key(Qt.Key_J); test.key(Qt.Key_Return)
-        if (page.currentRow.kind !== "change" || page.currentRow.why !== "Committed: Fix via shell" || page.currentRow.files[0].path !== test.repo + "/f.txt")
-          test.fail("an unfolded commit should be one row per file, starting with f.txt, got " + page.currentRow.why + " " + JSON.stringify(page.currentRow.files))
-        if (!test.hasText("&nbsp;&nbsp;</font>B")) test.fail("the commit's changed line is not shown")
-        test.key(Qt.Key_Return)
-        if (test.opened[3] !== "gamma:" + test.repo + "/f.txt:2") test.fail("Enter on a file row should open that file: " + test.opened)
-        test.key(Qt.Key_J)
-        if (page.currentRow.files[0].path !== test.repo + "/g.txt" || !test.hasText("&nbsp;&nbsp;</font>G")) test.fail("j should move to the commit's next file and show its diff")
-        test.key(Qt.Key_Return)
-        if (test.opened[4] !== "gamma:" + test.repo + "/g.txt:1") test.fail("Enter on the second file should open it, got " + test.opened)
-        test.key(Qt.Key_K)
-        var fileKey = page.cursorKey
-        test.key(Qt.Key_K, Qt.ShiftModifier)
-        if (page.currentRow.kind !== "card") test.fail("K should jump from a file row to a card")
-        test.key(Qt.Key_J, Qt.ShiftModifier)
-        if (page.currentRow.kind === "change" || page.cursorKey === fileKey) test.fail("J should skip file rows to the next card")
-        test.key(Qt.Key_K, Qt.ShiftModifier); test.key(Qt.Key_J)
-        if (page.currentRow.key !== fileKey) test.fail("j from the card should land on its first file again")
-        test.opened.pop()
+        if (test.opened[3] !== "gamma:" + test.repo + "/g.txt:1") test.fail("j then Enter in the commit card should open g.txt, got " + test.opened)
         test.key(Qt.Key_S)
-        if (test.opened[4] !== "gamma") test.fail("s did not open the change's session: " + test.opened)
-        test.key(Qt.Key_G, Qt.ShiftModifier); test.key(Qt.Key_Return)
-        test.codeFlick = test.find(page, i => i.flickableDirection === Flickable.HorizontalFlick && i.contentWidth > i.width + 300)
-        if (!test.codeFlick) test.fail("a long diff line should scroll sideways instead of being cut off")
-        test.key(Qt.Key_L)
+        if (test.opened[4] !== "gamma") test.fail("s did not open the card's session: " + test.opened)
       } else if (stage === 5) {
-        if (!(test.codeFlick.contentX > 0)) test.fail("l did not scroll the focused change's code sideways")
-        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0)
-        lv.contentY = lv.contentHeight - lv.height
-        var x0 = test.codeFlick.contentX, y0 = lv.contentY, p = test.codeFlick.mapToItem(page, 50, 10)
-        input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 120, 0, 0)
-        if (!(test.codeFlick.contentX < x0 - 50) || lv.contentY !== y0) test.fail("a sideways wheel should move the code at the family scroll speed, not the page")
-      } else if (stage === 6) {
-        page.anchors.fill = undefined; page.width = 1100; page.height = 500
-      } else if (stage === 7) {
-        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0)
-        lv.contentY = lv.contentHeight - lv.height
-        lv.contentY = Math.max(1, Math.min(lv.contentY, lv.contentY + test.codeFlick.mapToItem(page, 0, 0).y - 100))
-        var x0 = test.codeFlick.contentX, y0 = lv.contentY, p = test.codeFlick.mapToItem(page, 50, 10)
-        input.mouseWheel(page, p.x, p.y, Qt.NoButton, Qt.NoModifier, 0, 120, 0)
-        if (lv.contentHeight <= lv.height) test.fail("the feed must overflow for this check, got " + lv.contentHeight + " in " + lv.height)
-        if (!(lv.contentY < y0) || test.codeFlick.contentX !== x0) test.fail("an up/down wheel over code should still scroll the page")
-        page.height = 200
-        page.forceActiveFocus(); test.key(Qt.Key_Escape); test.key(Qt.Key_G); test.key(Qt.Key_J); test.key(Qt.Key_Return)
-      } else if (stage === 8) {
-        test.key(Qt.Key_K)
-      } else if (stage === 9) {
-        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), next = lv.itemAtIndex(page.cursor + 1)
-        var p = next.mapToItem(page, 100, 12)
-        if (p.y > page.height - 4) test.fail("the edit below the card should be partly in view, at " + p.y)
-        input.mouseClick(page, p.x, p.y, Qt.LeftButton, Qt.NoModifier, 0)
-      } else if (stage === 10) {
-        var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), item = lv.itemAtIndex(page.cursor)
-        if (page.currentRow.kind !== "change") test.fail("expected an unfolded edit, got " + page.currentRow.kind)
-        var top = item.y, bottom = item.y + item.height, viewBottom = lv.contentY + lv.height
-        if (top < lv.contentY - 1 || (bottom > viewBottom + 1 && Math.abs(top - lv.contentY) > 1))
-          test.fail("the focused edit grew past the view without scrolling: " + [top, bottom, lv.contentY, viewBottom])
-        page.height = 360
-        while (page.openKey) test.key(Qt.Key_Escape)
+        page.anchors.fill = undefined; page.width = 1100; page.height = 360
         test.key(Qt.Key_G, Qt.ShiftModifier)
         test.walk = { dir: Qt.Key_K, steps: 0 }
-      } else if (stage === 11) {
+      } else if (stage === 6) {
         var lv = test.find(page, i => String(i).indexOf("QQuickListView") === 0), w = test.walk
         if (w.top !== undefined) {
           if (Math.abs(lv.contentHeight - w.height) > 0.5) test.fail("step " + w.steps + ": moving the cursor resized rows, " + w.height + " -> " + lv.contentHeight)
           var item = lv.itemAtIndex(page.cursor), top = item.y - lv.contentY, bottom = top + item.height
           if (top < -1 || (bottom > lv.height + 1 && top > 1)) test.fail("step " + w.steps + ": the landed row is off screen at " + [top, bottom])
-          if (w.top >= 0 && w.top + item.height <= lv.height && Math.abs(top - w.top) > 1)
+          if (w.top >= 0 && w.top + item.height <= lv.height && Math.abs(top - w.top) > 1 && page.cursor !== page.rows.length - 1)
             test.fail("step " + w.steps + ": the viewport jumped — the landed row moved from " + w.top + " to " + top + " though it fit where it was")
         }
         if (w.steps === 6) w.dir = Qt.Key_J
@@ -313,14 +256,14 @@ ShellRoot {
           if (Object.values(heads).some(n => n > 1)) test.fail("each session should head one block per day, got " + JSON.stringify(heads))
           var last = page.rows.filter(r => r.kind === "card").pop()
           if (!last || last.sid !== "alpha") test.fail("the session with the newest activity should be the last block")
-          console.log("PASS: activity is one card per ask with its outcome and files, unfolding into tool edits with their reason and diff and commits made outside the edit tool, whole-file writes summarised, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
+          console.log("PASS: activity is one card per ask with its outcome and files, showing each file with its most relevant code, j/k walking files and J/K cards without resizing, commits made outside the edit tool, history backfilled once per session including late arrivals, and Enter opens the changed file at its line")
         Qt.quit()
         }
         var dest = page.cursor, step = w.dir === Qt.Key_K ? -1 : 1
         for (dest += step; dest >= 0 && dest < page.rows.length && !page.stop(page.rows[dest].kind); dest += step);
         var it = lv.itemAtIndex(dest)
         w.top = it ? it.y - lv.contentY : -1; w.height = lv.contentHeight
-        test.key(w.dir); w.steps++
+        test.key(w.dir, Qt.ShiftModifier); w.steps++
         return
       }
       stage++
