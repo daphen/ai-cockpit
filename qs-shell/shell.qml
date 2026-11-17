@@ -612,6 +612,7 @@ ShellRoot {
                 else { rail.openSessionFile(sid, path, line); win.pane = "nvim" }
               }
               onFocusRequested: direction => win.tryFocus(direction)
+              onComposeRequested: { win.pane = "rail"; Qt.callLater(rail.enterInsert) }
               onVisibleChanged: if (visible) peek.warm = true; else peek.hide()
               caretHeld: glideCaret.holding
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"

@@ -15,6 +15,7 @@ FocusScope {
   signal sessionRequested(string sid)
   signal fileRequested(string sid, string path, int line)
   signal focusRequested(string direction)
+  signal composeRequested()
 
   function cursorPoint(key) {
     var i = key ? rows.findIndex(r => r.key === key) : cursor
@@ -82,6 +83,7 @@ FocusScope {
           space: () => open(),
           tap: () => open(),
           session: () => (currentRow && sessionRequested(currentRow.sid), "list"),
+          compose: () => (composeRequested(), "list"),
           filter: () => (importantOnly = !importantOnly, "list")
         }
       }
@@ -93,7 +95,7 @@ FocusScope {
       return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight" })[k] || ""
     return ({ [Qt.Key_J]: shift ? "nextCard" : "down", [Qt.Key_Down]: "down", [Qt.Key_K]: shift ? "prevCard" : "up", [Qt.Key_Up]: "up",
               [Qt.Key_Return]: "enter", [Qt.Key_Enter]: "enter", [Qt.Key_Space]: "space",
-              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter" })[k] || ""
+              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter", [Qt.Key_I]: "compose" })[k] || ""
   }
   Keys.onPressed: event => { if (send({ type: eventOf(event) })) event.accepted = true }
   function send(event) {

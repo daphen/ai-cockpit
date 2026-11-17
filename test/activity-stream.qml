@@ -225,6 +225,9 @@ ShellRoot {
         if (test.visibleText("Fix via shell") && page.rows.filter(r => r.kind === "file" && r.sid === "gamma" && r.why).length > 1) test.fail("a shared commit message should not repeat on every change")
         test.key(Qt.Key_J); test.key(Qt.Key_J); test.key(Qt.Key_Return)
         if (test.opened[3] !== "gamma:" + test.repo + "/g.txt:1") test.fail("j j then Enter should open g.txt, got " + test.opened)
+        var composed = 0; page.composeRequested.connect(() => composed++)
+        test.key(Qt.Key_I)
+        if (composed !== 1) test.fail("i should ask to focus the rail's input")
         test.key(Qt.Key_S)
         if (test.opened[4] !== "gamma") test.fail("s did not open the card's session: " + test.opened)
       } else if (stage === 5) {
