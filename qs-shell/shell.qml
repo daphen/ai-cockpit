@@ -741,6 +741,7 @@ ShellRoot {
           property bool wasEmpty: false
           property bool pending: false   // hides arriving cursors between the move and the glide's first frame
           readonly property bool holding: caretGlide.running || pending
+          property int span: 180
           property string landing: "caret"   // caret: stretch into a line · rest: stay a dot · fade
           readonly property int dot: 8
           function leftSide(who) { return who === "nvim" || who === "dashboard" || who === "activity" }
@@ -794,6 +795,7 @@ ShellRoot {
               fromFade.from = from.landing === "caret" ? 1 : 0
               dotIn.from = dotInScale.from = from.landing === "rest" ? 1 : 0.25
               landing = to.landing
+              span = leftSide(owner) !== leftSide(settled) ? 110 : 180
               const dx = to.x - from.x, dy = to.y - from.y
               glideTail.width = Math.min(140, Math.hypot(dx, dy) * 0.2)
               glideTail.rotation = Math.atan2(dy, dx) * 180 / Math.PI
@@ -833,8 +835,8 @@ ShellRoot {
           // animators (a same-value animator stands in for a pause) so nothing else can stall it.
           ParallelAnimation {
             id: caretGlide
-            XAnimator { id: glideX; target: glideCaret; duration: 180; easing.type: Easing.InOutSine }
-            YAnimator { id: glideY; target: glideCaret; duration: 180; easing.type: Easing.InOutSine }
+            XAnimator { id: glideX; target: glideCaret; duration: glideCaret.span; easing.type: Easing.InOutSine }
+            YAnimator { id: glideY; target: glideCaret; duration: glideCaret.span; easing.type: Easing.InOutSine }
             OpacityAnimator { id: fromFade; target: fromLine; from: 1; to: 0; duration: 50; easing.type: Easing.InQuad }
             ScaleAnimator { target: fromLine; from: 1; to: glideCaret.dot / fromLine.height; duration: 50; easing.type: Easing.InCubic }
             SequentialAnimation {
@@ -842,7 +844,7 @@ ShellRoot {
                 OpacityAnimator { id: dotIn; target: glideDot; from: 0; to: 1; duration: 45; easing.type: Easing.OutQuad }
                 ScaleAnimator { id: dotInScale; target: glideDot; from: 0.25; to: 1; duration: 50; easing.type: Easing.OutCubic }
               }
-              OpacityAnimator { target: glideDot; from: 1; to: 1; duration: 50 }
+              OpacityAnimator { target: glideDot; from: 1; to: 1; duration: Math.max(0, glideCaret.span - 130) }
               ParallelAnimation {
                 OpacityAnimator { target: glideDot; from: 1; to: glideCaret.landing === "rest" ? 1 : 0; duration: 80; easing.type: Easing.InQuad }
                 ScaleAnimator { target: glideDot; from: 1; to: glideCaret.landing === "rest" ? 1 : 0.25; duration: 80; easing.type: Easing.InOutCubic }
@@ -854,7 +856,7 @@ ShellRoot {
               OpacityAnimator { target: glideTail; from: 0.8; to: 0; duration: 80; easing.type: Easing.InQuad }
             }
             SequentialAnimation {
-              OpacityAnimator { target: toLine; from: 0; to: 0; duration: 110 }
+              OpacityAnimator { target: toLine; from: 0; to: 0; duration: glideCaret.span - 70 }
               ParallelAnimation {
                 OpacityAnimator { target: toLine; from: 0; to: glideCaret.landing === "caret" ? 1 : 0; duration: 60; easing.type: Easing.OutQuad }
                 ScaleAnimator { target: toLine; from: glideCaret.dot / toLine.height; to: 1; duration: 70; easing.type: Easing.OutCubic }
