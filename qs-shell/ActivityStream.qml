@@ -651,7 +651,7 @@ FocusScope {
         Rectangle {
           id: fileDot
           z: 2
-          x: -20; y: 6 + 11 - height / 2
+          x: -20; y: 6 + 14 - height / 2
           width: 8; height: 8; radius: 4
           color: Theme.cursor
           visible: row.current && !root.caretHeld
@@ -661,21 +661,21 @@ FocusScope {
           y: 6
           width: parent.width
           Item {
-            x: 6; width: parent.width - 12; height: 22
+            x: 6; width: parent.width - 12; height: 28
             Icon { id: gIcon; x: 6; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
             Text {
               id: gName
               anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
               text: fileBox.tests ? fileBox.tests.length + (fileBox.tests.length === 1 ? " test file" : " test files") : fileBox.f.name
               textFormat: Text.PlainText
-              color: fileBox.tests ? root.metaColor : Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3
+              color: fileBox.tests ? root.metaColor : Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
             }
             Text {
               anchors { left: gName.right; leftMargin: 12; right: gCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
               text: fileBox.tests ? fileBox.tests.map(t => t.name).join(", ") : row.entry.why || ""
               textFormat: Text.PlainText
               elide: Text.ElideRight; maximumLineCount: 1
-              color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2
+              color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta
             }
             Row {
               id: gCounts
@@ -683,8 +683,8 @@ FocusScope {
               readonly property int del: fileBox.tests ? fileBox.tests.reduce((n, t) => n + t.del, 0) : fileBox.f.del
               anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
               spacing: 8
-              Text { visible: gCounts.add > 0; text: "+" + gCounts.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
-              Text { visible: gCounts.del > 0; text: "\u2212" + gCounts.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 3 }
+              Text { visible: gCounts.add > 0; text: "+" + gCounts.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
+              Text { visible: gCounts.del > 0; text: "\u2212" + gCounts.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
             }
           }
           Repeater {
