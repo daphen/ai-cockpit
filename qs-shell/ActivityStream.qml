@@ -130,8 +130,6 @@ FocusScope {
     return d.toLocaleDateString(Qt.locale(), "dddd d MMMM")
   }
   function esc(text) { return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;") }
-  // A few lines that say what changed: declarations added/removed and "old → new" edits;
-  // context, blanks, comments, imports and moved lines are dropped.
   // The hunk that best matches what the agent said it did, as real diff lines.
   function snippet(card) {
     var words = t => (String(t).replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z]{3,}/g) || [])
@@ -184,17 +182,9 @@ FocusScope {
       x.moreLines = top ? top.lines.length - lines.length : 0
       x.removedList = !!gone
     }
-    var shown = files.slice(0, 8)
-    return { files: shown, more: files.length - 8, path: files[0].path,
-             rows: Math.max(...shown.map(x => x.lines.length + (x.moreLines > 0 ? 1 : 0))) }
+    return { files: files.slice(0, 8) }
   }
 
-  function relPath(sid, path) {
-    var cwd = String((sessions.find(s => s.name === sid) || {}).cwd || "")
-    var p = String(path || "")
-    if (cwd && p.indexOf(cwd + "/") === 0) return p.slice(cwd.length + 1)
-    return p.replace(/^\/home\/[^/]+/, "~")
-  }
 
 
   // Commits fill in what the edit tool never saw (changes made through shell commands).
@@ -337,7 +327,6 @@ FocusScope {
     }
     return out.filter(c => c.changes.length || c.outcome).sort((a, b) => a.at - b.at)
   }
-  // Focus never resizes a row: only Enter does.
   // Past days fold to one row so today is what's on screen.
   property var openDays: ({})
   readonly property var rows: {
