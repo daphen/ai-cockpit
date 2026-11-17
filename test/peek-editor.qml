@@ -39,8 +39,9 @@ ShellRoot {
         if (!peek.open || !peek.visible) test.fail("show should open the floating editor")
       } else if (stage === 2) {
         running = false
-        test.ask(["--remote-expr", 'bufname() .. ":" .. line(".") .. ":" .. &readonly'], out => {
-          if (out !== test.file + ":42:0") { if (++waits < 20) { running = true; return } test.fail("the peek should show the file editable at line 42, got " + out) }
+        test.ask(["--remote-expr", 'bufname() .. ":" .. line(".") .. ":" .. &readonly .. ":" .. &laststatus'], out => {
+          if (out === test.file + ":42:0:" + out.split(":").pop() && out.split(":").pop() !== "0") test.fail("the peek should have no status line, laststatus is " + out.split(":").pop())
+          if (out !== test.file + ":42:0:0") { if (++waits < 20) { running = true; return } test.fail("the peek should show the file editable at line 42, got " + out) }
           waits = 0
           test.ask(["--remote-send", "ccedited<Esc>q"], () => { stage = 10; running = true })
         })
@@ -62,7 +63,7 @@ ShellRoot {
         return
       } else if (stage === 4) {
         if (peek.open) { if (++waits < 10) return; test.fail("q should close the peek a second time too") }
-        console.log("PASS: the peek opens a file editable at its line in its own Neovim, :w saves, q closes it every time but not over unsaved changes")
+        console.log("PASS: the peek opens a file editable at its line in its own Neovim, :w saves, q closes it every time but not over unsaved changes, with no status line")
         Qt.quit()
       }
       stage++
