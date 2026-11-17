@@ -670,7 +670,8 @@ FocusScope {
                     Rectangle {
                       visible: row.current && gFile.picked
                       anchors.fill: parent; radius: 6
-                      color: Qt.alpha(Theme.cursor, 0.14)
+                      color: Qt.alpha(Theme.fg, 0.07)
+                      Rectangle { width: 3; height: parent.height - 8; radius: 1.5; x: 1; anchors.verticalCenter: parent.verticalCenter; color: Theme.cursor }
                     }
                     TapHandler { onTapped: { root.select(row.index); root.file = gFile.index; root.forceActiveFocus(); root.send({ type: "tap" }) } }
                     Icon { id: gIcon; x: 6; name: "file-content"; width: 11; height: 11; color: "#9A6500"; anchors.verticalCenter: parent.verticalCenter }
