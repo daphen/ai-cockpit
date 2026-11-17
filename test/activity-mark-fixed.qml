@@ -36,6 +36,15 @@ ShellRoot {
         var m = test.mark(), l = test.list(), kids = m.parent.children, mi = -1, li = -1
         for (var k = 0; k < kids.length; k++) { if (kids[k] === m) mi = k; if (kids[k] === l) li = k }
         test.check(m.parent === l.parent && (m.z < l.z || (m.z === l.z && mi < li)), "the cards should slide over the mark, not under it")
+        var c = m.mapToItem(l.contentItem, m.width / 2, m.height / 2), d = l.itemAt(c.x, c.y), covered = false
+        test.check(d, "setup: a card should be over the mark after scrolling")
+        ;(function walk(it) {
+          if (!it || !it.visible) return
+          var q = it.mapFromItem(l.contentItem, c.x, c.y)
+          if (it.color !== undefined && it.border !== undefined && q.x >= 0 && q.y >= 0 && q.x <= it.width && q.y <= it.height && it.color.a > 0.999) covered = true
+          for (var ch of it.children) walk(ch)
+        })(d)
+        test.check(covered, "a card sliding over the mark is see-through, so the mark shows on top of it")
         console.log("PASS: the Activity mark stays fixed in the corner behind the cards while the list scrolls")
         Qt.quit()
       }

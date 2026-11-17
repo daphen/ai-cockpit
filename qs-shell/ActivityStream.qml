@@ -511,7 +511,7 @@ FocusScope {
         id: foldBox
         visible: row.kind === "fold"
         y: 6; width: parent.width; height: 34; radius: root.cardRadius
-        color: row.current ? Qt.alpha(Theme.fg, 0.05) : foldHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        color: Qt.tint(Theme.bg, row.current ? Qt.alpha(Theme.fg, 0.05) : foldHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent")
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: foldHover; cursorShape: Qt.PointingHandCursor }
@@ -556,7 +556,8 @@ FocusScope {
         readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
         readonly property string relay: ctx.from && ctx.from !== "you" && ctx.from !== "task" ? ctx.from : ""
         readonly property string done: row.entry.outcome ? root.tidy(row.entry.outcome).replace(/\.$/, "") : root.headline(last.why)
-        color: row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
+        // Opaque, so the corner mark stays hidden under the cards that slide over it.
+        color: Qt.tint(Theme.bg, row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent")
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
         HoverHandler { id: cardHover; cursorShape: Qt.PointingHandCursor }
@@ -665,7 +666,7 @@ FocusScope {
         width: parent.width - x
         height: visible ? fileCol.implicitHeight + 12 : 0
         radius: root.cardRadius
-        color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
+        color: Qt.tint(Theme.bg, root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05))
         border.width: 1
         border.color: row.current ? (root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.3)) : fileHover.hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
         HoverHandler { id: fileHover; cursorShape: Qt.PointingHandCursor }
