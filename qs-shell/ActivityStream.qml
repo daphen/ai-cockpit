@@ -455,6 +455,17 @@ FocusScope {
 
 
 
+  Image {
+    objectName: "activityEndMark"
+    readonly property string dir: Quickshell.env("COCKPIT_ASSET_DIR") || ""
+    anchors { right: parent.right; bottom: parent.bottom; rightMargin: 16; bottomMargin: 17 }
+    visible: dir !== ""
+    height: 44; width: height * 248 / 308
+    source: visible ? "file://" + dir + "/cockpit-mark-" + Theme.mode + ".png" : ""
+    sourceSize.height: height * 2
+    fillMode: Image.PreserveAspectFit
+    asynchronous: true; smooth: true
+  }
   ListView {
     id: list
     objectName: "activityList"
@@ -475,20 +486,8 @@ FocusScope {
       }
     }
 
-    footer: Item {
-      width: list.width; height: 92
-      Image {
-        objectName: "activityEndMark"
-        readonly property string dir: Quickshell.env("COCKPIT_ASSET_DIR") || ""
-        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 8; bottomMargin: 16 }
-        visible: dir !== ""
-        height: 44; width: height * 248 / 308
-        source: visible ? "file://" + dir + "/cockpit-mark-" + Theme.mode + ".png" : ""
-        sourceSize.height: height * 2
-        fillMode: Image.PreserveAspectFit
-        asynchronous: true; smooth: true
-      }
-    }
+    // Room under the last card for the corner mark.
+    footer: Item { width: list.width; height: 92 }
 
     delegate: Item {
       id: row
