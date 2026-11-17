@@ -424,6 +424,15 @@ ShellRoot {
               anchors.fill: parent
               color: win.ground
             }
+            Rectangle {
+              visible: win.activityActive || win.dashboardActive
+              anchors { left: parent.left; right: parent.right; top: parent.bottom }
+              height: 18
+              gradient: Gradient {
+                GradientStop { position: 0; color: win.ground }
+                GradientStop { position: 1; color: Qt.alpha(win.ground, 0) }
+              }
+            }
             Row {
               id: viewRow
               anchors { fill: parent; margins: 7; rightMargin: 0 }
