@@ -213,7 +213,8 @@ ShellRoot {
         if (test.opened[2] !== "alpha:/r/New.qml:1") test.fail("Enter on the second change opened " + test.opened)
         test.key(Qt.Key_K)
         if (page.currentRow.f.name !== "Rail.qml") test.fail("k should step back a change")
-        while (page.currentRow.sid !== "gamma" && page.cursor < page.rows.length - 1) test.key(Qt.Key_J, Qt.ShiftModifier)
+        var gammaAt = page.rows.findIndex(r => r.kind === "card" && r.sid === "gamma"), gammaKey = gammaAt > page.cursor ? Qt.Key_J : Qt.Key_K
+        for (var hop = 0; page.currentRow.sid !== "gamma" && hop < 20; hop++) test.key(gammaKey, Qt.ShiftModifier)
         if (page.currentRow.kind !== "card" || !page.currentRow.bare) test.fail("a dimmed outcome should stand alone, without its changes")
         var js2 = Object.assign({}, page.jev); js2[page.currentRow.jid] = { key: 0.9 }; page.jev = js2
         var names = page.rows.filter(r => r.kind === "file" && r.sid === "gamma").map(r => r.f.path).join()
@@ -254,6 +255,7 @@ ShellRoot {
         }
         if (w.steps === 6) w.dir = Qt.Key_J
         if (w.steps === 12) {
+          var before = page.rows.filter(r => r.kind === "card").map(r => r.key)
           test.event({ type: "message_end", session: "gamma", message: { role: "assistant", timestamp: Date.now(), content: [
             { type: "toolCall", id: "lw", name: "write", arguments: { path: "/h/notes/storage/reviews/pr-43.md",
               content: "# PR #43 \u2014 feat: live review\n\n## Verdict\n\n**Approve.** Clean and tested.\n\n## Findings\n\nNone.\n" } }] } })
@@ -263,11 +265,18 @@ ShellRoot {
           if (!lr || lr.changes.slice(-1)[0].review.verdict !== "approve") test.fail("a review written live should become a review card: " + JSON.stringify(lr && lr.changes.map(e => e.review)))
           test.event({ type: "message_end", session: "alpha", message: { role: "user", timestamp: Date.now(), content: [{ type: "text", text: "One more thing" }] } })
           test.event({ type: "message_end", session: "alpha", message: { role: "assistant", timestamp: Date.now(), content: [{ type: "text", text: "\u27e2 Did one more thing." }] } })
-          var heads = {}
-          for (var hr of page.rows.filter(r => r.kind === "who")) heads[hr.sid] = (heads[hr.sid] || 0) + 1
-          if (Object.values(heads).some(n => n > 1)) test.fail("each session should head one block per day, got " + JSON.stringify(heads))
+          var after = page.rows.filter(r => r.kind === "card").map(r => r.key)
+          if (JSON.stringify(after.filter(k => before.indexOf(k) >= 0)) !== JSON.stringify(before.filter(k => after.indexOf(k) >= 0)))
+            test.fail("cards already shown moved when new activity arrived: " + JSON.stringify(before) + " -> " + JSON.stringify(after))
           var last = page.rows.filter(r => r.kind === "card").pop()
-          if (!last || last.sid !== "alpha") test.fail("the session with the newest activity should be the last block")
+          if (!last || last.sid !== "alpha" || last.ctx.text !== "One more thing") test.fail("the newest ask should land at the bottom")
+          var heads = page.rows.filter(r => r.kind === "who"), prevRow = null
+          for (var ri = 0; ri < page.rows.length; ri++) {
+            var row = page.rows[ri]
+            if (row.kind === "card" && (!prevRow || prevRow.sid !== row.sid) && (ri === 0 || page.rows[ri - 1].kind !== "who")) test.fail("a session change should start with its name header")
+            if (row.kind === "card") prevRow = row
+            if (row.kind === "day" || row.kind === "fold") prevRow = null
+          }
           test.key(Qt.Key_G); test.key(Qt.Key_J); test.key(Qt.Key_J); test.key(Qt.Key_J); test.key(Qt.Key_J)
           test.walk = { burst: page.cursorPoint() }
           stage = 7

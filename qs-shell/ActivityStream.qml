@@ -26,7 +26,10 @@ FocusScope {
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
-  onSessionsChanged: if (visible && agentd) { agentd.loadActivityHistory(); gitAgain.restart() }
+  onSessionsChanged: if (visible && agentd) {
+    agentd.loadActivityHistory()
+    if (sessions.some(s => s.cwd && !_gitRead[s.cwd])) refreshGit()
+  }
   FeedScroll { id: scroller; view: list; chatVisible: root.visible }
 
   // Jev (Typesafe's classifier) scores each ask's card: key = importance 0..1.
@@ -192,10 +195,13 @@ FocusScope {
   // Commits fill in what the edit tool never saw (changes made through shell commands).
   property var repos: ({})
   property var _gitQueue: []
+  property var _gitRead: ({})
+  property var _gitRaw: ({})
   function refreshGit() {
-    if (gitRun.running) { gitAgain.restart(); return }
+    if (gitRun.running) { gitAgain.start(); return }
     var seen = {}
     _gitQueue = sessions.map(s => String(s.cwd || "")).filter(c => c && !seen[c] && (seen[c] = true))
+    for (var c of _gitQueue) _gitRead[c] = true
     gitNext()
   }
   function gitNext() {
@@ -230,13 +236,17 @@ FocusScope {
     stdout: StdioCollector {
       onStreamFinished: {
         var out = String(this.text || "")
+        // Most refreshes find the same commits; re-parsing them froze the whole window for ~200ms.
+        if (out === root._gitRaw[gitRun.cwd]) { root.gitNext(); return }
+        root._gitRaw[gitRun.cwd] = out
         if (out.trim()) { var r = root.parseLog(out), next = Object.assign({}, root.repos); next[gitRun.cwd] = r; root.repos = next }
         root.gitNext()
       }
     }
   }
   Timer { id: gitAgain; interval: 3000; onTriggered: root.refreshGit() }
-  Connections { target: root.agentd; function onActivityGenChanged() { if (root.visible) gitAgain.restart() } }
+  // Started, not restarted: a steady trickle of activity must not postpone the refresh forever.
+  Connections { target: root.agentd; function onActivityGenChanged() { if (root.visible) gitAgain.start() } }
 
   // One flat timeline of changes; the session's ask is repeated only when it changes.
   readonly property var changes: {
@@ -333,16 +343,13 @@ FocusScope {
   property var openDays: ({})
   readonly property var rows: {
     var out = [], day = "", sid = "", shown = cards.filter(c => !importantOnly || !minor(c))
+    // Ordered by when the ask was made, so a card never moves once shown; new work only appends.
+    var start = c => c.ctx.at || c.changes.reduce((m, e) => Math.min(m, e.at), c.at)
     var counts = {}
-    for (var c of shown) counts[dayLabel(c.at)] = (counts[dayLabel(c.at)] || 0) + 1
-    var lastAt = {}
-    for (c of shown) lastAt[dayLabel(c.at) + c.sid] = Math.max(lastAt[dayLabel(c.at) + c.sid] || 0, c.at)
-    shown.sort((a, b) => {
-      var da = dayLabel(a.at), db = dayLabel(b.at)
-      return da !== db ? a.at - b.at : (lastAt[da + a.sid] - lastAt[db + b.sid]) || a.at - b.at
-    })
+    for (var c of shown) counts[dayLabel(start(c))] = (counts[dayLabel(start(c))] || 0) + 1
+    shown.sort((a, b) => start(a) - start(b))
     for (c of shown) {
-      var label = dayLabel(c.at), past = label !== "Today"
+      var label = dayLabel(start(c)), past = label !== "Today"
       if (label !== day) {
         out.push({ kind: past ? "fold" : "day", key: "day:" + label, text: label, count: counts[label], open: !!openDays[label] })
         day = label; sid = ""

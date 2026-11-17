@@ -2962,6 +2962,7 @@ Item {
   ListModel { id: feedModel; dynamicRoles: true }
   property int proseTyping: 0
   property int thinkTyping: 0
+  property int proseActive: 0
   property bool _feedReset: false     // session switch → rebuild rather than reconcile
   function _turnSig(t) {
     if (!t) return ""
@@ -3435,7 +3436,8 @@ Item {
           rail.probeCardCreates++
         }
         // A tool card waits for the reply above it to finish typing, so text and tools never animate together.
-        readonly property bool waitsForProse: rail.proseTyping > 0 && !isUser && rail.turnProse(turn.items).length === 0
+        readonly property bool waitsForProse: (rail.proseTyping > 0 || rail.thinkTyping > 0) && !isUser
+          && rail.turnProse(turn.items).length === 0 && rail.turnThinks(turn.items).length === 0
         onWaitsForProseChanged: if (!waitsForProse && proseHold.running) { proseHold.stop(); turnIntro.start() }
         Timer { id: proseHold; interval: 1500; onTriggered: turnIntro.start() }
         ParallelAnimation {
@@ -5376,6 +5378,10 @@ Item {
       spacing: 9
       readonly property var compactItems: rail.activityRows(items)
       readonly property var tools: rail.activityEntries(items)
+      // Tool rows wait for this card's reasoning to finish typing; once shown they stay.
+      property int thinksTyping: 0
+      property bool toolsShown: thinksTyping === 0
+      onThinksTypingChanged: if (thinksTyping === 0) toolsShown = true
       readonly property bool toolsOpen: rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
       readonly property var unresolved: rail.unresolvedFailures(tools)
       // Closed shows what other harnesses show by default: changes, actions, live and unresolved work; reads stay behind the toggle.
@@ -5416,10 +5422,11 @@ Item {
           property string gkey: ekey + "-think-" + (entry.mid || index)
           property bool expanded: rail.groupOpen(gkey, rail.claudeThought(entry))
           property color mutedColor: actCol.parent.mutedColor
+          property Item owner: actCol
         }
       }
       Item {
-        visible: actCol.tools.length > 0
+        visible: actCol.tools.length > 0 && actCol.toolsShown
         x: 12; width: actCol.width - 24; height: detailsRow.implicitHeight
         ItemFocus { itemKey: ekey + "-tools"; anchors.fill: detailsRow }
       RowLayout {
@@ -5449,7 +5456,7 @@ Item {
       }
       }
       Repeater {
-        model: CountModel { size: actCol.shownTools.length }
+        model: CountModel { size: actCol.toolsShown ? actCol.shownTools.length : 0 }
         Loader {
           id: toolLoader
           x: 24; width: actCol.width - 24
@@ -5774,11 +5781,18 @@ Item {
           full: String((typeof expanded !== "undefined" && expanded && entry.full) ? entry.full : (entry.text || ""))
           live: entry.liveThink === true
           arrivedAt: Number(entry.arrivedAt || 0)
+          hold: rail.proseActive > 0
           property bool counted: false
-          function track() { if (counted !== revealing) { rail.thinkTyping += revealing ? 1 : -1; counted = revealing } }
+          readonly property Item card: typeof owner !== "undefined" ? owner : null
+          function track() {
+            if (counted === revealing) return
+            rail.thinkTyping += revealing ? 1 : -1
+            if (card) card.thinksTyping += revealing ? 1 : -1
+            counted = revealing
+          }
           onRevealingChanged: track()
           Component.onCompleted: track()
-          Component.onDestruction: if (counted) rail.thinkTyping--
+          Component.onDestruction: if (counted) { rail.thinkTyping--; if (card) card.thinksTyping-- }
         }
         text: reveal.text
         color: mutedColor
@@ -6093,7 +6107,9 @@ Item {
         function track() { if (counted !== revealing) { rail.proseTyping += revealing ? 1 : -1; counted = revealing } }
         onRevealingChanged: track()
         Component.onCompleted: track()
-        Component.onDestruction: if (counted) rail.proseTyping--
+        property bool activeCounted: false
+        onActiveChanged: if (activeCounted !== active) { rail.proseActive += active ? 1 : -1; activeCounted = active }
+        Component.onDestruction: { if (counted) rail.proseTyping--; if (activeCounted) rail.proseActive-- }
       }
       readonly property var parts: rail.proseParts(reveal.text)
       Repeater {
