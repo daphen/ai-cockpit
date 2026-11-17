@@ -676,7 +676,7 @@ FocusScope {
               anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
               text: fileBox.f.name
               textFormat: Text.PlainText
-              color: Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+              color: Theme.fg; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2; font.weight: Font.DemiBold
             }
             Text {
               anchors { left: gName.right; leftMargin: 12; right: gCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
