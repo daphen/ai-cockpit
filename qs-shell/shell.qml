@@ -414,7 +414,7 @@ ShellRoot {
               : chin.st.view === "plan" && rail.selectedPlan ? "plan"
               : /\/notes\/storage$/.test(String(chin.st.cwd || "")) ? "vault" : "code"
             readonly property string current: rail.workspaceTab === "plan" && !rail.selectedPlan ? "code" : rail.workspaceTab
-            readonly property var tabs: [{ view: "code", label: "Code", icon: "terminal" }, { view: "dashboard", label: "Dashboard", icon: "status-pulse" }, { view: "activity", label: "Activity", icon: "clock" }, { view: "vault", label: "Vault", icon: "vault-3" }]
+            readonly property var tabs: [{ view: "activity", label: "Activity", icon: "clock" }, { view: "code", label: "Code", icon: "terminal" }, { view: "vault", label: "Vault", icon: "vault-3" }]
               .concat(rail.selectedPlan ? [{ view: "plan", label: "Plan", icon: "clipboard-check" }] : [])
               .concat(win.studioRoot ? [{ view: "studio", label: "Studio", icon: "paintbrush" }] : [])
             readonly property var views: tabs.map(function(tab) { return tab.view })

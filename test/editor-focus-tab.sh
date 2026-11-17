@@ -32,12 +32,12 @@ text=text[:end]+'''
           term.forceActiveFocus()
         } else if (stage === 4) {
           if (marked !== 1) throw new Error("returning to editor does not restore the tab mark")
-          rail.workspaceTab = "dashboard"; chin.st = ({ dashboard: { active: true, model: {} } })
+          rail.showWorkspace("activity", true)
         } else if (stage === 5) {
-          dashboard.forceActiveFocus()
+          activityPage.forceActiveFocus()
         } else if (stage === 6) {
-          if (!dashboard.activeFocus || marked !== 1) throw new Error("focused dashboard does not mark its tab")
-          console.log("PASS: active view tab marks focus for editor, dashboard, composer and chat focus")
+          if (!activityPage.activeFocus || marked !== 1) throw new Error("focused activity view does not mark its tab")
+          console.log("PASS: active view tab marks focus for editor, activity, composer and chat focus")
           Qt.quit()
         }
         stage++

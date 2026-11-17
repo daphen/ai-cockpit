@@ -39,18 +39,18 @@ Item {
   // The editor reports its view a few hundred ms after a request, so the tab the user
   // picked leads; stale reports are ignored until the editor confirms it.
   property string reportedTab: "code"
-  property string workspaceTab: "code"
+  property string workspaceTab: "activity"
   property bool _tabAwaiting: false
   onReportedTabChanged: {
     if (reportedTab === workspaceTab) { _tabAwaiting = false; tabConfirm.stop() }
     else if (!_tabAwaiting && workspaceTab !== "studio" && workspaceTab !== "activity") workspaceTab = reportedTab
   }
-  // Activity and Studio are not editor views, so after a hot reload the editor's report would replace them.
+  // A hot reload keeps the open tab instead of falling back to the startup default.
   PersistentProperties {
     id: keptTab
     reloadableId: "rail-workspace-tab"
     property string tab: ""
-    onReloaded: if (tab === "activity" || tab === "studio") rail.workspaceTab = tab
+    onReloaded: if (tab) rail.workspaceTab = tab
   }
   onWorkspaceTabChanged: keptTab.tab = workspaceTab
   Timer { id: tabConfirm; interval: 3000; onTriggered: { rail._tabAwaiting = false; rail.workspaceTab = rail.reportedTab } }
