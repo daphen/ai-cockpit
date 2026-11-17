@@ -112,6 +112,14 @@ FocusScope {
 
 
   Rectangle { anchors.fill: parent; color: root.color }
+  // The same rounded editor-like panel as the Code tab, inset to line up with the tab row.
+  Rectangle {
+    id: panel
+    anchors { fill: parent; leftMargin: 7; topMargin: 2; bottomMargin: 7 }
+    radius: 8
+    color: Theme.bg
+    border.width: 1; border.color: Qt.alpha(Theme.fg, 0.08)
+  }
   TapHandler { onTapped: root.forceActiveFocus() }
 
   readonly property bool light: Theme.mode === "light"
@@ -439,9 +447,7 @@ FocusScope {
   ListView {
     id: list
     objectName: "activityList"
-    x: 24
-    width: parent.width - x
-    height: parent.height
+    anchors { fill: panel; leftMargin: 17; rightMargin: 12; topMargin: 1; bottomMargin: 1 }
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }
