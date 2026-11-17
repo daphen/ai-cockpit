@@ -439,9 +439,9 @@ FocusScope {
   ListView {
     id: list
     objectName: "activityList"
-    width: parent.width - 48
+    x: 24
+    width: parent.width - x
     height: parent.height
-    anchors.horizontalCenter: parent.horizontalCenter
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }
