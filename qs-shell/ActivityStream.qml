@@ -110,6 +110,8 @@ FocusScope {
 
 
   // Sits in the shell's rounded panel (radius 16): cards keep 8px corners 8px from its edge.
+  // Opaque, because the Code tab's terminal keeps drawing underneath.
+  Rectangle { anchors.fill: parent; color: Theme.bg }
   TapHandler { onTapped: root.forceActiveFocus() }
 
   readonly property bool light: Theme.mode === "light"
