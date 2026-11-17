@@ -74,8 +74,7 @@ FocusScope {
   property int visLine: 0
   property int visCol: 0
   property string pending: ""
-  onCursorKeyChanged: mode = "list"
-  onModeChanged: pending = ""
+  onCursorKeyChanged: go("list")
   function codeRows() {
     var f = currentRow && inCode ? currentRow.files[file] : null, out = [], last = 0
     for (var l of f ? f.diff : []) {
@@ -86,7 +85,7 @@ FocusScope {
     return out
   }
   function enterCode(fi) {
-    file = fi; mode = "code"
+    file = fi; go("code")
     var rs = codeRows(), first = currentRow.files[fi].diff.findIndex(l => /^[+-]/.test(l))
     codeLine = Math.max(0, first)
     codeCol = Math.max(0, (rs[codeLine] || { text: "" }).text.search(/\S/))
@@ -99,93 +98,111 @@ FocusScope {
     if (mode === "visualLine") return [0, Infinity]
     return [i === a.l ? a.c : 0, i === b.l ? b.c + 1 : Infinity]
   }
-  function keyCode(event) {
-    var rs = codeRows(), k = event.key, shift = event.modifiers & Qt.ShiftModifier, p = { l: codeLine, c: codeCol }
+  // The keyboard is a state machine: eventOf names a key, and the current state's
+  // table maps that event to the next state, or to an action that may return one.
+  function eventOf(e) {
+    var k = e.key, shift = e.modifiers & Qt.ShiftModifier
+    if (e.modifiers & Qt.ControlModifier)
+      return ({ [Qt.Key_H]: "focusLeft", [Qt.Key_L]: "focusRight", [Qt.Key_D]: "halfDown", [Qt.Key_U]: "halfUp" })[k] || ""
+    return ({ [Qt.Key_J]: "down", [Qt.Key_Down]: "down", [Qt.Key_K]: "up", [Qt.Key_Up]: "up",
+              [Qt.Key_H]: "left", [Qt.Key_Left]: "left", [Qt.Key_L]: "right", [Qt.Key_Right]: "right",
+              [Qt.Key_Return]: "enter", [Qt.Key_Enter]: "enter", [Qt.Key_Space]: "space", [Qt.Key_Escape]: "back",
+              [Qt.Key_G]: shift ? "bottom" : "g", [Qt.Key_S]: "session", [Qt.Key_F]: "filter",
+              [Qt.Key_V]: shift ? "visualLine" : "visual", [Qt.Key_Y]: "yank",
+              [Qt.Key_0]: "lineStart", [Qt.Key_AsciiCircum]: "firstChar", [Qt.Key_Dollar]: "lineEnd",
+              [Qt.Key_W]: "word", [Qt.Key_E]: "wordEnd", [Qt.Key_B]: "wordBack" })[k] || ""
+  }
+  readonly property var machine: {
+    var focus = { focusLeft: () => focusRequested("left"), focusRight: () => focusRequested("right") }
+    var caretMoves = {}
+    for (var m of ["down", "up", "left", "right", "lineStart", "firstChar", "lineEnd", "word", "wordEnd", "wordBack", "halfDown", "halfUp", "bottom"])
+      caretMoves[m] = (name => () => caret(name))(m)
+    var inCode = Object.assign({}, focus, caretMoves, {
+      enter: () => fileRequested(currentRow.sid, currentRow.files[file].path, codeRows()[codeLine].line),
+      g: (ev, was) => { if (was === "g") caret("top"); else pending = "g" },
+      other: () => true
+    })
+    return {
+      list: Object.assign({}, focus, {
+        down: () => move(1), up: () => move(-1), left: () => codeShift(-1), right: () => codeShift(1),
+        g: () => edge(false), bottom: () => edge(true), enter: () => open(),
+        session: () => { if (currentRow) sessionRequested(currentRow.sid) },
+        filter: () => { importantOnly = !importantOnly },
+        back: () => { if (!openKey) return false; var k = openKey; openKey = ""; cursorKey = k }
+      }),
+      files: {
+        back: "list", enter: () => open(), space: () => open(),
+        down: () => { file = Math.min(currentRow.files.length - 1, file + 1) }, up: () => { file = Math.max(0, file - 1) },
+        left: () => codeShift(-1), right: () => codeShift(1),
+        other: ev => { go("list"); return send(ev) }
+      },
+      code: Object.assign({}, inCode, {
+        back: () => picking ? "files" : "list", visual: "visual", visualLine: "visualLine",
+        yank: (ev, was) => { if (was === "y") yank(); else pending = "y" }
+      }),
+      visual: Object.assign({}, inCode, { back: "code", visual: "code", visualLine: "visualLine", yank: () => yank() }),
+      visualLine: Object.assign({}, inCode, { back: "code", visual: "visual", visualLine: "code", yank: () => yank() })
+    }
+  }
+  function send(ev) {
+    var table = machine[mode], step = ev in table ? table[ev] : table.other, was = pending
+    if (step === undefined) return false
+    pending = ""
+    var next = typeof step === "function" ? step(ev, was) : step
+    if (typeof next === "string") go(next)
+    return next !== false
+  }
+  function go(next) {
+    if (mode === "code" && (next === "visual" || next === "visualLine")) { visLine = codeLine; visCol = codeCol }
+    pending = ""
+    mode = next
+  }
+  Keys.onPressed: event => { if (send(eventOf(event))) event.accepted = true }
+  function yank() {
+    var rs = codeRows(), out = [], visual = mode !== "code"
+    for (var i = 0; i < rs.length; i++) {
+      var r = visual ? selRange(i) : i === codeLine ? [0, Infinity] : null
+      if (r) out.push(rs[i].text.slice(r[0], r[1]))
+    }
+    yanked(out.join("\n"))
+    if (!visual) return
+    codeLine = Math.min(visLine, codeLine)
+    return "code"
+  }
+  function caret(name) {
+    var rs = codeRows(), p = { l: codeLine, c: codeCol }
     var len = l => rs[l].text.length
     var ch = q => q.c < len(q.l) ? rs[q.l].text[q.c] : "\n"
     var cls = c => /\s/.test(c) ? 0 : /\w/.test(c) ? 1 : 2
     var next = q => q.c < len(q.l) ? { l: q.l, c: q.c + 1 } : q.l < rs.length - 1 ? { l: q.l + 1, c: 0 } : null
     var prev = q => q.c > 0 ? { l: q.l, c: q.c - 1 } : q.l > 0 ? { l: q.l - 1, c: len(q.l - 1) } : null
-    var was = pending
-    pending = ""
-    var visual = mode !== "code"
-    if (k === Qt.Key_Escape) { mode = visual ? "code" : picking ? "files" : "list"; return true }
-    if (k === Qt.Key_Return || k === Qt.Key_Enter) { fileRequested(currentRow.sid, currentRow.files[file].path, rs[codeLine].line); return true }
-    if (k === Qt.Key_G && !shift && was !== "g") { pending = "g"; return true }
-    if (k === Qt.Key_Y && !visual && was !== "y") { pending = "y"; return true }
-    if (k === Qt.Key_Y) {
-      var out = []
-      for (var i = 0; i < rs.length; i++) {
-        var r = visual ? selRange(i) : i === codeLine ? [0, Infinity] : null
-        if (r) out.push(rs[i].text.slice(r[0], r[1]))
-      }
-      yanked(out.join("\n"))
-      if (visual) { codeLine = Math.min(visLine, codeLine); mode = "code" }
-      return true
-    }
-    if (k === Qt.Key_V) {
-      var target = shift ? "visualLine" : "visual"
-      if (!visual) { visLine = codeLine; visCol = codeCol }
-      mode = mode === target ? "code" : target
-      return true
-    }
-    if (event.modifiers & Qt.ControlModifier) {
-      if (k !== Qt.Key_D && k !== Qt.Key_U) return false
-      p.l += (k === Qt.Key_D ? 1 : -1) * Math.max(1, Math.floor(height / (2 * fsMeta * 1.5)))
-    } else if (k === Qt.Key_H || k === Qt.Key_Left) p.c--
-    else if (k === Qt.Key_L || k === Qt.Key_Right) p.c++
-    else if (k === Qt.Key_J || k === Qt.Key_Down) p.l++
-    else if (k === Qt.Key_K || k === Qt.Key_Up) p.l--
-    else if (k === Qt.Key_0) p.c = 0
-    else if (k === Qt.Key_AsciiCircum) p.c = Math.max(0, rs[p.l].text.search(/\S/))
-    else if (k === Qt.Key_Dollar) p.c = Infinity
-    else if (k === Qt.Key_G) p = shift ? { l: rs.length - 1, c: 0 } : { l: 0, c: 0 }
-    else if (k === Qt.Key_W) {
-      var c0 = cls(ch(p)), q = p
+    var half = Math.max(1, Math.floor(height / (2 * fsMeta * 1.5))), q
+    if (name === "halfDown" || name === "halfUp") p.l += (name === "halfDown" ? 1 : -1) * half
+    else if (name === "left") p.c--
+    else if (name === "right") p.c++
+    else if (name === "down") p.l++
+    else if (name === "up") p.l--
+    else if (name === "lineStart") p.c = 0
+    else if (name === "firstChar") p.c = Math.max(0, rs[p.l].text.search(/\S/))
+    else if (name === "lineEnd") p.c = Infinity
+    else if (name === "top") p = { l: 0, c: 0 }
+    else if (name === "bottom") p = { l: rs.length - 1, c: 0 }
+    else if (name === "word") {
+      var c0 = cls(ch(p)); q = p
       while (q && c0 && cls(ch(q)) === c0) q = next(q)
       while (q && cls(ch(q)) === 0) q = next(q)
       if (q) p = q
-    } else if (k === Qt.Key_E) {
-      var q = next(p)
+    } else if (name === "wordEnd") {
+      q = next(p)
       while (q && cls(ch(q)) === 0) q = next(q)
       if (q) { var c1 = cls(ch(q)); for (var n = next(q); n && cls(ch(n)) === c1; n = next(n)) q = n; p = q }
-    } else if (k === Qt.Key_B) {
-      var q = prev(p)
+    } else if (name === "wordBack") {
+      q = prev(p)
       while (q && cls(ch(q)) === 0) q = prev(q)
-      if (q) { var c2 = cls(ch(q)); for (var n = prev(q); n && cls(ch(n)) === c2; n = prev(n)) q = n; p = q }
-    } else return true
+      if (q) { var c2 = cls(ch(q)); for (var n2 = prev(q); n2 && cls(ch(n2)) === c2; n2 = prev(n2)) q = n2; p = q }
+    }
     codeLine = Math.max(0, Math.min(rs.length - 1, p.l))
     codeCol = Math.max(0, Math.min(len(codeLine) - 1, p.c))
-    return true
-  }
-  function keyFiles(event) {
-    var n = currentRow.files.length
-    if (event.key === Qt.Key_Escape) mode = "list"
-    else if (event.key === Qt.Key_J || event.key === Qt.Key_Down) file = Math.min(n - 1, file + 1)
-    else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) file = Math.max(0, file - 1)
-    else if (event.key === Qt.Key_H || event.key === Qt.Key_L) codeShift(event.key === Qt.Key_L ? 1 : -1)
-    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter || event.key === Qt.Key_Space) open()
-    else { mode = "list"; return false }
-    return true
-  }
-  Keys.onPressed: event => {
-    var layer = mode === "files" ? keyFiles : inCode ? keyCode : null
-    if ((layer && layer(event)) || keyList(event)) event.accepted = true
-  }
-  function keyList(event) {
-    var ctrl = event.modifiers & Qt.ControlModifier
-    if (ctrl && event.key === Qt.Key_L) focusRequested("right")
-    else if (ctrl && event.key === Qt.Key_H) focusRequested("left")
-    else if (event.key === Qt.Key_J || event.key === Qt.Key_Down) move(1)
-    else if (event.key === Qt.Key_K || event.key === Qt.Key_Up) move(-1)
-    else if (event.key === Qt.Key_H || event.key === Qt.Key_L) codeShift(event.key === Qt.Key_L ? 1 : -1)
-    else if (event.key === Qt.Key_G) edge(event.modifiers & Qt.ShiftModifier)
-    else if (event.key === Qt.Key_S) { if (currentRow) sessionRequested(currentRow.sid) }
-    else if (event.key === Qt.Key_F) importantOnly = !importantOnly
-    else if (event.key === Qt.Key_Escape && openKey) { var k = openKey; openKey = ""; cursorKey = k }
-    else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) open()
-    else return false
-    return true
   }
   signal codeShift(int dir)
   FontMetrics { id: codeMetrics; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
@@ -506,7 +523,7 @@ FocusScope {
     }
     if (!currentRow || currentRow.kind !== "change") return
     var files = currentRow.files
-    if (mode === "list" && files.length > 1) { file = Math.max(0, files.findIndex(x => !x.covered)); mode = "files"; return }
+    if (mode === "list" && files.length > 1) { file = Math.max(0, files.findIndex(x => !x.covered)); go("files"); return }
     var f = mode === "files" ? files[file] : files.find(x => !x.covered) || files[0]
     if (f.diff.length && !byClick) { enterCode(files.indexOf(f)); return }
     fileRequested(currentRow.sid, f.path, f.line || 1)
