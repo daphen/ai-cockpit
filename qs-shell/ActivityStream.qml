@@ -1,4 +1,5 @@
 import QtQuick
+import Quickshell
 import Quickshell.Io
 import QsLib
 
@@ -457,7 +458,20 @@ FocusScope {
       }
     }
 
-    footer: Item { width: list.width; height: 48 }
+    footer: Item {
+      width: list.width; height: 92
+      Image {
+        objectName: "activityEndMark"
+        readonly property string dir: Quickshell.env("COCKPIT_ASSET_DIR") || ""
+        anchors { right: parent.right; bottom: parent.bottom; rightMargin: 8; bottomMargin: 16 }
+        visible: dir !== ""
+        height: 44; width: height * 248 / 308
+        source: visible ? "file://" + dir + "/cockpit-mark-" + Theme.mode + ".png" : ""
+        sourceSize.height: height * 2
+        fillMode: Image.PreserveAspectFit
+        asynchronous: true; smooth: true
+      }
+    }
 
     delegate: Item {
       id: row
