@@ -78,7 +78,7 @@ ShellRoot {
           { type: "message", id: "gr2", message: { role: "assistant", timestamp: test.t0 - 108000, content: [{ type: "text", text: "\u27e2 Reviewed PR #42 and wrote the review (request changes, 2 findings)." }] } },
           { type: "message", id: "gq", timestamp: new Date(test.t0 - 107000).toISOString(), message: { role: "user", timestamp: test.t0 - 107000,
             content: [{ type: "text", text: "Ok so. Hm, where are we on the branch?" }] } },
-          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "thinking", thinking: "Weighing the branch state" }, { type: "text", text: "**No change:** the branch still sits at last week's merge.\n\nDetails follow.\n\n\u27e2 Answer only; nothing on the branch has changed since last week." }] } },
+          { type: "message", id: "gq1", message: { role: "assistant", timestamp: test.t0 - 106000, content: [{ type: "thinking", thinking: "Weighing the branch state" }, { type: "text", text: "**No change:** the branch still sits at last week's merge. It's committed as abc1234def, not pushed.\n\nDetails follow.\n\n\u27e2 Answer only; nothing on the branch has changed since last week." }] } },
           { type: "message", id: "gd", timestamp: new Date(test.t0 - 105000).toISOString(), message: { role: "user", timestamp: test.t0 - 105000,
             content: [{ type: "text", text: "Drop the loader" }] } },
           { type: "message", id: "gd1", message: { role: "assistant", timestamp: test.t0 - 104000, content: [
@@ -133,8 +133,9 @@ ShellRoot {
         if (!chip || !test.visibleText("coordinator") || !test.visibleText("3 of 4 reviews are now posted") || test.hasText("posted PR #9"))
           test.fail("a relayed ask should show its sender as a chip and the reply as its headline, not the relayed text")
         if (test.find(page, i => i.objectName === "activityList").width > 960) test.fail("the activity column should stay narrow enough to read")
-        if (!test.visibleText("Where are we on the branch?") || !test.visibleText("No change: the branch still sits at last week's merge"))
-          test.fail("an ask answered without edits should headline its question, then the answer's own first line, not its closing note")
+        var qa = test.find(page, i => i.visible && i.objectName === "cardHead" && String(i.text).indexOf("No change") >= 0)
+        if (!qa || qa.text !== "No change: the branch still sits at last week's merge" || test.hasText("committed as") || !test.visibleText("Where are we on the branch?"))
+          test.fail("an ask answered without edits should headline the answer's first sentence, with the question beneath for context")
         if (!test.hasText("loadLegacy") || !test.hasText("legacyLoaded") || !test.hasText("legacyDepth") || test.hasText("deepBodyLine"))
           test.fail("a change that only removed code should list what was removed, not show the first lines of it")
         var removedCode = test.find(page, i => i.visible && String(i.text || "").indexOf("legacyDepth") >= 0)
