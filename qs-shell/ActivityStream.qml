@@ -455,20 +455,7 @@ FocusScope {
       }
     }
 
-    footer: Item {
-      width: list.width; height: root.cards.length ? 72 : 24
-      readonly property real newest: root.cards.reduce((n, c) => Math.max(n, c.at), 0)
-      Rectangle { visible: endText.visible; anchors.verticalCenter: endText.verticalCenter; x: 8; width: endText.x - 20; height: 1; color: Qt.alpha(Theme.fg, 0.1) }
-      Rectangle { visible: endText.visible; anchors.verticalCenter: endText.verticalCenter; x: endText.x + endText.width + 12; width: parent.width - x; height: 1; color: Qt.alpha(Theme.fg, 0.1) }
-      Text {
-        id: endText
-        objectName: "activityEnd"
-        visible: root.cards.length > 0
-        anchors.horizontalCenter: parent.horizontalCenter; y: 24
-        text: "Up to date \u00b7 latest " + root.clock(parent.newest)
-        color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 1
-      }
-    }
+    footer: Item { width: list.width; height: 48 }
 
     delegate: Item {
       id: row
