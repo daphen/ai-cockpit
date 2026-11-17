@@ -116,13 +116,15 @@ FocusScope {
   Rectangle {
     id: panel
     anchors { fill: parent; leftMargin: 7; topMargin: 2; bottomMargin: 7 }
-    radius: 8
+    // Concentric with the cards: card radius plus the gap to the panel edge.
+    radius: root.cardRadius + 8
     color: Theme.bg
     border.width: 1; border.color: Qt.alpha(Theme.fg, 0.08)
   }
   TapHandler { onTapped: root.forceActiveFocus() }
 
   readonly property bool light: Theme.mode === "light"
+  readonly property int cardRadius: 8
   readonly property string bodyFont: rail ? rail.messageFontFamily : "Geist"
   readonly property int fsBody: rail ? rail.fsBody : Theme.fontSize + 3
   readonly property int fsName: rail ? rail.fsName : Theme.fontSize + 4
@@ -447,7 +449,7 @@ FocusScope {
   ListView {
     id: list
     objectName: "activityList"
-    anchors { fill: panel; leftMargin: 17; rightMargin: 12; topMargin: 1; bottomMargin: 1 }
+    anchors { fill: panel; leftMargin: 17; rightMargin: 8; topMargin: 1; bottomMargin: 1 }
     clip: true
     boundsBehavior: Flickable.StopAtBounds
     model: ListModel { id: rowModel }
@@ -500,7 +502,7 @@ FocusScope {
       Rectangle {
         id: foldBox
         visible: row.kind === "fold"
-        y: 6; width: parent.width; height: 34; radius: 10
+        y: 6; width: parent.width; height: 34; radius: root.cardRadius
         color: row.current ? Qt.alpha(Theme.fg, 0.05) : foldHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent"
         border.width: row.current ? 1 : 0
         border.color: root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.18)
@@ -537,7 +539,7 @@ FocusScope {
         x: 8
         width: parent.width - 8
         height: visible ? cardCol.implicitHeight + 16 : 0
-        radius: 12
+        radius: root.cardRadius
         readonly property bool dim: root.minor(row.entry)
         readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
         readonly property var ctx: row.entry.ctx || ({ text: "" })
@@ -656,7 +658,7 @@ FocusScope {
         x: 32; y: 2
         width: parent.width - x
         height: visible ? fileCol.implicitHeight + 12 : 0
-        radius: 10
+        radius: root.cardRadius
         color: root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05)
         border.width: 1
         border.color: row.current ? (root.rail ? root.rail.cardRing : Qt.alpha(Theme.fg, 0.3)) : fileHover.hovered ? Qt.alpha(Theme.fg, 0.14) : Qt.alpha(Theme.fg, 0.07)
