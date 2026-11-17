@@ -22,7 +22,8 @@ QtObject {
     typing.stop()
     if (typingOn && !(snapOnEnd && !live) && full.length > shown) {
       typing.from = shown; typing.to = full.length
-      typing.duration = Math.max(160, Math.min(1200, (full.length - shown) * 4))
+      // Once the message is complete, the rest catches up fast so the next tool is not held behind it.
+      typing.duration = live ? Math.max(160, Math.min(1200, (full.length - shown) * 4)) : Math.max(120, Math.min(300, (full.length - shown) * 2))
       typing.start()
     } else shown = full.length
     paint()

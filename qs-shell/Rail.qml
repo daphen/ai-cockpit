@@ -727,10 +727,9 @@ Item {
     }
     var tools = activityEntries(items)
     if (!tools.length) return rows
-    if (!smallTurn(tools)) rows.push([{ key: ekey + "-tools", run: () => toggleGroupKey(ekey + "-tools") }])
+    rows.push([{ key: ekey + "-tools", run: () => toggleGroupKey(ekey + "-tools") }])
     var compact = activityRows(items), unresolved = unresolvedFailures(tools)
-    var currentId = agentd ? agentd.curToolIdFor(selectedRaw) : ""
-    var shown = smallTurn(tools) || groupOpen(ekey + "-tools") ? compact : compact.filter(activity => usefulActivity(activity, unresolved, currentId))
+    var shown = groupOpen(ekey + "-tools") ? compact : compact.filter(activity => usefulActivity(activity, unresolved))
     function addFile(file, gkey) {
       var row = [{ key: "open:" + gkey, run: () => openFileRef(file.path) }]
       var diff = entryDiff(file)
@@ -888,11 +887,11 @@ Item {
       && !tools.slice(index + 1).some(later => later.failed !== true && later.partial !== true && _attemptKey(later) === _attemptKey(tool)))
   }
   // A turn this small gains nothing from a "Work details" header; its rows show directly.
-  function smallTurn(tools) { return tools.length <= 2 }
-  function usefulActivity(activity, unresolved, currentId) {
+  // Reads stay behind the Work details toggle even while running, so no row appears and then vanishes.
+  function usefulActivity(activity, unresolved) {
     if (activity.kind === "edits") return true
     var rows = activity.kind === "group" ? (activity.cmds || []) : [activity]
-    return rows.some(row => (currentId && row.id === currentId) || (row.runs || [row]).some(run => unresolved.indexOf(run) >= 0)
+    return rows.some(row => (row.runs || [row]).some(run => unresolved.indexOf(run) >= 0)
       || (!row.failed && !sourceTool(row) && ["read", "read_file", "ls", "list", "glob", "find"].indexOf(row.tool) < 0))
   }
   function sourceTool(entry) {
@@ -2961,6 +2960,7 @@ Item {
   // matched by a cheap signature, and only the row that actually changed is written, so
   // the delegates persist and their bindings just update in place.
   ListModel { id: feedModel; dynamicRoles: true }
+  property int proseTyping: 0
   property bool _feedReset: false     // session switch → rebuild rather than reconcile
   function _turnSig(t) {
     if (!t) return ""
@@ -3428,9 +3428,15 @@ Item {
         layer.enabled: turnIntro.running
         layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: turnDel.introBlur }
         Component.onCompleted: {
-          if (rail._feedShown >= 0) { opacity = 1; introBlur = 0; introY = 0 } else turnIntro.start()
+          if (rail._feedShown >= 0) { opacity = 1; introBlur = 0; introY = 0 }
+          else if (waitsForProse) proseHold.start()
+          else turnIntro.start()
           rail.probeCardCreates++
         }
+        // A tool card waits for the reply above it to finish typing, so text and tools never animate together.
+        readonly property bool waitsForProse: rail.proseTyping > 0 && !isUser && rail.turnProse(turn.items).length === 0
+        onWaitsForProseChanged: if (!waitsForProse && proseHold.running) { proseHold.stop(); turnIntro.start() }
+        Timer { id: proseHold; interval: 1500; onTriggered: turnIntro.start() }
         ParallelAnimation {
           id: turnIntro
           NumberAnimation { target: turnDel; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.InOutQuad }
@@ -5369,15 +5375,12 @@ Item {
       spacing: 9
       readonly property var compactItems: rail.activityRows(items)
       readonly property var tools: rail.activityEntries(items)
-      readonly property bool smallTurn: rail.smallTurn(tools)
-      readonly property bool toolsOpen: smallTurn || rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
+      readonly property bool toolsOpen: rail.groupOpen(ekey + "-tools") || (rail.fileSelectOpen && rail.fileChoiceKey === ekey)
       readonly property var unresolved: rail.unresolvedFailures(tools)
       // Closed shows what other harnesses show by default: changes, actions, live and unresolved work; reads stay behind the toggle.
       readonly property var shownTools: {
         if (toolsOpen) return compactItems
-        rail.agentd ? rail.agentd.curToolGen : 0
-        var id = rail.agentd ? rail.agentd.curToolIdFor(rail.selectedRaw) : ""
-        return compactItems.filter(activity => rail.usefulActivity(activity, unresolved, id))
+        return compactItems.filter(activity => rail.usefulActivity(activity, unresolved))
       }
       // Rings sit beside rows, never inside a Row/RowLayout, which would give them layout space.
       Item {
@@ -5415,7 +5418,7 @@ Item {
         }
       }
       Item {
-        visible: actCol.tools.length > 0 && !actCol.smallTurn
+        visible: actCol.tools.length > 0
         x: 12; width: actCol.width - 24; height: detailsRow.implicitHeight
         ItemFocus { itemKey: ekey + "-tools"; anchors.fill: detailsRow }
       RowLayout {
@@ -6077,7 +6080,14 @@ Item {
       id: proseCol
       width: parent ? parent.width : 400
       spacing: rail.bodyLeading
-      readonly property StreamReveal reveal: StreamReveal { full: String(entry.text || ""); live: entry.liveText === true; arrivedAt: Number(entry.arrivedAt || 0) }
+      readonly property StreamReveal reveal: StreamReveal {
+        full: String(entry.text || ""); live: entry.liveText === true; arrivedAt: Number(entry.arrivedAt || 0)
+        property bool counted: false
+        function track() { if (counted !== revealing) { rail.proseTyping += revealing ? 1 : -1; counted = revealing } }
+        onRevealingChanged: track()
+        Component.onCompleted: track()
+        Component.onDestruction: if (counted) rail.proseTyping--
+      }
       readonly property var parts: rail.proseParts(reveal.text)
       Repeater {
         model: CountModel { size: proseCol.parts.length }
