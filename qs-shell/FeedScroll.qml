@@ -53,8 +53,26 @@ QtObject {
   }
   // A switch or send lands instantly while its rows realize; growth after that glides.
   property real _snapUntil: 0
+  // The top row on screen as of the previous follow step: growth above the viewport pushes
+  // it down, and that shift is taken back at once so only growth on screen or below glides.
+  property Item _anchor: null
+  property real _anchorY: 0
+  on_StickChanged: _anchor = null
+  function _topItem() {
+    for (var dy = 0; dy < 64; dy += 8) {
+      var i = view.indexAt(view.width / 2, view.contentY + dy)
+      if (i >= 0) return view.itemAtIndex(i)
+    }
+    return null
+  }
   function _followEnd() {
     if (!view || !chatVisible || view.count <= 0) return
+    if (_anchor && Math.abs(_anchor.y - _anchorY) > 0.5) {
+      _glide.stop()
+      view.contentY += _anchor.y - _anchorY
+    }
+    _anchor = _topItem()
+    _anchorY = _anchor ? _anchor.y : 0
     var li = view.itemAtIndex(view.count - 1)
     if (Date.now() < _snapUntil || (li && li.y + li.height > view.contentHeight + 0.5)) _pin()
     else _glideTo(_bottomY())
