@@ -148,7 +148,7 @@ ShellRoot {
         if (!test.hasText("checkCockpit") || test.visibleText("older") || test.hasText("toBe")) test.fail("a card's preview should show the source code that matches what the agent said it did, not the test")
         var names = []; test.find(page, i => { if (i.visible && (i.text === "Older.qml" || i.text === "older.test.qml")) names.push(i.text); return false })
         names = names.filter((n, k) => names.indexOf(n) === k)
-        if (names.join() !== "Older.qml,older.test.qml") test.fail("each file should be listed, source before tests: " + names)
+        if (names.join() !== "Older.qml" || !test.hasText("+ tests</font>")) test.fail("source files get change cards; tests only tag the outcome: " + names)
         if (!test.visibleText("hook the cockpit check into Older so the old thing runs")) test.fail("each file should say what was done in it")
         page.openDays = ({})
         if (test.find(page, i => i.visible && i.color !== undefined && i.x === 0 && i.width > 0 && i.width <= 4 && i.height > 20))

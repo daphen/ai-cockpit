@@ -356,17 +356,16 @@ FocusScope {
       if (past && !openDays[label]) continue
       if (c.sid !== sid) { out.push({ kind: "who", key: "who:" + c.key, sid: c.sid }); sid = c.sid }
       var g = c.changes.some(e => e.review) ? null : snippet(c), why = ""
-      c.bare = !g || minor(c)
+      var code = g ? g.files.filter(x => !x.test) : []
+      c.tests = !!g && code.length < g.files.length
+      c.bare = !code.length || minor(c)
       c.top = g ? g.files[0] : null
       out.push(c)
       if (c.bare) continue
-      var code = g.files.filter(x => !x.test), tests = g.files.filter(x => x.test)
       for (var x of code) {
         out.push({ kind: "file", key: c.key + "\x1f" + x.path, sid: c.sid, at: c.at, f: x, why: x.why === why ? "" : x.why })
         why = x.why
       }
-      if (tests.length)
-        out.push({ kind: "file", key: c.key + "\x1ftests", sid: c.sid, at: c.at, tests: tests, f: tests[0], why: "" })
     }
     return out
   }
@@ -581,7 +580,7 @@ FocusScope {
             objectName: "cardHead"
             width: parent.width
             text: cardBox.review ? '<font color="' + root.metaColor + '">#' + cardBox.review.pr + "</font>&nbsp;&nbsp;" + root.esc(cardBox.review.title || "Review")
-              : root.esc(cardBox.done || cardBox.asked)
+              : root.esc(cardBox.done || cardBox.asked) + (row.entry.tests ? '&nbsp;&nbsp;<font color="' + root.metaColor + '">+ tests</font>' : "")
             leftPadding: relayChip.visible ? relayChip.width + 8 : 0
             PillSurface {
               id: relayChip
@@ -653,7 +652,6 @@ FocusScope {
         objectName: "glanceBox"
         visible: row.kind === "file"
         readonly property var f: row.entry.f || ({ name: "", lines: [], add: 0, del: 0 })
-        readonly property var tests: row.entry.tests || null
         readonly property string language: root.rail && visible ? root.rail.codeLanguage(f.path) : ""
         readonly property real lineH: (root.fsMeta - 2) * 1.65
         x: 32; y: 2
@@ -683,21 +681,21 @@ FocusScope {
             Text {
               id: gName
               anchors { left: gIcon.right; leftMargin: 6; verticalCenter: parent.verticalCenter }
-              text: fileBox.tests ? fileBox.tests.length + (fileBox.tests.length === 1 ? " test file" : " test files") : fileBox.f.name
+              text: fileBox.f.name
               textFormat: Text.PlainText
-              color: fileBox.tests ? root.metaColor : Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
+              color: Theme.fg_secondary; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2
             }
             Text {
               anchors { left: gName.right; leftMargin: 12; right: gCounts.left; rightMargin: 12; verticalCenter: parent.verticalCenter }
-              text: fileBox.tests ? fileBox.tests.map(t => t.name).join(", ") : row.entry.why || ""
+              text: row.entry.why || ""
               textFormat: Text.PlainText
               elide: Text.ElideRight; maximumLineCount: 1
               color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta
             }
             Row {
               id: gCounts
-              readonly property int add: fileBox.tests ? fileBox.tests.reduce((n, t) => n + t.add, 0) : fileBox.f.add
-              readonly property int del: fileBox.tests ? fileBox.tests.reduce((n, t) => n + t.del, 0) : fileBox.f.del
+              readonly property int add: fileBox.f.add
+              readonly property int del: fileBox.f.del
               anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
               spacing: 8
               Text { visible: gCounts.add > 0; text: "+" + gCounts.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
@@ -705,7 +703,7 @@ FocusScope {
             }
           }
           Repeater {
-            model: fileBox.tests ? [] : fileBox.f.lines
+            model: fileBox.f.lines
             delegate: Rectangle {
               required property var modelData
               width: fileCol.width
@@ -725,7 +723,7 @@ FocusScope {
           }
           Text {
             x: 12
-            visible: !fileBox.tests && fileBox.f.moreLines > 0
+            visible: fileBox.f.moreLines > 0
             height: visible ? fileBox.lineH : 0; verticalAlignment: Text.AlignVCenter
             text: "\u22ef " + fileBox.f.moreLines + (fileBox.f.removedList ? " more removed" : " more lines")
             color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 3
