@@ -29,6 +29,7 @@ cp qs-shell/*.qml qs-shell/*.js qs-shell/*.qsb "$tmp/"
 cp -r qs-shell/crew "$tmp/"
 cp "${1:-test/session-landing.qml}" "$tmp/shell.qml"
 [[ "${1:-}" != "test/composer-attach.qml" ]] || cp test/fake-chooser.sh "$tmp/"
+[[ "${1:-}" != "test/activity-score-batches.qml" ]] || cp qs-shell/jev-activity.py "$tmp/"
 mkdir -p "$tmp/home"
 if [[ "${1:-}" == "test/private-font.qml" || "${1:-}" == "test/composer-lines.qml" ]]; then
   mkdir -p "$tmp/home/.local/share"
@@ -75,7 +76,7 @@ if [[ "${1:-}" == "test/diff-source.qml" ]]; then
     [[ -S "$tmp/runtime/agentd-$scope.sock" ]]
   done
 fi
-env -u WAYLAND_DISPLAY HOME="$tmp/home" QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml" \
+env -u WAYLAND_DISPLAY -u XDG_CACHE_HOME HOME="$tmp/home" QT_QPA_PLATFORM=offscreen QML_IMPORT_PATH="$PWD/build/qml:$HOME/.local/share/qml" \
   setsid qs -p "$tmp" >"$tmp/output" 2>&1 &
 pid=$!
 checks=200

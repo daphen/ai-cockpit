@@ -40,6 +40,14 @@ FocusScope {
   // Only a session's latest ask can still be in progress; older unfinished asks were steered past.
   function working(e) { return !e.outcome && e.latest && !!agentd && agentd.isBusy(e.sid) }
   function minor(e) { var s = jev[e.jid]; return !working(e) && !!s && s.key < 0.5 }
+  property var _jevPending: ({})
+  property double _jevShown: 0
+  function jevPublish() {
+    _jevShown = Date.now()
+    if (!Object.keys(_jevPending).length) return
+    jev = Object.assign({}, jev, _jevPending)
+    _jevPending = {}
+  }
   function jevNext() {
     if (jevRun.running || !visible) return
     var batch = []
@@ -47,6 +55,8 @@ FocusScope {
       var e = cards[i]
       if (!working(e) && !(e.jid in jev) && !jevAsked[e.jid]) batch.push(e)
     }
+    // Each published score set recomputes every row, so scores are held until the queue drains or 2s pass.
+    if (!batch.length || Date.now() - _jevShown >= 2000) jevPublish()
     if (!batch.length) return
     for (var b of batch) jevAsked[b.jid] = true
     jevRun.command = ["python3", Qt.resolvedUrl("jev-activity.py").toString().replace(/^file:\/\//, ""), JSON.stringify(batch.map(e => {
@@ -61,7 +71,7 @@ FocusScope {
     id: jevRun
     stdout: StdioCollector {
       onStreamFinished: {
-        try { root.jev = Object.assign({}, root.jev, JSON.parse(this.text)) } catch (_) {}
+        try { Object.assign(root._jevPending, JSON.parse(this.text)) } catch (_) {}
         Qt.callLater(root.jevNext)
       }
     }
