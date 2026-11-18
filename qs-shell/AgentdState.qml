@@ -776,14 +776,14 @@ Item {
   }
   // Keeps only the changed lines of a numbered diff ("+ 12 text"), capped, so rows stay small.
   // Keeps the numbered diff with its context lines ("+ 12 text"), capped, so rows stay small.
-  function _editActivity(sid, id, at, path, details, content, why) {
+  function _editActivity(sid, id, at, path, details, content, why, written) {
     var diff = details && details.diff ? String(details.diff) : "", counts = diff ? _countDiff(diff) : [0, 0]
     var lines = diff.split("\n").filter(l => l.length)
     if (!diff && content) counts = [String(content).split("\n").length, 0]
     var changed = lines.find(l => /^[+-]\s*\d+ /.test(l))
     var first = changed ? Number(changed.match(/^[+-]\s*(\d+)/)[1]) : 1
     return { key: "edit:" + id, sid: sid, at: at, kind: "edit", path: String(path), add: counts[0], del: counts[1],
-             line: Number(details && details.firstChangedLine) || first, why: String(why || ""), lines: lines.length, whole: !diff && !!content,
+             line: Number(details && details.firstChangedLine) || first, why: String(why || ""), lines: lines.length, whole: !diff && (!!content || !!written),
              diff: lines.slice(0, 40).map(l => l.length > 200 ? l.slice(0, 200) : l),
              review: _isReview(path) && content ? _reviewDigest(String(content)) : null }
   }
@@ -1624,7 +1624,7 @@ Item {
         feedGen++
       }
       if (!failed && activity && activity.kind === "edit" && _isCodeEdit(String(activity.path || ""))) {
-        var editRow = _editActivity(sid, m.toolCallId, Date.now(), activity.path, det, _reviewText[m.toolCallId] || "", _editWhy[m.toolCallId])
+        var editRow = _editActivity(sid, m.toolCallId, Date.now(), activity.path, det, _reviewText[m.toolCallId] || "", _editWhy[m.toolCallId], activity.tool === "write" || activity.tool === "create")
         var whys = _editWhy; delete whys[m.toolCallId]; delete _reviewText[m.toolCallId]
         if (!editRow.add && !editRow.del) { editRow.add = activity.add || 0; editRow.del = activity.del || 0 }
         _noteActivity([editRow])

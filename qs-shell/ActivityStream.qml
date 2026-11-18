@@ -150,8 +150,9 @@ FocusScope {
       for (var f of e.files || []) {
         if (f.covered) continue
         var file = files.find(x => x.path === f.path)
-        if (!file) files.push(file = { path: f.path, name: String(f.path).split("/").pop(), line: f.line || 1, add: 0, del: 0, why: "", best: null, removed: [], test: isTest(f.path) })
+        if (!file) files.push(file = { path: f.path, name: String(f.path).split("/").pop(), line: f.line || 1, add: 0, del: 0, why: "", best: null, removed: [], test: isTest(f.path), written: false })
         file.add += f.add; file.del += f.del
+        if (f.whole) file.written = true
         if (e.why) file.why = headline(e.why)
         var hunk = []
         var close = () => {
@@ -262,7 +263,7 @@ FocusScope {
       if (r.kind !== "edit") continue
       ;(editsBy[r.sid] = editsBy[r.sid] || []).push(r)
       events.push({ sid: r.sid, at: r.at, ctx: ctx[r.sid] || { text: "", from: "", at: 0 }, why: r.why || "", whole: !!r.whole, review: r.review || null,
-                    files: [{ path: r.path, add: r.add || 0, del: r.del || 0, line: r.line || 1, diff: r.whole ? [] : (r.diff || []) }],
+                    files: [{ path: r.path, add: r.add || 0, del: r.del || 0, line: r.line || 1, whole: !!r.whole, diff: r.whole ? [] : (r.diff || []) }],
                     key: r.key })
     }
     var tops = {}
@@ -708,6 +709,8 @@ FocusScope {
               readonly property int del: fileBox.f.del
               anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
               spacing: 8
+              // The write tool reports the same result for a new file and an overwrite, so this says "written", not "new".
+              Text { objectName: "writtenLabel"; visible: !!fileBox.f.written; text: "written"; color: root.metaColor; font.family: root.bodyFont; font.pixelSize: root.fsMeta - 2 }
               Text { visible: gCounts.add > 0; text: "+" + gCounts.add; color: Theme.green; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
               Text { visible: gCounts.del > 0; text: "\u2212" + gCounts.del; color: Theme.red; font.family: Theme.fontFamily; font.pixelSize: root.fsMeta - 2 }
             }
