@@ -92,7 +92,6 @@ Item {
   // and clear the restore flag, or the next focus change would drop you back into it.
   // Jump straight to a session by name (Super+i on a live question): select it
   // and put the keyboard in the rail so the ask card's keys work immediately.
-  // A session switch lands the editor after its fade; the file rides on that landing.
   property var _pendingFile: null
   function openSessionFile(sid, path, line) {
     if (sid === selectedRaw) { openInNvim(path, _sessionCwdOf(sid), line); return }
@@ -2296,7 +2295,6 @@ Item {
     rememberSelection(selectedRaw)
     _ensureChanges()
     if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
-    var hadPrevious = _prevSelected !== ""
     if (_prevSelected) {
       var m = _seenAt
       if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
@@ -2308,10 +2306,15 @@ Item {
     // Restore the panel (chat/files) this session was last viewed on.
     view = _viewFor[selectedRaw] || "chat"
     _feedReset = true
-    if (hadPrevious) beginSwitchFade()
-    else if (selectedRaw) {
-      if (agentd) agentd.select(selectedRaw)
-      if (_landed) landNvim(selectedRaw)
+    switchQuiet.restart()
+    if (selectedRaw) {
+      // A session already on hand shows its saved cards first; the fresh transcript loads once they are built.
+      _fetchAfterFill = agentd && agentd.feedFor(selectedRaw).length ? selectedRaw : ""
+      if (agentd && !_fetchAfterFill) agentd.select(selectedRaw)
+      var file = _pendingFile
+      _pendingFile = null
+      if (file && file.sid === selectedRaw) openInNvim(file.path, _sessionCwdOf(file.sid), file.line)
+      else if (_landed) landNvim(selectedRaw)
     }
     // Report the rebuild, don't just do it: synced() is what consumes a pending jump, and
     // it was only ever reached from the stream debounce. Switching to an IDLE session on a
@@ -2990,64 +2993,46 @@ Item {
     if (!t) return ""
     return t.key ? ("k:" + t.key) : (String(t.kind) + ":" + String(t.text || t.command || "").slice(0, 80))
   }
-  // Animations share the GUI thread with transcript parsing and row building (~8ms a row), so a
-  // switch fetches nothing until the roster collapse ends, then builds newest-first and fades in.
+  // Every card is realized (~10ms each), so a rebuilt feed shows its newest screenful at once
+  // and adds older cards above it one per frame, out of sight.
   property int _feedShown: -1
   readonly property int _feedOffset: _feedShown >= 0 ? Math.max(0, groupedFeed.length - _feedShown) : 0
-  readonly property bool switching: switchSettle.running || feedFill.running
-  readonly property int feedFillStep: 1
   readonly property int feedFillFirst: 2
-  // An Animator runs on the render thread, so the feed build and nvim repaint on a switch
-  // cannot stall it. It only writes feedView.opacity back when it stops or finishes.
-  OpacityAnimator { id: feedFade; target: feedView; duration: Motion.base; easing.type: Easing.OutCubic }
-  function fadeFeedIn() {
-    if (feedFade.running ? feedFade.to === 1 : feedView.opacity >= 1) return
-    feedFade.stop(); feedFade.to = 1; feedFade.duration = 220; feedFade.start()
-  }
-  Timer {
-    id: switchSettle
-    interval: Motion.slow + 20
-    onTriggered: {
-      if (rail.agentd && rail.selectedRaw) rail.agentd.select(rail.selectedRaw)
-      var file = rail._pendingFile
-      rail._pendingFile = null
-      if (file && file.sid === rail.selectedRaw) rail.openInNvim(file.path, rail._sessionCwdOf(file.sid), file.line)
-      else if (rail._landed && rail.selectedRaw) rail.landNvim(rail.selectedRaw)
-      rail._resyncFeed()
-    }
+  property var _builtKeys: ({})   // rows a rebuild showed: they appear without the entrance animation
+  // Briefly true after a switch so the chin swaps its values instead of animating them.
+  readonly property bool switching: switchQuiet.running
+  Timer { id: switchQuiet; interval: 400 }
+  property string _fetchAfterFill: ""
+  function _fetchDeferred() {
+    if (!_fetchAfterFill || feedFill.running) return
+    if (agentd && _fetchAfterFill === selectedRaw) agentd.select(_fetchAfterFill)
+    _fetchAfterFill = ""
   }
   Timer {
     id: feedFill
     interval: 16; repeat: true
     onTriggered: {
-      rail._feedShown += rail.feedFillStep
+      rail._feedShown++
       if (rail._feedShown >= rail.groupedFeed.length) { rail._feedShown = -1; stop() }
       rail._resyncFeed()
-      if (rail._feedShown >= 0 && !feedScroll.following) return
-      if (rail._feedShown < 0 && feedScroll.mode === "free" && rail.cur >= rail.rSize)
-        feedScroll.cursorMoved(rail.cur - rail.rSize, rail.cur - rail.rSize === rail.groupedFeed.length - 1)
-      rail.fadeFeedIn()
+      rail._fetchDeferred()
     }
-  }
-  function beginSwitchFade() {
-    feedFill.stop(); _feedShown = -1
-    feedFade.stop(); feedFade.to = 0; feedFade.duration = Motion.base; feedFade.start()
-    switchSettle.restart()
   }
   function syncFeedModel() {
-    if (switchSettle.running) return
     var arr = groupedFeed
-    if (arr.length > feedFillStep && (_feedReset || (feedModel.count === 0 && _feedShown < 0))) {
-      feedFade.stop(); feedView.opacity = 0; _feedShown = feedFillFirst; feedFill.restart()
-    } else if (_feedShown < 0) {
-      fadeFeedIn()
-    }
+    var rebuild = _feedReset || feedModel.count === 0
+    if (rebuild && arr.length > feedFillFirst) { _feedShown = feedFillFirst; feedFill.restart() }
     if (_feedShown >= 0) arr = arr.slice(Math.max(0, arr.length - _feedShown))
-    if (_feedReset) {
+    if (rebuild) {
       _feedReset = false
       feedModel.clear()
-      for (var a = 0; a < arr.length; a++)
-        feedModel.append({ d: JSON.parse(JSON.stringify(arr[a])), sig: _turnSig(arr[a]), k: _feedKey(arr[a]) })
+      var built = {}
+      for (var a = 0; a < arr.length; a++) {
+        var k = _feedKey(arr[a])
+        built[k] = true
+        feedModel.append({ d: JSON.parse(JSON.stringify(arr[a])), sig: _turnSig(arr[a]), k: k })
+      }
+      _builtKeys = built
       return
     }
     _reconcileKeyed(feedModel, arr, _feedKey, _turnSig)
@@ -3078,7 +3063,7 @@ Item {
 
   // Rebuild the feed rows and tell the scroll machine they are in. Always paired: a sync
   // without the report leaves a queued jump waiting for an event that may never come.
-  function _resyncFeed() { syncFeedModel(); feedScroll.synced() }
+  function _resyncFeed() { syncFeedModel(); feedScroll.synced(); _fetchDeferred() }
 
   // --- Live feed for the selected session; mock when no daemon data yet ---
   // Debounced stream updates: rebuilding the whole feed model on every token
@@ -3430,7 +3415,7 @@ Item {
         layer.enabled: turnIntro.running
         layer.effect: MultiEffect { blurEnabled: true; blurMax: 16; blur: turnDel.introBlur }
         Component.onCompleted: {
-          if (rail._feedShown >= 0) { opacity = 1; introBlur = 0; introY = 0 }
+          if (rail._feedShown >= 0 || rail._builtKeys[model.k]) { opacity = 1; introBlur = 0; introY = 0 }
           else if (waitsForProse) proseHold.start()
           else turnIntro.start()
           rail.probeCardCreates++

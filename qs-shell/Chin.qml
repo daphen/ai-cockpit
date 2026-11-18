@@ -25,16 +25,8 @@ Rectangle {
   readonly property color sky: Theme.mode === "light" ? "#287FA6" : "#7DD3FC"
   property var st: ({})
   property string remoteSocket: ""
-  // A session switch blocks the GUI thread while the feed rebuilds; per-field animations
-  // stutter there, so the contents fade on the render thread and values swap unseen.
+  // During a session switch values swap in place instead of animating from the old session's.
   property bool switching: false
-  onSwitchingChanged: {
-    contentFade.stop()
-    contentFade.to = switching ? 0 : 1
-    contentFade.duration = switching ? Motion.base : Motion.slow
-    contentFade.start()
-  }
-  OpacityAnimator { id: contentFade; target: content; easing.type: Easing.OutCubic }
   onRemoteSocketChanged: {
     st = remoteSocket ? chin._placeholder("VM editor connecting") : ({})
     remoteState.running = false

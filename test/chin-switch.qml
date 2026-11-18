@@ -26,7 +26,7 @@ ShellRoot {
         test.widthBefore = cell.width
         chin.switching = true
       } else if (test.phase === 2) {
-        if (content.opacity > 0.01) test.fail("chin contents still visible mid-switch: " + content.opacity)
+        if (content.opacity < 0.99) test.fail("chin contents faded during a switch: " + content.opacity)
         chin.st = { path: "apps/webapp/app/components/runs/v3/diagnosis/RunSheet.tsx" }
         Qt.callLater(function() {
           if (cell.width <= test.widthBefore + 100) test.fail("value change animated during a switch (width " + cell.width + ")")
@@ -34,14 +34,13 @@ ShellRoot {
       } else if (test.phase === 3) {
         chin.switching = false
       } else if (test.phase === 4) {
-        if (content.opacity < 0.99) test.fail("chin did not fade back in: " + content.opacity)
         var w = cell.width
         chin.st = { path: "b.txt" }
         Qt.callLater(function() {
           if (Math.abs(cell.width - w) > 1) test.fail("in-session change no longer animates (jumped to " + cell.width + ")")
         })
       } else {
-        console.log("PASS: chin fades during a session switch, swaps values unseen, animates in-session changes")
+        console.log("PASS: chin stays visible and swaps values in place during a session switch, animates in-session changes")
         Qt.quit()
       }
       test.phase++
