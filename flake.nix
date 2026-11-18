@@ -119,9 +119,9 @@
           if [ "''${COCKPIT_SCOPE:-lovable}" = "personal" ]; then
             export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · private}"
             mirror="$HOME/.local/state/cockpit/private-shell-pkg"
-            mkdir -p "$mirror"; rm -f "$mirror"/*.qml "$mirror"/*.qsb
-            for f in "$shell"/*.qml "$shell"/*.qsb; do ln -sf "$f" "$mirror/$(basename "$f")"; done
-            for d in "$shell"/*/; do ln -sfn "''${d%/}" "$mirror/$(basename "$d")"; done
+            # Mirror every shipped entry, so a new file type in qs-shell can't go missing here.
+            mkdir -p "$mirror"; find "$mirror" -mindepth 1 -maxdepth 1 -type l -delete
+            for f in "$shell"/*; do ln -sfn "$f" "$mirror/$(basename "$f")"; done
             shell="$mirror"
           else
             export COCKPIT_TITLE="''${COCKPIT_TITLE:-cockpit-qs · lovable}"
