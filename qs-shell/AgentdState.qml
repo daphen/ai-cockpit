@@ -1824,7 +1824,7 @@ Item {
   // transcript: an ask_user call with no matching result is still waiting on you.
   function _recoverAsk(sid, entries) {
     var calls = [], answered = {}, lastCallId = ""
-    function walk(o) {
+    function visit(o) {
       if (!o || typeof o !== "object") return
       if (o.type === "toolCall") {
         lastCallId = o.id || lastCallId          // track the most recent call of ANY kind
@@ -1836,9 +1836,17 @@ Item {
       var rid = o.toolCallId
       if (rid && (o.type === "toolResult" || o.result !== undefined || o.output !== undefined))
         answered[rid] = true
-      for (var k in o) walk(o[k])
     }
-    for (var i = 0; i < entries.length; i++) walk(entries[i])
+    // Tool calls and results live only on entries, their message, and its content blocks;
+    // walking every nested value of a multi-MB transcript froze the window for ~80ms.
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i], msg = e && e.message
+      visit(e)
+      if (!msg || typeof msg !== "object") continue
+      visit(msg)
+      var blocks = msg.content
+      if (Array.isArray(blocks)) for (var n = 0; n < blocks.length; n++) visit(blocks[n])
+    }
     var open = null
     for (var j = calls.length - 1; j >= 0; j--)
       if (!answered[calls[j].id]) { open = calls[j]; break }
