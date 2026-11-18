@@ -141,6 +141,7 @@ Item {
   signal editMarksSnapshot(string sid, string path, var rows, double at, int line, string editId)
   signal fileActivity(string sid, string path, int line, string needleB64, var addedLines, string editId)
   signal sessionSettled(string sid)
+  signal entriesLoaded(string sid)
   signal modelChangeResult(string sid, bool success, string detail)
   signal openInNvimRequested(string sid, string path, int line, int column)
   // The edit's most distinctive inserted line (longest trimmed, >=3 chars),
@@ -909,11 +910,16 @@ Item {
   }
 
   // Selecting a session: pull its transcript AND its current changed files.
+  // Sessions that had events while another one was on screen: their saved feed is behind.
+  property var _unseen: ({})
+  function feedReady(sid) { return (feeds[sid] || []).length > 0 && !_unseen[sid] }
+  // Returns whether a fresh transcript is on its way; a session already up to date is shown as saved.
   function select(sid) {
-    if (!sid || !String(sid).length) return
-    send({ type: "get_entries", session: sid })
+    if (!sid || !String(sid).length) return false
+    var asked = !feedReady(sid) && send({ type: "get_entries", session: sid })
     send({ type: "get_session_stats", session: sid })
     refreshChanges(sid)
+    return asked
   }
 
   function refreshChanges(sid) {
@@ -1265,7 +1271,11 @@ Item {
     }
     if (t === "response" && m.command === "get_entries") {
       if (m.success && m.session) _noteActivity(_activityFromEntries(m.session, (m.data || {}).entries || []))
-      if (m.session === selectedSession) onEntries(m)
+      if (m.session === selectedSession) {
+        onEntries(m)
+        if (m.success) { var u = _unseen; delete u[m.session]; _unseen = u }
+        entriesLoaded(m.session)
+      }
       return
     }
     if (t === "response" && m.command === "get_session_stats" && m.success === true && m.session) {
@@ -1284,6 +1294,7 @@ Item {
     }
     const sid = m.session
     if (!sid) return
+    if (sid !== selectedSession) _unseen[sid] = true
     // pi died: its queue and any message it had not yet written are gone with it.
     if (t === "reconnecting") {
       _setFeedValue(sid, "pi-queue", null)

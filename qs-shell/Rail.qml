@@ -2287,49 +2287,67 @@ Item {
   // you were following (or have never opened) still lands on its newest message.
   property var _seenAt: ({})
   property var _viewFor: ({})   // sid -> "chat" | "files": the panel you left it on
-  property string _prevSelected: ""
   property bool _restoring: false
 
+  // The session whose cards are on screen. It follows the selection only once that session's
+  // feed is complete, so a switch never shows stale cards that then change.
+  property string shownRaw: ""
+  property string _prevShown: ""
   onSelectedRawChanged: {
     rememberRecent(selectedRaw)
     rememberSelection(selectedRaw)
     _ensureChanges()
     if (hinting) cancelHints("session-switch")   // hint mode is per-row; a session switch orphans it
-    if (_prevSelected) {
-      var m = _seenAt
-      if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevSelected] = cursorFeedKey
-      else delete m[_prevSelected]          // was following → follow again next time
-      _seenAt = m
-      var vw = _viewFor; vw[_prevSelected] = view; _viewFor = vw
-    }
-    _prevSelected = selectedRaw
-    // Restore the panel (chat/files) this session was last viewed on.
-    view = _viewFor[selectedRaw] || "chat"
-    _feedReset = true
     switchQuiet.restart()
     if (selectedRaw) {
-      // A session already on hand shows its saved cards first; the fresh transcript loads once they are built.
-      _fetchAfterFill = agentd && agentd.feedFor(selectedRaw).length ? selectedRaw : ""
-      if (agentd && !_fetchAfterFill) agentd.select(selectedRaw)
       var file = _pendingFile
       _pendingFile = null
       if (file && file.sid === selectedRaw) openInNvim(file.path, _sessionCwdOf(file.sid), file.line)
       else if (_landed) landNvim(selectedRaw)
     }
-    // Report the rebuild, don't just do it: synced() is what consumes a pending jump, and
-    // it was only ever reached from the stream debounce. Switching to an IDLE session on a
-    // quiet daemon produced no further ticks, so the jump queued below never ran at all —
-    // the feed sat wherever the last session left it.
+    // First switch retries (nvim's RPC socket may not be up yet); after nvim has answered
+    // once, land EXACTLY once per switch — the retry visibly blinked the buffer.
+    if (selectedRaw && !_landed) { landTimer.n = 0; landTimer.restart() }
+    switchSettle.interval = shownRaw ? Motion.slow + 20 : 0
+    switchSettle.restart()
+  }
+  // The roster reorders with an animation on every switch; loading or building cards during it
+  // made it stutter, so the swap waits for it to finish while the current cards stay put.
+  Timer {
+    id: switchSettle
+    onTriggered: {
+      var sid = rail.selectedRaw
+      // Stale saved cards wait for the fresh transcript; with none saved there is nothing to hold.
+      if (rail.agentd && sid && rail.agentd.select(sid) && rail.agentd.feedFor(sid).length) entriesWait.restart()
+      else rail.shownRaw = sid
+    }
+  }
+  Timer { id: entriesWait; interval: 1000; onTriggered: rail.shownRaw = rail.selectedRaw }
+  Connections {
+    target: rail.agentd
+    function onEntriesLoaded(sid) { if (sid === rail.selectedRaw && entriesWait.running) { entriesWait.stop(); rail.shownRaw = sid } }
+  }
+  onShownRawChanged: {
+    if (_prevShown) {
+      var m = _seenAt
+      if (feedScroll.mode === "free" && cur >= rSize && cursorFeedKey) m[_prevShown] = cursorFeedKey
+      else delete m[_prevShown]          // was following → follow again next time
+      _seenAt = m
+      var vw = _viewFor; vw[_prevShown] = view; _viewFor = vw
+    }
+    _prevShown = shownRaw
+    view = _viewFor[shownRaw] || "chat"
+    _feedReset = true
+    feedTick++
+    // synced() is what consumes a pending jump; an idle session on a quiet daemon sends no
+    // further ticks, so report the rebuild here or the jump queued below never runs.
     Qt.callLater(rail._resyncFeed)
-    // Only restore a saved spot on a session that is NOT working. A streaming session
-    // should track its live edge — parking you where you last read means "no live follow"
-    // on exactly the session you switched to in order to watch it.
+    // A streaming session tracks its live edge; only an idle one returns to where you left it.
     var busy = false
     for (var b = 0; b < (agentd ? agentd.sessions.length : 0); b++)
-      if (agentd.sessions[b].id === selectedRaw) { busy = agentd.sessions[b].status === "streaming"; break }
-    var want = busy ? "" : _seenAt[selectedRaw]
+      if (agentd.sessions[b].id === shownRaw) { busy = agentd.sessions[b].status === "streaming"; break }
+    var want = busy ? "" : _seenAt[shownRaw]
     if (want) {
-      // Park the anchor and let onGroupedFeedChanged land on it once the transcript arrives.
       cursorFeedKey = want
       _restoring = true
       feedScroll.hold()
@@ -2337,12 +2355,6 @@ Item {
       _restoring = false
       feedScroll.toEnd()
     }
-    // Live-follow: land nvim in the session's worktree (+ plan) on open AND on
-    // every switch, so the editor always tracks the session you're viewing.
-    // First switch retries (nvim's RPC socket may not be up yet); after nvim has
-    // answered once, land EXACTLY once per switch — the 3x retry re-ran cd +
-    // dashboard three times and the buffer visibly blinked on every session change.
-    if (selectedRaw && !_landed) { landTimer.n = 0; landTimer.restart() }
   }
 
   function _sessionOf(sid) {
@@ -3002,12 +3014,7 @@ Item {
   // Briefly true after a switch so the chin swaps its values instead of animating them.
   readonly property bool switching: switchQuiet.running
   Timer { id: switchQuiet; interval: 400 }
-  property string _fetchAfterFill: ""
-  function _fetchDeferred() {
-    if (!_fetchAfterFill || feedFill.running) return
-    if (agentd && _fetchAfterFill === selectedRaw) agentd.select(_fetchAfterFill)
-    _fetchAfterFill = ""
-  }
+
   Timer {
     id: feedFill
     interval: 16; repeat: true
@@ -3015,7 +3022,6 @@ Item {
       rail._feedShown++
       if (rail._feedShown >= rail.groupedFeed.length) { rail._feedShown = -1; stop() }
       rail._resyncFeed()
-      rail._fetchDeferred()
     }
   }
   function syncFeedModel() {
@@ -3063,7 +3069,7 @@ Item {
 
   // Rebuild the feed rows and tell the scroll machine they are in. Always paired: a sync
   // without the report leaves a queued jump waiting for an event that may never come.
-  function _resyncFeed() { syncFeedModel(); feedScroll.synced(); _fetchDeferred() }
+  function _resyncFeed() { syncFeedModel(); feedScroll.synced() }
 
   // --- Live feed for the selected session; mock when no daemon data yet ---
   // Debounced stream updates: rebuilding the whole feed model on every token
@@ -3087,7 +3093,7 @@ Item {
     void rail.feedTick           // debounced dependency (see feedDebounce)
     // Live: the SELECTED session's own transcript (empty until loaded), read at
     // the debounced tick so rapid stream bumps don't thrash the model.
-    return (agentd && selectedRaw) ? agentd.feedFor(selectedRaw) : []
+    return (agentd && shownRaw) ? agentd.feedFor(shownRaw) : []
   }
   readonly property var mockFeed: [
     { kind: "user",  text: "Fix tile placement so deleted shapes free their geometry." },
