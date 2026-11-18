@@ -37,7 +37,8 @@ FocusScope {
   property var jevAsked: ({})
   property bool importantOnly: false
   // An ask still being worked on is never judged: each new edit would re-score it and flip its preview.
-  function working(e) { return !e.outcome && !!agentd && agentd.isBusy(e.sid) }
+  // Only a session's latest ask can still be in progress; older unfinished asks were steered past.
+  function working(e) { return !e.outcome && e.latest && !!agentd && agentd.isBusy(e.sid) }
   function minor(e) { var s = jev[e.jid]; return !working(e) && !!s && s.key < 0.5 }
   function jevNext() {
     if (jevRun.running || !visible) return
@@ -340,6 +341,7 @@ FocusScope {
       for (var i = lo; i < own.length && own[i].at < end; i++) if (own[i].kind !== "summary" && own[i].at > c.ctx.at) end = own[i].at
       for (i = lo; i < own.length && own[i].at < end; i++) if (own[i].kind === "summary" && (!best || own[i].at > best.at)) best = own[i]
       c.outcome = best ? best.text : ""
+      c.latest = end === Infinity
       if (best && !c.changes.length) c.at = best.at
       c.jid = c.key + ":" + c.changes.length + ":" + (best ? 1 : 0)
     }
