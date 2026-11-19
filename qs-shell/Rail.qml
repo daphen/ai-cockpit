@@ -3016,10 +3016,14 @@ Item {
   readonly property bool switching: switchQuiet.running
   Timer { id: switchQuiet; interval: 400 }
 
+  Timer { id: reorderSettle; interval: 700 }
+  Connections { target: rosterModel; function onRowsMoved() { reorderSettle.restart() } }
   Timer {
     id: feedFill
     interval: 16; repeat: true
     onTriggered: {
+      // Building a card takes most of a frame, which stutters the tabs sliding after a switch.
+      if (reorderSettle.running) return
       rail._feedShown++
       if (rail._feedShown >= rail.groupedFeed.length) { rail._feedShown = -1; stop() }
       rail._resyncFeed()
@@ -4991,12 +4995,7 @@ Item {
           spacing: 8
           // Spring only for a reorder; a pill growing on hover pushes its neighbours directly,
           // so they move in step with its width animation.
-          property bool reordering: false
-          Timer { id: reorderSettle; interval: 700; onTriggered: inlineRowItems.reordering = false }
-          Connections {
-            target: rail
-            function onTabRecencyChanged() { inlineRowItems.reordering = true; reorderSettle.restart() }
-          }
+          readonly property bool reordering: reorderSettle.running
           move: reordering ? reorderSpring : null
           Transition { id: reorderSpring; SpringAnimation { properties: "x"; spring: 8; damping: 0.55; epsilon: 0.25 } }
           Repeater {
