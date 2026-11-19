@@ -301,10 +301,29 @@ Item {
   // vanish and then "all show up at once" when pi finally consumed them.
   property var _localEcho: ({})   // sid -> [{text}, …] not yet seen in the transcript
   property int _sendSerial: 0
+  property var _runEndedAt: ({})
+  Timer {
+    id: lostEchoCheck
+    interval: root.lostEchoAfterMs + 100
+    onTriggered: {
+      var sid = root.selectedSession
+      if ((root._localEcho[sid] || []).length && root._sessionStatus(sid) !== "streaming") root.refreshEntries(sid)
+    }
+  }
+  readonly property int lostEchoAfterMs: 3000
+  // The run ended, then a fresh transcript covering the send still lacks it: pi
+  // dropped it, so offer resend instead of pinning it to the bottom forever.
+  function _echoLost(sid, echo, entries, trimmed) {
+    var ended = _runEndedAt[sid] || 0
+    if (!echo.at || echo.at >= ended || Date.now() - ended < lostEchoAfterMs) return false
+    if (echo.delivery === "failed" || echo.delivery === "handled" || _sessionStatus(sid) === "streaming") return false
+    var first = entries.length ? Date.parse((entries[0] || {}).timestamp || "") : NaN
+    return !trimmed || first <= echo.at
+  }
   function _sendId() { return "cockpit-send:" + Date.now() + ":" + (++_sendSerial) }
   function _echoTrack(sid, text, id, delivery, steered) {
     var m = Object.assign({}, _localEcho)
-    m[sid] = (m[sid] || []).concat([{ text: text, id: id, delivery: delivery, steered: steered === true }])
+    m[sid] = (m[sid] || []).concat([{ text: text, id: id, delivery: delivery, steered: steered === true, at: Date.now() }])
     _localEcho = m
     _push(sid, { kind: "user", text: text, deliveryId: id, delivery: delivery, steered: steered === true })
   }
@@ -1377,7 +1396,11 @@ Item {
     }
     if (t === "message_end" && m.message && m.message.role === "user") _noteActivity([_promptActivity(sid, m.message, Date.now())])
     // The daemon is talking about this session, so its real status is authoritative now.
-    if (t === "agent_end") root._confirmInterrupt(sid)
+    if (t === "agent_end") {
+      root._confirmInterrupt(sid)
+      var ends = _runEndedAt; ends[sid] = Date.now(); _runEndedAt = ends
+      lostEchoCheck.restart()
+    }
     if (t === "agent_end" || t === "error" || (t === "turn_end" && !isInterrupting(sid))) root._clearPending(sid)
     if (t === "agent_end") { _clearToolPreview(sid); _curTool.delete(sid); curToolGen++ }
     // The whole turn is over (completed or aborted) → the next queued message goes out.
@@ -1767,6 +1790,8 @@ Item {
               if (feeds[esid][si].mid === settledMid) { insertAt = si; break }
           }
         }
+        if (_echoLost(esid, qe, m.data.entries, m.data.trimmedFrom !== undefined))
+          qe = Object.assign({}, qe, { delivery: "failed" })
         left.push(qe)
         feeds[esid].splice(insertAt, 0, { kind: "user", text: qt, deliveryId: qe.id, delivery: qe.delivery, steered: qe.steered === true })
       }
