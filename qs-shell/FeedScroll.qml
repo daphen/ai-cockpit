@@ -57,12 +57,13 @@ QtObject {
   // re-basing its origin) pin in the same frame, so what is on screen does not move.
   property Item _last: null
   property real _lastH: 0
-  property int _lastCount: 0
   function _followEnd() {
     if (!view || !chatVisible || view.count <= 0) return
     var li = view.itemAtIndex(view.count - 1)
-    var atEnd = view.count > _lastCount || li !== _last || (li && li.height > _lastH + 0.5)
-    _last = li; _lastH = li ? li.height : 0; _lastCount = view.count
+    // Mid-insert the last row reads as null for one call; treating that as new content glided the feed.
+    if (!li) return
+    var atEnd = li !== _last || (li && li.height > _lastH + 0.5)
+    _last = li; _lastH = li ? li.height : 0
     if (Date.now() < _snapUntil || (li && li.y + li.height > view.contentHeight + 0.5) || (!atEnd && !_glide.running)) _pin()
     else _glideTo(_bottomY())
   }

@@ -53,20 +53,28 @@ ShellRoot {
   property double reorderAt: 0
   property int cardsAtReorder: -1
   property bool builtDuringSlide: false
-  Connections { target: rail; function onTabRecencyChanged() { if (test.round > 1) { test.reorderAt = Date.now(); test.cardsAtReorder = rail.feedScrollState().count } } }
+  property bool wasFull: false
+  property real landedAt: NaN
+  property real worstDrift: 0
+  Connections { target: rail; function onTabRecencyChanged() { if (test.round > 1) { test.reorderAt = Date.now(); test.cardsAtReorder = rail.feedScrollState().count; test.wasFull = false } } }
   FrameAnimation {
     running: true
     onTriggered: {
       var now = Date.now()
+      var lv = test.feedView(rail), li = lv ? lv.itemAtIndex(lv.count - 1) : null
       if (test.reorderAt && test.lastFrame && now - test.reorderAt < 700) test.worstDuringReorder = Math.max(test.worstDuringReorder, now - test.lastFrame)
-      if (test.reorderAt && now - test.reorderAt < 650 && rail.feedScrollState().count !== test.cardsAtReorder) test.builtDuringSlide = true
+      if (test.reorderAt && now - test.reorderAt < 650 && lv) {
+        if (lv.count !== test.cardsAtReorder && test.wasFull) test.builtDuringSlide = true
+        test.cardsAtReorder = lv.count; test.wasFull = lv.contentHeight >= lv.height
+      }
       test.lastFrame = now
+      if (li && !isNaN(test.landedAt) && !test.t0) test.worstDrift = Math.max(test.worstDrift, Math.abs(li.y - lv.contentY - test.landedAt))
       if (!test.t0) return
       var fv = test.feedView(rail)
       if (fv) test.lowest = Math.min(test.lowest, fv.opacity)
       var key = test.newest()
       if (test.betaMoved && test.target === "beta" && key.indexOf("beta") === 0 && key.indexOf("betaa30") !== 0) test.stale = key
-      if (key.indexOf(test.target) === 0 && (!test.betaMoved || key.indexOf("betaa30") === 0)) { test.times.push(Date.now() - test.t0); test.t0 = 0 }
+      if (key.indexOf(test.target) === 0 && (!test.betaMoved || key.indexOf("betaa30") === 0)) { test.times.push(Date.now() - test.t0); test.t0 = 0; var nv = test.feedView(rail); test.landedAt = nv.itemAtIndex(nv.count - 1).y - nv.contentY }
     }
   }
   Timer {
@@ -93,7 +101,8 @@ ShellRoot {
         test.check(test.times.length === 5, "a switch never showed the other session's cards: " + JSON.stringify(test.times))
         // The first visit to beta waits for its transcript; the later ones have cards on hand.
         var revisits = test.times.slice(2, 4)
-        test.check(!test.builtDuringSlide, "older cards were built while the session tabs were sliding")
+        test.check(test.worstDrift < 2, "the newest card moved " + Math.round(test.worstDrift) + "px on screen after a switch showed it")
+        test.check(!test.builtDuringSlide, "off-screen cards were built while the session tabs were sliding")
         test.check(test.worstDuringReorder < 50, "a frame took " + test.worstDuringReorder + "ms while the session list reorders after a switch")
         test.check(Math.max(...revisits) < 600, "switching back to a session took " + JSON.stringify(revisits) + "ms to show its newest card")
         test.check(test.lowest >= 0.99, "the chat faded out during a switch (opacity " + test.lowest + ")")

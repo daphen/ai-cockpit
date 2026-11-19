@@ -3022,8 +3022,8 @@ Item {
     id: feedFill
     interval: 16; repeat: true
     onTriggered: {
-      // Building a card takes most of a frame, which stutters the tabs sliding after a switch.
-      if (reorderSettle.running) return
+      // Building a card takes most of a frame, so once the screen is full the rest waits for the tabs to finish sliding.
+      if (reorderSettle.running && feedView.contentHeight >= feedView.height) return
       rail._feedShown++
       if (rail._feedShown >= rail.groupedFeed.length) { rail._feedShown = -1; stop() }
       rail._resyncFeed()
@@ -3377,6 +3377,8 @@ Item {
       spacing: 24
       model: feedModel
       boundsBehavior: Flickable.StopAtBounds
+      // A short feed sits against the bottom, so older cards built in above it never push the newest one down.
+      topMargin: Math.max(0, height - contentHeight)
       // Realize the WHOLE feed (it is capped at feedCap=60 rows — slack-channel scale).
       // This one line is what makes scrolling exact instead of statistical: virtualized,
       // contentHeight is an estimate and every scroll-to-bottom lands on a guess, which is
