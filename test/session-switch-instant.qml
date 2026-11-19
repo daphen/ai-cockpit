@@ -50,11 +50,13 @@ ShellRoot {
   property string stale: ""
   property double lastFrame: 0
   property int worstDuringReorder: 0
+  property double reorderAt: 0
+  Connections { target: rail; function onTabRecencyChanged() { if (test.round > 1) test.reorderAt = Date.now() } }
   FrameAnimation {
     running: true
     onTriggered: {
       var now = Date.now()
-      if (test.t0 && test.lastFrame && now - test.t0 < Motion.slow) test.worstDuringReorder = Math.max(test.worstDuringReorder, now - test.lastFrame)
+      if (test.reorderAt && test.lastFrame && now - test.reorderAt < 700) test.worstDuringReorder = Math.max(test.worstDuringReorder, now - test.lastFrame)
       test.lastFrame = now
       if (!test.t0) return
       var fv = test.feedView(rail)

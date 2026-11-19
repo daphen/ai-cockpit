@@ -258,7 +258,9 @@ Item {
     ? [childScope].concat(liveSessions.filter(s => s.parent === childScope).map(s => s.name)) : []
   onRosterExpandedChanged: childScope = ""
   function syncTabRecency() { if (!tabsFocused) tabRecency = recentSelections }
-  onRecentSelectionsChanged: syncTabRecency()
+  // A switch re-sorts the tabs only after the new cards are built: building them mid-slide dropped frames.
+  onRecentSelectionsChanged: if (shownRaw === selectedRaw) syncTabRecency()
+  Timer { id: tabReorder; interval: 32; onTriggered: rail.syncTabRecency() }
   onTabsFocusedChanged: syncTabRecency()
   function rememberRecent(name) {
     if (!name) return
@@ -2308,13 +2310,11 @@ Item {
     // First switch retries (nvim's RPC socket may not be up yet); after nvim has answered
     // once, land EXACTLY once per switch — the retry visibly blinked the buffer.
     if (selectedRaw && !_landed) { landTimer.n = 0; landTimer.restart() }
-    switchSettle.interval = shownRaw ? Motion.slow + 20 : 0
     switchSettle.restart()
   }
-  // The roster reorders with an animation on every switch; loading or building cards during it
-  // made it stutter, so the swap waits for it to finish while the current cards stay put.
   Timer {
     id: switchSettle
+    interval: 0
     onTriggered: {
       var sid = rail.selectedRaw
       // Stale saved cards wait for the fresh transcript; with none saved there is nothing to hold.
@@ -2336,6 +2336,7 @@ Item {
       var vw = _viewFor; vw[_prevShown] = view; _viewFor = vw
     }
     _prevShown = shownRaw
+    tabReorder.restart()
     view = _viewFor[shownRaw] || "chat"
     _feedReset = true
     feedTick++
