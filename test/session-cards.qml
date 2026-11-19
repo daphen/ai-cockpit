@@ -12,7 +12,7 @@ ShellRoot {
   property string opened: ""
   property string ticketAction: ""
   property var originalCard: null
-  property int lastFrame: -1
+  property var lastFrame: null
   property bool breathed: false
   property bool busy: false
   property string activityLabel: "bash"
@@ -127,11 +127,11 @@ ShellRoot {
         test.check(test.card("every-3789").x > c.x && test.card("orchestrator").x < c.x && test.card("every-3710").y > c.y, "unordered status roster reshuffled the cards")
         var crew = test.crew(c.modelData)
         test.check(crew.activity === "bash", "working card did not pass bash to its character")
-        test.lastFrame = crew.frame
+        test.lastFrame = test.find(crew, item => item.objectName === "crewFigure").source
         window.implicitHeight = 520
       } else if (test.phase === 3) {
         ++test.ticks
-        if (test.crew("every-3790").frame !== test.lastFrame) test.breathed = true
+        if (test.find(test.crew("every-3790"), item => item.objectName === "crewFigure").source !== test.lastFrame) test.breathed = true
         if (test.ticks < 55) return
         input.keyClick(Qt.Key_J,Qt.NoModifier,0)
         test.check(dash.currentAction === "session:every-3710", "j did not move to nearest card below")
@@ -147,7 +147,7 @@ ShellRoot {
         input.keyClick(Qt.Key_Return,Qt.ControlModifier,0)
         test.check(test.opened === "every-3790", "Ctrl+Enter did not open the selected session")
         var crew = test.crew("every-3790")
-        test.check(test.breathed, "busy character did not breathe")
+        test.check(!test.breathed, "a busy character animated; crew figures are still frames")
         test.check(test.find(test.card("every-3790"),item => item.text === "BASH" && item.opacity === 1), "badge did not settle to Bash")
         test.card("every-3790").grabToImage(result => result.saveToFile("/tmp/inset-mesh-session-card-active.png"))
         test.working(false); test.ticks = 0

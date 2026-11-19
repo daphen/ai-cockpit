@@ -625,7 +625,6 @@ FocusScope {
                   name: sessionCard.modelData
                   profile: sessionCard.session.profile || ""
                   activity: sessionCard.ask ? "asking" : root.activityLabelFor(sessionCard.modelData)
-                  running: sessionCards.visible
                 }
               }
               Rectangle {
