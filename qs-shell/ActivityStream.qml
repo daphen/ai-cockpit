@@ -484,6 +484,7 @@ FocusScope {
     anchors { right: parent.right; bottom: parent.bottom; rightMargin: 16; bottomMargin: 17 }
     visible: dir !== ""
     height: 44; width: height * 248 / 308
+    opacity: 0.35
     source: visible ? "file://" + dir + "/cockpit-mark-" + Theme.mode + ".png" : ""
     sourceSize.height: height * 2
     fillMode: Image.PreserveAspectFit
