@@ -1113,7 +1113,9 @@ Item {
           //   trailing + we sent an abort recently → YOU interrupted (red ⏹)
           //   trailing, no abort of ours → something ELSE stopped it — another
           //     client, the orchestrator, or the agent tripping its own keybinds
-          if (!isLast) {
+          if (msg._stalledFor) {
+            items.push({ kind: "cmd", tool: "error", text: "⏱ stalled — the model was silent for " + msg._stalledFor + "s, so the stall guard cancelled this turn" })
+          } else if (!isLast) {
             items.push({ kind: "cmd", tool: "info", text: "· redirected mid-turn (steer)" })
           } else if (sid && _myAbortAt[sid] && (Date.now() - _myAbortAt[sid]) < 600000) {
             items.push({ kind: "cmd", tool: "error", text: "⏹ interrupted by you" })
@@ -1176,7 +1178,7 @@ Item {
     for (var oi = (olderTasks || []).length - 1; oi >= 0; oi--) if (!seen[olderTasks[oi].id]) chain.push(Object.assign({ _older: true }, olderTasks[oi]))
     // Collect user/assistant messages chronologically, then only format the TAIL —
     // a big transcript (3000+ entries / 7MB) is otherwise multi-second to expand.
-    var msgs = [], toolErrs = {}, toolResults = {}
+    var msgs = [], toolErrs = {}, toolResults = {}, stalledFor = 0
     for (var j = chain.length - 1; j >= 0; j--) {
       var e = chain[j]
       // Failed tool calls: the isError flag lives on the toolResult MESSAGE, not the
@@ -1202,6 +1204,10 @@ Item {
                     outcome: typeof e.data.outcome === "string" ? e.data.outcome : "", timestamp: e.timestamp || "", _mid: e.id, _clipped: e._older === true })
         continue
       }
+      if (e.type === "custom" && e.customType === "stall-guard-abort") {
+        stalledFor = (e.data && e.data.seconds) || 1
+        continue
+      }
       if (e.type === "custom" && e.customType === "cockpit-user-bash-approval"
           && e.data && e.data.decision === "approved") {
         msgs.push({ role: "userBashApproval", command: e.data.command || "", _mid: e.id })
@@ -1218,6 +1224,10 @@ Item {
         // the CHAT_CAP window sliding, or every row's INDEX shifts by one per new message
         // and anything keyed on it (the cursor, expanded groups) lands on a neighbour.
         e.message._mid = e.id
+        if (e.message.role === "assistant") {
+          if (stalledFor && e.message.stopReason === "aborted") e.message._stalledFor = stalledFor
+          stalledFor = 0
+        }
         msgs.push(e.message)
       }
     }
@@ -1767,7 +1777,7 @@ Item {
         // row renders as the mid-chain steer marker, not "⏹ interrupted".
         var mt = String(feeds[esid][fi].text || "")
         caughtUp = mt.indexOf("⏹ interrupted") === 0 || mt.indexOf("· redirected mid-turn") === 0
-                   || mt.indexOf("⚡ aborted externally") === 0
+                   || mt.indexOf("⚡ aborted externally") === 0 || mt.indexOf("⏱ stalled") === 0
       }
       mks = caughtUp ? [] : mks.filter(mm => (Date.now() - (mm.at || 0)) < 60000)
       var nm = _marks
