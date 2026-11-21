@@ -3496,7 +3496,7 @@ Item {
         ParallelAnimation {
           id: turnIntro
           NumberAnimation { target: turnDel; property: "opacity"; from: 0; to: 1; duration: 150; easing.type: Easing.InOutQuad }
-          NumberAnimation { target: turnDel; property: "introY"; from: 4; to: 0; duration: 150; easing.type: Easing.OutCubic }
+          NumberAnimation { target: turnDel; property: "introY"; from: 4; to: 0; duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
           NumberAnimation { target: turnDel; property: "introBlur"; from: 0.125; to: 0; duration: 150; easing.type: Easing.InOutQuad }
         }
         property int rowIndex: index + rail._feedOffset
@@ -3564,8 +3564,8 @@ Item {
               ? Qt.rgba(turnDel.cardAccent.r, turnDel.cardAccent.g, turnDel.cardAccent.b, 0.22)
               : (lightKey ? Qt.alpha(Theme.fg, 0.11) : "#282828")
             shadowColor: lightKey ? Qt.rgba(0.12, 0.15, 0.18, 0.07) : "#101010"
-            Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
-            Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            Behavior on rimTop { ColorAnimation { duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
+            Behavior on outlineColor { ColorAnimation { duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
           }
           LightKey {
             anchors.fill: parent
@@ -3581,7 +3581,7 @@ Item {
             border.width: 1
             border.color: rail.cardRing
             opacity: turnDel.cursor ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
           }
           TapHandler {
             onTapped: eventPoint => {
@@ -4687,7 +4687,7 @@ Item {
                 implicitHeight: 22
                 radius: 11
                 color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
-                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
                 Behavior on color { ColorAnimation { duration: 140 } }
                 clip: true
                 Row {
@@ -4718,7 +4718,7 @@ Item {
                 readonly property color tint: chin.muted
                 readonly property bool expanded: modelHover.hovered || rail.modelOpen
                 implicitWidth: expanded ? modelRow.implicitWidth + 12 : 30
-                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
                 clip: true
                 implicitHeight: 22
                 radius: 11
@@ -4761,7 +4761,7 @@ Item {
                 color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
                 border.width: 1
                 border.color: "transparent"
-                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
                 Behavior on color { ColorAnimation { duration: 140 } }
                 Behavior on border.color { ColorAnimation { duration: 140 } }
                 clip: true
@@ -4799,7 +4799,7 @@ Item {
                 color: expanded ? chin.itemHover : Qt.alpha(chin.itemHover, 0)
                 border.width: 1
                 border.color: "transparent"
-                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on implicitWidth { NumberAnimation { duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
                 Behavior on color { ColorAnimation { duration: 140 } }
                 Behavior on border.color { ColorAnimation { duration: 140 } }
                 clip: true
@@ -4844,7 +4844,7 @@ Item {
               objectName: "contextLabel"
               anchors { right: parent.left; rightMargin: 8; verticalCenter: parent.verticalCenter }
               property real shown: contextHover.hovered ? 1 : 0
-              Behavior on shown { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+              Behavior on shown { NumberAnimation { duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
               opacity: shown
               visible: shown > 0
               layer.enabled: shown < 1
@@ -4897,7 +4897,7 @@ Item {
               property real fill: contextMeter.percent / 100
               property real aspect: width / height
               property real pixel: 2 / height
-              Behavior on fill { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+              Behavior on fill { NumberAnimation { duration: 400; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
               Behavior on colA { ColorAnimation { duration: 650 } }
               Behavior on colB { ColorAnimation { duration: 650 } }
             }
@@ -5045,7 +5045,7 @@ Item {
         }
         onFocusIndexChanged: Qt.callLater(reveal)
         onWidthChanged: Qt.callLater(reveal)
-        NumberAnimation { id: inlineReveal; target: inlineList; property: "contentX"; duration: Motion.base; easing.type: Easing.OutCubic }
+        NumberAnimation { id: inlineReveal; target: inlineList; property: "contentX"; duration: Motion.base; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
         ScrollFeel { flick: inlineList; onScrolled: inlineReveal.stop() }
         Row {
           id: inlineRowItems
@@ -5072,7 +5072,7 @@ Item {
             }
             placedX = x
           }
-          XAnimator { id: slide; target: pill; to: 0; duration: rail.reorderMs; easing.type: Easing.OutCubic }
+          XAnimator { id: slide; target: pill; to: 0; duration: rail.reorderMs; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
           Rectangle {
           id: pill
           objectName: "sessionTab"
@@ -5115,7 +5115,7 @@ Item {
             anchors { left: parent.left; leftMargin: 2; verticalCenter: parent.verticalCenter }
             SessionDot { id: pillDot; anchors.verticalCenter: parent.verticalCenter; sid: pill.sid; status: pill.md.status || pill.md.state || ""; size: pill.height - 4
               scale: pill.selected || pill.hovered || pill.cursor || orbActive || hasAsk ? 1 : 0.67
-              Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } } }
+              Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } } }
             Item { width: 7; height: 1 }
             Text {
               objectName: "sessionTabLabel"
@@ -5135,8 +5135,8 @@ Item {
               width: shown ? 4 + pillDot.size : 0; height: pillDot.size
               opacity: shown ? 1 : 0
               clip: true
-              Behavior on width { NumberAnimation { duration: Motion.base; easing.type: Easing.OutCubic } }
-              Behavior on opacity { NumberAnimation { duration: Motion.base; easing.type: Easing.OutCubic } }
+              Behavior on width { NumberAnimation { duration: Motion.base; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
+              Behavior on opacity { NumberAnimation { duration: Motion.base; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
               Icon {
                 anchors.right: parent.right
                 width: pillDot.size; height: pillDot.size
@@ -6309,7 +6309,7 @@ Item {
       readonly property bool chevronShown: hasDiff && (expanded || writeHover.hovered || (rail.itemMode && (rail.itemFocus === gkey || rail.itemFocus === "open:" + gkey)))
       RowLayout {
         anchors.fill: parent; anchors.leftMargin: 12; anchors.rightMargin: writeRow.chevronShown ? 31 : 12
-        Behavior on anchors.rightMargin { NumberAnimation { duration: Motion.fast; easing.type: Easing.OutCubic } }
+        Behavior on anchors.rightMargin { NumberAnimation { duration: Motion.fast; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
         spacing: 8
         Icon { name: entry.failed ? "triangle-warning" : "file-content"; width: 16; height: 16; color: entry.failed ? Theme.red : mutedColor; Layout.alignment: Qt.AlignVCenter }
         Text { text: rail.pathMarkup(entry.path || entry.file); textFormat: Text.StyledText; color: textColor; font.family: Theme.fontFamily; font.pixelSize: rail.fsMeta - 2; elide: Text.ElideRight; Layout.fillWidth: true }
@@ -6322,7 +6322,7 @@ Item {
         objectName: "edit-diff-toggle:" + (entry.path || "")
         anchors { right: parent.right; rightMargin: 12; verticalCenter: parent.verticalCenter }
         opacity: writeRow.chevronShown ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: Motion.fast; easing.type: Easing.OutCubic } }
+        Behavior on opacity { NumberAnimation { duration: Motion.fast; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
         name: expanded ? "chevron-down" : "chevron-right"
         width: 11; height: 11; color: mutedColor
       }
@@ -6360,7 +6360,7 @@ Item {
     border.color: chin.hairline
     opacity: rail.pillTipFor ? 1 : 0
     visible: opacity > 0
-    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+    Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
     Text {
       id: tipText
       anchors.centerIn: parent
@@ -6380,7 +6380,7 @@ Item {
     z: 60
     visible: opacity > 0
     opacity: rail.hintsOpen ? 1 : 0
-    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
     color: Qt.alpha(rail.railGroundColor, 0.72)
     TapHandler { onTapped: rail.hintsOpen = false }
     readonly property var groups: [
@@ -6401,7 +6401,7 @@ Item {
       border.width: 1
       border.color: chin.hairline
       scale: rail.hintsOpen ? 1 : 0.97
-      Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+      Behavior on scale { NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
       TapHandler {}
       Column {
         id: hintsCol

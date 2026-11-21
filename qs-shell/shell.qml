@@ -541,8 +541,8 @@ ShellRoot {
                 onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
                 SequentialAnimation {
                   id: termSwitchFade
-                  OpacityAnimator { target: term; to: 0; duration: Motion.base; easing.type: Easing.OutCubic }
-                  OpacityAnimator { target: term; to: 1; duration: 220; easing.type: Easing.OutCubic }
+                  OpacityAnimator { target: term; to: 0; duration: Motion.base; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
+                  OpacityAnimator { target: term; to: 1; duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
                 }
                 Connections {
                   target: rail
@@ -843,7 +843,7 @@ ShellRoot {
             SequentialAnimation {
               ParallelAnimation {
                 OpacityAnimator { id: dotIn; target: glideDot; from: 0; to: 1; duration: 45; easing.type: Easing.OutQuad }
-                ScaleAnimator { id: dotInScale; target: glideDot; from: 0.25; to: 1; duration: 50; easing.type: Easing.OutCubic }
+                ScaleAnimator { id: dotInScale; target: glideDot; from: 0.25; to: 1; duration: 50; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
               }
               OpacityAnimator { target: glideDot; from: 1; to: 1; duration: Math.max(0, glideCaret.span - 130) }
               ParallelAnimation {
@@ -860,7 +860,7 @@ ShellRoot {
               OpacityAnimator { target: toLine; from: 0; to: 0; duration: glideCaret.span - 70 }
               ParallelAnimation {
                 OpacityAnimator { target: toLine; from: 0; to: glideCaret.landing === "caret" ? 1 : 0; duration: 60; easing.type: Easing.OutQuad }
-                ScaleAnimator { target: toLine; from: glideCaret.dot / toLine.height; to: 1; duration: 70; easing.type: Easing.OutCubic }
+                ScaleAnimator { target: toLine; from: glideCaret.dot / toLine.height; to: 1; duration: 70; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
               }
             }
           }

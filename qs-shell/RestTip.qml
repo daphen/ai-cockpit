@@ -14,7 +14,7 @@ Rectangle {
   property bool shown: false
   visible: opacity > 0
   opacity: shown ? 1 : 0
-  Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+  Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
   z: 1000
   width: Math.min(label.implicitWidth + 24, 520)
   height: label.implicitHeight + 14

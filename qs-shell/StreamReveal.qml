@@ -20,7 +20,7 @@ QtObject {
   property string text: ""
   property NumberAnimation typing: NumberAnimation { target: root; property: "shown" }
   property NumberAnimation fadeIn: NumberAnimation {
-    target: root.fade; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.OutCubic
+    target: root.fade; property: "opacity"; from: 0; to: 1; duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1]
   }
   function sync() {
     typing.stop()

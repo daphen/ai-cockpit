@@ -16,14 +16,15 @@ ShellRoot {
       if (test.phase === 0) {
         state.onLine(JSON.stringify({type:"roster",sessions:[{id:"one",name:"one",cwd:Quickshell.env("HOME") + "/tab-cycle",status:"idle",plan:"p"}]}),0)
         rail.jumpToSession("one")
-      } else if (test.phase === 3) {
+      // After the rail's startup landings (500/1000/1500ms), which re-request the open tab.
+      } else if (test.phase === 8) {
         rail.showWorkspace("dashboard"); test.expect("dashboard", "first press")
         rail.showWorkspace("vault"); test.expect("vault", "second quick press")
         rail.reportedTab = "dashboard"; test.expect("vault", "late report of the first press")
         rail.reportedTab = "vault"; test.expect("vault", "editor confirms")
         rail.reportedTab = "dashboard"; test.expect("dashboard", "editor changes view itself")
         rail.showWorkspace("plan"); test.expect("plan", "unconfirmed press")
-      } else if (test.phase === 15) {
+      } else if (test.phase === 20) {
         test.expect("dashboard", "unconfirmed press falls back to the editor's view")
         rail.showWorkspace("activity", true); test.expect("activity", "activity press")
         rail.jumpToSession("one"); rail.landNvim("one")

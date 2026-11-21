@@ -52,7 +52,7 @@ Item {
         border.color: Theme.hairline
         radius: Theme.radiusSm
         Behavior on opacity {
-          NumberAnimation { duration: 150; easing.type: Easing.OutCubic }
+          NumberAnimation { duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
         }
         Behavior on y {
           NumberAnimation {

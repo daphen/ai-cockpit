@@ -72,7 +72,7 @@ Rectangle {
     readonly property Item _active: _front ? ta : tb
     TextMetrics { id: valueMetrics; text: sw.value; font: sw._active.font }
     width: value.length ? Math.min(maxWidth, valueMetrics.width + gap) : 0
-    Behavior on width { enabled: !chin.switching; NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+    Behavior on width { enabled: !chin.switching; NumberAnimation { duration: 180; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
     property bool _front: true
     onValueChanged: {
       var inc = _front ? tb : ta
@@ -172,7 +172,7 @@ Rectangle {
       opacity: chin.st.rec ? 1 : 0
       scale: chin.st.rec ? 1 : 0.6
       visible: opacity > 0.01
-      Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+      Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
       Behavior on scale   { NumberAnimation { duration: 220; easing.type: Easing.OutBack } }
       Text {
         id: recText
@@ -228,7 +228,7 @@ Rectangle {
           * (chin._n(chin.st.lines) > 1 ? (chin._n(chin.st.line) - 1) / (chin._n(chin.st.lines) - 1) : 0)
         property real animatedY: targetY
         y: Math.round(animatedY)
-        Behavior on animatedY { enabled: !chin.switching; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+        Behavior on animatedY { enabled: !chin.switching; NumberAnimation { duration: 120; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
       }
     }
   }

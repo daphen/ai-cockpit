@@ -514,7 +514,7 @@ FocusScope {
             property real reveal: expanded ? 1 : 0
             readonly property bool asking: !!ask && !expanded
             property real askReveal: asking ? 1 : 0
-            Behavior on askReveal { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+            Behavior on askReveal { NumberAnimation { duration: 260; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
             // A pending question covers only the text below the crew scene, so the character stays in view.
             readonly property real sceneCut: (1 - reveal) * askReveal * (sessionInset.y + meshPanel.height + 8)
             readonly property var answers: !ask ? [] : ask.method === "confirm"
@@ -525,7 +525,7 @@ FocusScope {
               if (choice.open) root.sessionRequested(modelData)
               else root.answerRequested(modelData, choice.response)
             }
-            Behavior on reveal { NumberAnimation { duration: 260; easing.type: Easing.OutCubic } }
+            Behavior on reveal { NumberAnimation { duration: 260; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
             onHeightChanged: if (expanded) Qt.callLater(root.revealCard)
             width: (sessionCards.width - sessionCards.spacing * (sessionCards.columns - 1)) / sessionCards.columns
             height: (root.compact ? width * 0.75 + 290 : Math.max(width * 1.6, 420)) + Math.max(0, ticketBadges.height - 54)
@@ -564,7 +564,7 @@ FocusScope {
               border.width: 1
               border.color: root.activeFocus && "session:" + modelData === root.currentAction ? root.muted : Qt.alpha(Theme.fg, 0.3)
               opacity: (root.activeFocus && "session:" + modelData === root.currentAction) || cardHover.hovered ? 1 : 0
-              Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+              Behavior on opacity { NumberAnimation { duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
             }
             Item {
               id: sessionInset
@@ -635,7 +635,7 @@ FocusScope {
                 height: 26; radius: 6
                 color: Qt.rgba(0, 0, 0, 0.45)
                 border { width: 1; color: Qt.rgba(1, 1, 1, 0.38) }
-                Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
                 Text {
                   id: badgeText
                   anchors.centerIn: parent
@@ -656,14 +656,14 @@ FocusScope {
                       id: badgeSwap
                       ParallelAnimation {
                         NumberAnimation { target: badgeText; property: "opacity"; to: 0; duration: 100; easing.type: Easing.InOutQuad }
-                        NumberAnimation { target: badgeText; property: "shift"; to: -3; duration: 100; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: badgeText; property: "shift"; to: -3; duration: 100; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
                         NumberAnimation { target: badgeText; property: "motionBlur"; to: 0.125; duration: 100 }
                       }
                       PropertyAction {}
                       PropertyAction { target: badgeText; property: "shift"; value: 3 }
                       ParallelAnimation {
                         NumberAnimation { target: badgeText; property: "opacity"; to: 1; duration: 150; easing.type: Easing.InOutQuad }
-                        NumberAnimation { target: badgeText; property: "shift"; to: 0; duration: 150; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: badgeText; property: "shift"; to: 0; duration: 150; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] }
                         NumberAnimation { target: badgeText; property: "motionBlur"; to: 0; duration: 150 }
                       }
                     }
@@ -1289,7 +1289,7 @@ FocusScope {
     visible: !!root.restPoint && !root.caretHeld && root.restPoint.y > view.y && root.restPoint.y < view.y + view.height
     x: root.restPoint ? root.restPoint.x - width / 2 : 0
     y: root.restPoint ? root.restPoint.y - height / 2 : 0
-    Behavior on x { enabled: dashRestDot.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-    Behavior on y { enabled: dashRestDot.visible; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+    Behavior on x { enabled: dashRestDot.visible; NumberAnimation { duration: 160; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
+    Behavior on y { enabled: dashRestDot.visible; NumberAnimation { duration: 160; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.23, 1, 0.32, 1, 1, 1] } }
   }
 }
