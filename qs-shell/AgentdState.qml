@@ -454,6 +454,30 @@ Item {
   // ever finish, and pi spent its time re-serializing instead of answering prompts.
   property var _entriesAskedAt: ({})
   readonly property int entriesRetryMs: 120000
+  // Every session's transcript is fetched once in the background, one at a time, so the
+  // first switch to it shows its cards at once instead of waiting on the fetch.
+  property string _prefetching: ""
+  property var _prefetched: ({})
+  readonly property Timer prefetchNext: Timer {
+    interval: 400
+    onTriggered: {
+      var list = root.sessions || []
+      for (var i = 0; i < list.length; i++) {
+        var sid = list[i].name
+        if (!sid || root._prefetched[sid] || root._activityRequested.has(sid) || (root.feeds[sid] || []).length) continue
+        root._prefetched[sid] = true
+        if (Date.now() - (root._entriesAskedAt[sid] || 0) < root.entriesRetryMs) continue
+        root._prefetching = sid
+        root.refreshEntries(sid)
+        prefetchGiveUp.restart()
+        return
+      }
+    }
+  }
+  readonly property Timer prefetchGiveUp: Timer {
+    interval: 30000
+    onTriggered: { root._prefetching = ""; root.prefetchNext.restart() }
+  }
   function refreshEntries(sid) {
     if (!sid) return
     var at = _entriesAskedAt[sid] || 0
@@ -874,6 +898,8 @@ Item {
     for (var s of sessions) {
       if (_activityRequested.has(s.name)) continue
       _activityRequested.set(s.name, true)
+      // Any transcript reply records its activity, so one already asked for is not asked again.
+      if (_entriesAskedAt[s.name]) continue
       _activityQueue.push(s.name)
     }
     if (_activityQueue.length) activityPull.start()
@@ -935,7 +961,8 @@ Item {
   // Returns whether a fresh transcript is on its way; a session already up to date is shown as saved.
   function select(sid) {
     if (!sid || !String(sid).length) return false
-    var asked = !feedReady(sid) && send({ type: "get_entries", session: sid })
+    // A background fetch already on its way serves the selection too.
+    var asked = !feedReady(sid) && (_prefetching === sid || send({ type: "get_entries", session: sid }))
     send({ type: "get_session_stats", session: sid })
     refreshChanges(sid)
     return asked
@@ -1248,6 +1275,7 @@ Item {
       _rebuildSessions()
       if (selectedSession && _sockOf[selectedSession] === si && !(feeds[selectedSession] || []).length)
         refreshEntries(selectedSession)
+      if (!_prefetching && !prefetchNext.running) prefetchNext.restart()
       _reconcileCurrentTools()
       // Rosters are authoritative for asks: clearing used to depend solely on
       // catching the ask_answered event, so a rail that was relaunching or
@@ -1290,9 +1318,11 @@ Item {
     }
     if (t === "response" && m.command === "get_entries") {
       if (m.success && m.session) _noteActivity(_activityFromEntries(m.session, (m.data || {}).entries || []))
-      if (m.session === selectedSession) {
-        onEntries(m)
-        if (m.success) { var u = _unseen; delete u[m.session]; _unseen = u }
+      var background = m.session === _prefetching
+      if (background) { _prefetching = ""; prefetchNext.restart() }
+      if (m.session === selectedSession || (m.success && !feedReady(m.session))) {
+        onEntries(m, m.session !== selectedSession)
+        if (m.success && m.session === selectedSession) { var u = _unseen; delete u[m.session]; _unseen = u }
         entriesLoaded(m.session)
       }
       return
@@ -1671,7 +1701,7 @@ Item {
   }
 
   // get_entries response → rebuild the session's feed from the full transcript.
-  function onEntries(m) {
+  function onEntries(m, background) {
     if (!m.data || !m.data.entries) return
     var esid = m.session
     if (!esid) return
@@ -1849,7 +1879,7 @@ Item {
         markedId = String(historyMessage.toolCallId || "")
       }
     }
-    if (markedPath) root.editMarksSnapshot(esid, markedPath, markedRows, markedAt, markedLine, markedId)
+    if (markedPath && !background) root.editMarksSnapshot(esid, markedPath, markedRows, markedAt, markedLine, markedId)
     feedGen++
     _recoverAsk(esid, m.data.entries)
   }

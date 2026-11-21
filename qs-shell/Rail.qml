@@ -258,9 +258,8 @@ Item {
     ? [childScope].concat(liveSessions.filter(s => s.parent === childScope).map(s => s.name)) : []
   onRosterExpandedChanged: childScope = ""
   function syncTabRecency() { if (!tabsFocused) tabRecency = recentSelections }
-  // A switch re-sorts the tabs only after the new cards are built: building them mid-slide dropped frames.
-  onRecentSelectionsChanged: if (shownRaw === selectedRaw) syncTabRecency()
-  Timer { id: tabReorder; interval: 32; onTriggered: rail.syncTabRecency() }
+  // A switch re-sorts the tabs as the new cards fade in: building them mid-slide dropped frames.
+  onRecentSelectionsChanged: if (shownRaw === selectedRaw && !sessionSwitch.busy) syncTabRecency()
   onTabsFocusedChanged: syncTabRecency()
   function rememberRecent(name) {
     if (!name) return
@@ -2310,22 +2309,21 @@ Item {
     // First switch retries (nvim's RPC socket may not be up yet); after nvim has answered
     // once, land EXACTLY once per switch — the retry visibly blinked the buffer.
     if (selectedRaw && !_landed) { landTimer.n = 0; landTimer.restart() }
-    switchSettle.restart()
+    sessionSwitch.request(selectedRaw)
   }
-  Timer {
-    id: switchSettle
-    interval: 0
-    onTriggered: {
-      var sid = rail.selectedRaw
-      // Stale saved cards wait for the fresh transcript; with none saved there is nothing to hold.
-      if (rail.agentd && sid && rail.agentd.select(sid) && rail.agentd.feedFor(sid).length) entriesWait.restart()
-      else rail.shownRaw = sid
-    }
+  readonly property string switchPhase: sessionSwitch.phase
+  readonly property bool feedCovered: feedView.contentHeight >= feedView.height + 120 || _feedShown < 0
+  SessionSwitch {
+    id: sessionSwitch
+    agentd: rail.agentd
+    target: feedView
+    covered: !rail._wantOlder
+    onSwap: (sid) => rail.shownRaw = sid
+    onPhaseChanged: if (phase === "in" || phase === "idle") rail.syncTabRecency()
   }
-  Timer { id: entriesWait; interval: 1000; onTriggered: rail.shownRaw = rail.selectedRaw }
   Connections {
     target: rail.agentd
-    function onEntriesLoaded(sid) { if (sid === rail.selectedRaw && entriesWait.running) { entriesWait.stop(); rail.shownRaw = sid } }
+    function onEntriesLoaded(sid) { sessionSwitch.entriesLoaded(sid) }
   }
   onShownRawChanged: {
     if (_prevShown) {
@@ -2336,7 +2334,6 @@ Item {
       var vw = _viewFor; vw[_prevShown] = view; _viewFor = vw
     }
     _prevShown = shownRaw
-    tabReorder.restart()
     view = _viewFor[shownRaw] || "chat"
     _feedReset = true
     feedTick++
@@ -2842,6 +2839,8 @@ Item {
     if (fileSelectOpen) closeFileSelection()
     if (itemMode) exitItemMode()
     if (hinting) cancelHints("cur-move")   // any cursor move invalidates the labeled row
+    _keep = null
+    if (cur >= rSize) _buildTo(Math.max(0, cur - rSize - 1))
     _anchorCursor()
     if (view === "files" && cur >= rSize) changesView.positionViewAtIndex(cur - rSize, ListView.Contain)
     else if (view === "chat" && cur >= rSize)
@@ -3010,41 +3009,91 @@ Item {
   // and adds older cards above it one per frame, out of sight.
   property int _feedShown: -1
   readonly property int _feedOffset: _feedShown >= 0 ? Math.max(0, groupedFeed.length - _feedShown) : 0
-  readonly property int feedFillFirst: 2
   property var _builtKeys: ({})   // rows a rebuild showed: they appear without the entrance animation
   // Briefly true after a switch so the chin swaps its values instead of animating them.
   readonly property bool switching: switchQuiet.running
   Timer { id: switchQuiet; interval: 400 }
 
-  Timer { id: reorderSettle; interval: 700 }
+  readonly property int reorderMs: 240
+  Timer { id: reorderSettle; interval: rail.reorderMs + 60 }
   Connections { target: rosterModel; function onRowsMoved() { reorderSettle.restart() } }
+  // Older cards are built only when they are about to be seen: building one takes most of
+  // a frame, and building them all after every switch stuttered the rail for seconds.
+  // The model always holds the newest _feedShown rows, so one older card is one insert.
+  function _buildOlder() {
+    var arr = groupedFeed, i = arr.length - _feedShown - 1
+    // At the top of what is built, the view pushes the screen down to make room, and the new card's
+    // height settles a frame later; the card you are reading stays put until you scroll again.
+    if (!_keep && !feedScroll.following)
+      for (var j = 0; j < feedView.count && !_keep; j++) {
+        var it = feedView.itemAtIndex(j)
+        if (it && it.y + it.height > feedView.contentY) _keep = { it: it, off: it.y - feedView.contentY }
+      }
+    if (i >= 0) { feedModel.insert(0, { d: JSON.parse(JSON.stringify(arr[i])), sig: _turnSig(arr[i]), k: _feedKey(arr[i]) }); _settleTop() }
+    _holdKeep()
+    _feedShown++
+    if (_feedShown >= arr.length) _feedShown = -1
+  }
+  // A new card's Columns re-sum their rows only at the next frame's polish, reporting a stale
+  // (often several screens) height until then; settle them now, innermost first, so it measures true.
+  function _settleTop() {
+    feedView.forceLayout()
+    var polish = function (o) { for (var c of o.children) polish(c); o.ensurePolished() }
+    var it = feedView.itemAtIndex(0)
+    if (it) { polish(it); feedView.forceLayout() }
+  }
+  property var _keep: null
+  function _holdKeep() {
+    if (!_keep) return
+    if (feedScroll.following || !_keep.it || !_keep.it.parent) { _keep = null; return }
+    feedView.forceLayout()
+    if (Math.abs(feedView.contentY - (_keep.it.y - _keep.off)) >= 0.5) feedView.contentY = _keep.it.y - _keep.off
+  }
+  // A cursor jump (task, restored position, moving up) needs its row to exist before it is revealed.
+  function _buildTo(row) { while (_feedShown >= 0 && row < _feedOffset) _buildOlder() }
+  readonly property bool _wantOlder: _feedShown >= 0
+    && (!feedCovered || feedView.contentY - feedView.originY < feedView.height)
+  on_WantOlderChanged: if (_wantOlder) feedFill.start()
   Timer {
     id: feedFill
     interval: 16; repeat: true
     onTriggered: {
-      // Building a card takes most of a frame, so once the screen is full the rest waits for the tabs to finish sliding.
-      if (reorderSettle.running && feedView.contentHeight >= feedView.height) return
-      rail._feedShown++
-      if (rail._feedShown >= rail.groupedFeed.length) { rail._feedShown = -1; stop() }
-      rail._resyncFeed()
+      if (!rail._wantOlder) { stop(); return }
+      // A switch builds what the first screen needs while the rail is hidden; scrolling builds the rest.
+      if (reorderSettle.running || (sessionSwitch.busy && sessionSwitch.phase !== "settle")) return
+      rail._buildOlder()
     }
   }
   function syncFeedModel() {
     var arr = groupedFeed
-    var rebuild = _feedReset || feedModel.count === 0
-    if (rebuild && arr.length > feedFillFirst) { _feedShown = feedFillFirst; feedFill.restart() }
-    if (_feedShown >= 0) arr = arr.slice(Math.max(0, arr.length - _feedShown))
-    if (rebuild) {
+    // A transcript landing after the switch adds many cards at once; built in one go they froze the rail.
+    var landed = _feedShown < 0 && arr.length - feedModel.count > 6
+    if (_feedReset || feedModel.count === 0 || landed) {
       _feedReset = false
+      feedFill.stop()
+      _feedShown = -1
       feedModel.clear()
       var built = {}
-      for (var a = 0; a < arr.length; a++) {
-        var k = _feedKey(arr[a])
-        built[k] = true
-        feedModel.append({ d: JSON.parse(JSON.stringify(arr[a])), sig: _turnSig(arr[a]), k: k })
-      }
+      for (var b = 0; b < arr.length; b++) built[_feedKey(arr[b])] = true
       _builtKeys = built
+      // Newest first, laid out now, until the screen is full: one frame (hidden during a
+      // switch) instead of a visible card per frame. Older cards fill in afterwards.
+      var n = 0
+      for (var a = arr.length - 1; a >= 0; a--) {
+        feedModel.insert(0, { d: JSON.parse(JSON.stringify(arr[a])), sig: _turnSig(arr[a]), k: _feedKey(arr[a]) })
+        n++
+        _settleTop()
+        if (feedView.contentHeight >= feedView.height + feedView.spacing) break
+      }
+      if (n < arr.length) { _feedShown = n; feedFill.restart() }
       return
+    }
+    if (_feedShown >= 0) {
+      // New rows extend the built span at the bottom; it starts at the oldest card already built.
+      var top = feedModel.get(0).k, from = Math.max(0, arr.length - _feedShown)
+      for (var t = arr.length - 1; t >= 0; t--) if (_feedKey(arr[t]) === top) { from = t; break }
+      _feedShown = from > 0 ? arr.length - from : -1
+      arr = arr.slice(from)
     }
     _reconcileKeyed(feedModel, arr, _feedKey, _turnSig)
   }
@@ -3365,6 +3414,7 @@ Item {
     // Chat view — the activity feed.
     second: ListView {
       id: feedView
+      objectName: "feedView"
       readonly property int shadowGutter: 18
       anchors {
         fill: parent
@@ -3373,6 +3423,8 @@ Item {
       }
       enabled: rail.view === "chat"
       clip: false
+      // Unlayered, each overlapping card would fade on its own and show the ones beneath through it.
+      layer.enabled: opacity < 1 || sessionSwitch.busy
       displayMarginBeginning: 40
       spacing: 24
       model: feedModel
@@ -3392,7 +3444,7 @@ Item {
       highlight: null           // the delegate paints its own cursor fill
       ScrollFeel {
         flick: feedView
-        onScrolled: (up) => feedScroll.userScrolled(up)
+        onScrolled: (up) => { rail._keep = null; feedScroll.userScrolled(up) }
       }
       // The viewport follows chin.top, preserving the pane's existing animated height.
       // Unclipped delegates may paint beneath the transparent wrapper, while the rounded
@@ -3400,6 +3452,9 @@ Item {
       header: Item { width: feedView.width; height: feedView.spacing }
       footer: Item { width: feedView.width; height: 56 }
       onCountChanged: feedScroll.contentChanged()
+      onContentHeightChanged: rail._holdKeep()
+      onOriginYChanged: rail._holdKeep()
+      onMovementStarted: rail._keep = null
       // Streaming content arrived as a hard pop. Fade added rows in — short enough
       // (140ms) that it never lags the bottom-follow, and `displaced` keeps the rows
       // below from jumping when one is inserted.
@@ -4998,13 +5053,27 @@ Item {
           // Spring only for a reorder; a pill growing on hover pushes its neighbours directly,
           // so they move in step with its width animation.
           readonly property bool reordering: reorderSettle.running
-          move: reordering ? reorderSpring : null
-          Transition { id: reorderSpring; SpringAnimation { properties: "x"; spring: 8; damping: 0.55; epsilon: 0.25 } }
           Repeater {
           id: inlineRepeater
           model: rosterModel
           onCountChanged: Qt.callLater(inlineList.reveal)
-          delegate: Rectangle {
+          // The Row places each tab at once; the visible pill starts where it was and glides home
+          // on the render thread, so building the new session's cards cannot stall the slide.
+          delegate: Item {
+          id: slot
+          width: pill.width; height: pill.height
+          z: pill.z
+          property real placedX: -1
+          Component.onCompleted: placedX = x
+          onXChanged: {
+            if (placedX >= 0 && inlineRowItems.reordering) {
+              slide.stop(); pill.x = placedX - x
+              slide.from = pill.x; slide.start()
+            }
+            placedX = x
+          }
+          XAnimator { id: slide; target: pill; to: 0; duration: rail.reorderMs; easing.type: Easing.OutCubic }
+          Rectangle {
           id: pill
           objectName: "sessionTab"
           readonly property var md: model.d
@@ -5014,6 +5083,8 @@ Item {
           readonly property bool scoped: rail.childScope === sid && rail.tabsFocused && rail.cur === index
           readonly property bool cursor: rail.rosterExpanded && rail.focused && !rail.insert && rail.cur === index && !(scoped && rail.childCur > 0)
           height: 28; radius: 14
+          // The pill moving to the front slides over the ones making room for it.
+          z: selected ? 2 : 0
           width: Math.round(inlineRow.implicitWidth) + 2 + 12
           onWidthChanged: if (selected || cursor) Qt.callLater(inlineList.reveal)
           readonly property bool lightKey: selected && Theme.mode === "light"
@@ -5053,6 +5124,9 @@ Item {
               color: pill.offline ? Theme.red : pill.selected || pill.cursor || pill.hovered ? chin.fg : chin.muted
               font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta
               font.weight: pill.selected ? 600 : 400
+              // Sized to the bold weight so selecting a tab does not shove its neighbours.
+              width: Math.ceil(boldName.advanceWidth)
+              TextMetrics { id: boldName; text: pill.md.name; font.family: rail.messageFontFamily; font.pixelSize: rail.fsMeta; font.weight: 600 }
             }
             Item {
               readonly property bool shown: pill.md.remote === true && (inlineHover.hovered || pill.cursor)
@@ -5128,6 +5202,7 @@ Item {
               else rail.clickAt(index)
             }
           }
+        }
         }
         }
         }

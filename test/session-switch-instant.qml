@@ -47,7 +47,6 @@ ShellRoot {
   property var fetches: []
   property int fetchesBefore: 0
   property bool betaMoved: false
-  property string stale: ""
   property double lastFrame: 0
   property int worstDuringReorder: 0
   property double reorderAt: 0
@@ -56,6 +55,22 @@ ShellRoot {
   property bool wasFull: false
   property real landedAt: NaN
   property real worstDrift: 0
+  property int shownCount: 0
+  property int addedAfterShown: 0
+  property int builtAfterSettle: -1
+  property string anchorKey: ""
+  property real anchorAt: NaN
+  property real anchorDrift: 0
+  property int scrollSteps: 0
+  // What the wheel does: move the view, then report a user scroll so following lets go.
+  function wheelTo(lv, y) {
+    lv.contentY = y
+    for (var d of lv.contentItem.data.concat(lv.data)) if (d && d.flick === lv && d.scrolled) d.scrolled(true)
+  }
+  function itemByKey(lv, k) {
+    for (var i = 0; i < lv.count; i++) { var it = lv.itemAtIndex(i); if (it && it.turn && String(it.turn.key) === k) return it }
+    return null
+  }
   Connections { target: rail; function onTabRecencyChanged() { if (test.round > 1) { test.reorderAt = Date.now(); test.cardsAtReorder = rail.feedScrollState().count; test.wasFull = false } } }
   FrameAnimation {
     running: true
@@ -68,13 +83,31 @@ ShellRoot {
         test.cardsAtReorder = lv.count; test.wasFull = lv.contentHeight >= lv.height
       }
       test.lastFrame = now
-      if (li && !isNaN(test.landedAt) && !test.t0) test.worstDrift = Math.max(test.worstDrift, Math.abs(li.y - lv.contentY - test.landedAt))
+      if (test.anchorKey && lv) {
+        var a = test.itemByKey(lv, test.anchorKey)
+        if (a) test.anchorDrift = Math.max(test.anchorDrift, Math.abs(a.y - lv.contentY - test.anchorAt))
+      }
+      if (lv && !isNaN(test.landedAt) && !test.t0 && !test.anchorKey && lv.count !== test.shownCount) test.addedAfterShown = Math.max(test.addedAfterShown, lv.count - test.shownCount)
+      if (li && !isNaN(test.landedAt) && !test.t0 && !test.anchorKey) test.worstDrift = Math.max(test.worstDrift, Math.abs(li.y - lv.contentY - test.landedAt))
       if (!test.t0) return
       var fv = test.feedView(rail)
       if (fv) test.lowest = Math.min(test.lowest, fv.opacity)
       var key = test.newest()
-      if (test.betaMoved && test.target === "beta" && key.indexOf("beta") === 0 && key.indexOf("betaa30") !== 0) test.stale = key
-      if (key.indexOf(test.target) === 0 && (!test.betaMoved || key.indexOf("betaa30") === 0)) { test.times.push(Date.now() - test.t0); test.t0 = 0; var nv = test.feedView(rail); test.landedAt = nv.itemAtIndex(nv.count - 1).y - nv.contentY }
+      // Shown means fully faded in: the swap itself happens while the chat is hidden.
+      if (!fv || fv.opacity < 0.99) return
+      if (key.indexOf(test.target) === 0 && (!test.betaMoved || key.indexOf("betaa30") === 0)) { test.times.push(Date.now() - test.t0); test.t0 = 0; var nv = test.feedView(rail); test.landedAt = nv.itemAtIndex(nv.count - 1).y - nv.contentY; test.shownCount = nv.count }
+    }
+  }
+  // Keep reading upward, as a wheel would: each step brings the oldest built card into view.
+  Timer {
+    interval: 250; repeat: true; running: test.anchorKey !== "" && test.round < 14
+    onTriggered: {
+      var sv = test.feedView(rail), first = sv ? sv.itemAtIndex(0) : null
+      if (!first || rail.feedScrollState().count >= rail.groupedFeed.length) return
+      var worst = test.anchorDrift
+      test.anchorKey = String(first.turn.key); test.wheelTo(sv, Math.max(sv.originY, first.y - 40)); test.anchorAt = first.y - sv.contentY
+      test.scrollSteps++
+      test.anchorDrift = worst
     }
   }
   Timer {
@@ -95,19 +128,28 @@ ShellRoot {
         state.onLine(JSON.stringify({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: 305, content: [{ type: "text", text: "beta answer 30." }] } }), 0)
       } else if (r === 6) {
         test.target = "beta"; test.t0 = Date.now(); rail.activeRaw = "beta"
-      } else if (r < 12 && rail.feedScrollState().count < rail.groupedFeed.length) {
+      } else if (r === 7) {
+        // Nothing builds older cards while nobody looks at them.
+        test.builtAfterSettle = rail.feedScrollState().count
+        var lv = test.feedView(rail)
+        test.check(lv && lv.count < rail.groupedFeed.length, "every older card was built after the switch (" + (lv ? lv.count : 0) + " of " + rail.groupedFeed.length + ")")
+        test.wheelTo(lv, lv.originY + 40)
+        var top = lv.itemAtIndex(0)
+        test.anchorKey = String(top.turn.key); test.anchorAt = top.y - lv.contentY
+      } else if (r < 14 && rail.feedScrollState().count < rail.groupedFeed.length) {
       } else {
-        test.check(!test.stale, "switching to a session that moved on showed its old cards first (newest was " + test.stale + ")")
         test.check(test.times.length === 5, "a switch never showed the other session's cards: " + JSON.stringify(test.times))
         // The first visit to beta waits for its transcript; the later ones have cards on hand.
         var revisits = test.times.slice(2, 4)
+        test.check(test.addedAfterShown === 0, test.addedAfterShown + " cards popped in one by one after a switch had faded in")
         test.check(test.worstDrift < 2, "the newest card moved " + Math.round(test.worstDrift) + "px on screen after a switch showed it")
         test.check(!test.builtDuringSlide, "off-screen cards were built while the session tabs were sliding")
         test.check(test.worstDuringReorder < 50, "a frame took " + test.worstDuringReorder + "ms while the session list reorders after a switch")
         test.check(Math.max(...revisits) < 600, "switching back to a session took " + JSON.stringify(revisits) + "ms to show its newest card")
-        test.check(test.lowest >= 0.99, "the chat faded out during a switch (opacity " + test.lowest + ")")
-        test.check(rail.feedScrollState().count === rail.groupedFeed.length, "all cards should be built after the switch, got " + rail.feedScrollState().count + " of " + rail.groupedFeed.length)
-        console.log("PASS: switching sessions shows the other session's newest card in " + JSON.stringify(revisits) + "ms without a fade")
+        test.check(test.lowest < 0.05, "the old cards never faded out during a switch (opacity " + test.lowest + ")")
+        test.check(rail.feedScrollState().count === rail.groupedFeed.length, "scrolling to the top should build every card, got " + rail.feedScrollState().count + " of " + rail.groupedFeed.length)
+        test.check(test.anchorDrift < 2, "an on-screen card moved " + Math.round(test.anchorDrift) + "px while older cards were built above it")
+        console.log("PASS: a switch fades to the other session's newest card in " + JSON.stringify(revisits) + "ms; older cards build only while scrolling up, without moving the screen")
         Qt.quit()
       }
     }

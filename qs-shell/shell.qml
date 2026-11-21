@@ -601,7 +601,8 @@ ShellRoot {
               anchors.fill: workPanel
               visible: win.studioActive
               enabled: visible
-              active: !!win.studioRoot
+              // Built only while open: loading it draws its sprites in JS, a 1.4s freeze on every switch to that session.
+              active: !!win.studioRoot && win.studioActive
               source: win.studioRoot ? "file://" + win.studioRoot + "/cockpit/StudioPanel.qml" : ""
               onLoaded: { item.root = Qt.binding(() => win.studioRoot); item.focus = true }
               onActiveFocusChanged: if (activeFocus) win.pane = "nvim"
