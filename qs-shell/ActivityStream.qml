@@ -487,7 +487,7 @@ FocusScope {
     source: visible ? "file://" + dir + "/cockpit-mark-quiet-" + Theme.mode + ".png" : ""
     sourceSize.height: height * 2
     fillMode: Image.PreserveAspectFit
-    asynchronous: true; smooth: true
+    asynchronous: true; smooth: true; cache: false
   }
   ListView {
     id: list
