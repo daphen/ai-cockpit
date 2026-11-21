@@ -37,7 +37,7 @@ ShellRoot {
           worst = Math.max(worst, Date.now() - t0)
         }
         test.check(page.cards.length > 50, "setup: expected a long activity list, got " + page.cards.length)
-        test.check(worst < 400, "one new change froze the window for " + worst + "ms while Activity rebuilt")
+        test.check(worst < 60, "one new change froze the window for " + worst + "ms while Activity rebuilt")
         console.log("PASS: a new change updates Activity in " + worst + "ms with two weeks of history")
         Qt.quit()
       }

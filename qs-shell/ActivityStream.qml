@@ -358,21 +358,24 @@ FocusScope {
     }
     return out.filter(c => c.changes.length || c.outcome).sort((a, b) => a.at - b.at)
   }
-  // Past days fold to one row so today is what's on screen.
+  // Past days fold to one row so today is what's on screen, except days within 6h of the newest card:
+  // work that runs past midnight must not collapse under the cursor.
   property var openDays: ({})
   readonly property var rows: {
     var out = [], day = "", sid = "", shown = cards.filter(c => !importantOnly || !minor(c))
     // Ordered by when the ask was made, so a card never moves once shown; new work only appends.
-    var counts = {}, startOf = new Map(), labelOf = new Map(), dayNames = new Map(), open = openDays
+    // Plain fields, not Maps keyed by card: Map lookups made this sort ~100ms for two weeks of cards.
+    var counts = {}, dayNames = {}, open = openDays, recent = {}
+    var newest = shown.reduce((m, c) => Math.max(m, c.at), 0)
     for (var c of shown) {
       var st = c.ctx.at || c.changes.reduce((m, e) => Math.min(m, e.at), c.at), midnight = new Date(st).setHours(0, 0, 0, 0)
-      if (!dayNames.has(midnight)) dayNames.set(midnight, dayLabel(st))
-      startOf.set(c, st); labelOf.set(c, dayNames.get(midnight))
-      counts[labelOf.get(c)] = (counts[labelOf.get(c)] || 0) + 1
+      c.start = st; c.day = dayNames[midnight] || (dayNames[midnight] = dayLabel(st))
+      counts[c.day] = (counts[c.day] || 0) + 1
+      if (c.at > newest - 6 * 3600000) recent[c.day] = true
     }
-    shown.sort((a, b) => startOf.get(a) - startOf.get(b))
+    shown.sort((a, b) => a.start - b.start)
     for (c of shown) {
-      var label = labelOf.get(c), past = label !== "Today"
+      var label = c.day, past = label !== "Today" && !recent[label]
       if (label !== day) {
         out.push({ kind: past ? "fold" : "day", key: "day:" + label, text: label, count: counts[label], open: !!open[label] })
         day = label; sid = ""
@@ -421,6 +424,13 @@ FocusScope {
     var parts = tidy(t).replace(/^[\w./-]+(\s[\w./-]+){0,2}:\s+(?=\S)/, "").split(/(;\s|:\s|\.\s)/)
     var head = parts[0].split(/\s+/).length < 3 && parts.length > 2 ? parts[0] + parts[1] + parts[2] : parts[0]
     return head.replace(/\.$/, "")
+  }
+  // The first sentence or clause leads; the rest is supporting detail.
+  function split(t) {
+    var m = String(t).match(/^(.{12,}?)(?:([.?!])\s+(?=[A-Z0-9"\u201c(])|:\s+(?=\S))/)
+    if (!m) return { head: t, rest: "" }
+    var rest = t.slice(m[0].length)
+    return { head: m[1] + (m[2] === "?" ? "?" : ""), rest: rest.charAt(0).toUpperCase() + rest.slice(1) }
   }
   // Commit hashes in outcomes are for the chat, not for scanning.
   function tidy(t) { return String(t || "").replace(/`/g, "").replace(/\s*\([^()]*\b[0-9a-f]{7,40}\b[^()]*\)/g, "").replace(/\s+([.,;:])/g, "$1").trim() }
@@ -512,7 +522,7 @@ FocusScope {
       readonly property real gap: kind === "card" && index > 0 && (root.rows[index - 1] || {}).kind === "file" ? 20 : 0
       readonly property Item restDot: kind === "fold" ? foldDot : kind === "file" ? fileDot : cardDot
       width: list.width
-      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 48 : kind === "file" ? fileBox.height + 4 : cardBox.height + 2 + gap
+      height: kind === "day" ? 52 : kind === "fold" ? 44 : kind === "who" ? 56 : kind === "file" ? fileBox.height + 8 : cardBox.height + 6 + gap
 
       CapLabel {
         visible: row.kind === "day"
@@ -544,7 +554,7 @@ FocusScope {
 
       Row {
         visible: row.kind === "who"
-        x: 14; anchors.bottom: parent.bottom; anchors.bottomMargin: 6
+        x: 14; anchors.bottom: parent.bottom; anchors.bottomMargin: 8
         spacing: 10
         Text {
           text: row.entry.sid || ""; textFormat: Text.PlainText
@@ -559,7 +569,7 @@ FocusScope {
         y: 1 + row.gap
         x: 8
         width: parent.width - 8
-        height: visible ? cardCol.implicitHeight + 16 : 0
+        height: visible ? cardCol.implicitHeight + 24 : 0
         radius: root.cardRadius
         readonly property bool dim: root.minor(row.entry)
         readonly property var last: (row.entry.changes || []).slice(-1)[0] || ({ why: "" })
@@ -569,6 +579,7 @@ FocusScope {
         readonly property var review: (row.entry.changes || []).reduce((v, e) => e.review || v, null)
         readonly property string relay: ctx.from && ctx.from !== "you" && ctx.from !== "task" ? ctx.from : ""
         readonly property string done: row.entry.outcome ? root.tidy(row.entry.outcome).replace(/\.$/, "") : root.headline(last.why)
+        readonly property var parts: row.entry.outcome && !review ? root.split(done) : ({ head: done, rest: "" })
         // Opaque, so the corner mark stays hidden under the cards that slide over it.
         color: Qt.tint(Theme.bg, row.current ? Qt.alpha(Theme.fg, 0.05) : cardHover.hovered ? Qt.alpha(Theme.fg, 0.03) : "transparent")
         border.width: row.current ? 1 : 0
@@ -593,15 +604,15 @@ FocusScope {
         }
         Column {
           id: cardCol
-          x: 24; y: 8
+          x: 24; y: 12
           width: parent.width - 36 - cardMeta.width - 12
-          spacing: 6
+          spacing: 4
           Text {
             id: cardHead
             objectName: "cardHead"
             width: parent.width
             text: cardBox.review ? '<font color="' + root.metaColor + '">#' + cardBox.review.pr + "</font>&nbsp;&nbsp;" + root.esc(cardBox.review.title || "Review")
-              : root.esc(cardBox.done || cardBox.asked) + (row.entry.tests ? '&nbsp;&nbsp;<font color="' + root.metaColor + '">+ tests</font>' : "")
+              : root.esc(cardBox.parts.head || cardBox.asked) + (row.entry.tests ? '&nbsp;&nbsp;<font color="' + root.metaColor + '">+ tests</font>' : "")
             leftPadding: relayChip.visible ? relayChip.width + 8 : 0
             PillSurface {
               id: relayChip
@@ -621,6 +632,17 @@ FocusScope {
             lineHeightMode: Text.FixedHeight; lineHeight: root.fsBody * 1.4
             color: cardBox.dim ? root.metaColor : root.contentColor
             font.family: root.bodyFont; font.pixelSize: root.fsBody
+          }
+          Text {
+            objectName: "cardRest"
+            visible: text !== ""
+            width: parent.width
+            text: cardBox.parts.rest
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap; maximumLineCount: 2; elide: Text.ElideRight
+            lineHeightMode: Text.FixedHeight; lineHeight: root.fsMeta * 1.45
+            color: cardBox.dim ? Qt.alpha(root.metaColor, 0.7) : root.metaColor
+            font.family: root.bodyFont; font.pixelSize: root.fsMeta
           }
           Row {
             objectName: "reviewRow"
@@ -677,7 +699,7 @@ FocusScope {
         readonly property real lineH: (root.fsMeta - 2) * 1.65
         x: 32; y: 2
         width: parent.width - x
-        height: visible ? fileCol.implicitHeight + 12 : 0
+        height: visible ? fileCol.implicitHeight + 16 : 0
         radius: root.cardRadius
         color: Qt.tint(Theme.bg, root.rail ? root.rail.codePanelColor : Qt.alpha(Theme.fg, 0.05))
         border.width: 1
@@ -687,14 +709,14 @@ FocusScope {
         Rectangle {
           id: fileDot
           z: 2
-          x: -20; y: 6 + 14 - height / 2
+          x: -20; y: 8 + 14 - height / 2
           width: 8; height: 8; radius: 4
           color: Theme.cursor
           visible: row.current && !root.caretHeld
         }
         Column {
           id: fileCol
-          y: 6
+          y: 8
           width: parent.width
           Item {
             x: 6; width: parent.width - 12; height: 28
