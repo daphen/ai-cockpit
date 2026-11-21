@@ -935,15 +935,17 @@ Item {
     _push(sid, item)
     return item
   }
+  // Counts assistant messages per session, so a reasoning block that stopped typing is still found by message_end.
+  property var _msgSeq: ({})
   function _liveThink(sid, contentIndex, model) {
-    var items = feeds[sid] || []
+    var items = feeds[sid] || [], msg = _msgSeq[sid] || 0
     for (var i = items.length - 1; i >= 0; i--)
-      if (items[i].liveThink && items[i].contentIndex === contentIndex) {
+      if (items[i].kind === "think" && items[i].msg === msg && items[i].contentIndex === contentIndex) {
         if (model) items[i].model = String(model)
         return items[i]
       }
     var item = { kind: "think", text: "thinking", full: "", liveThink: true, arrivedAt: Date.now(),
-                 model: String(model || ""), contentIndex: contentIndex, mid: "think:" + Date.now() + ":" + contentIndex }
+                 model: String(model || ""), contentIndex: contentIndex, msg: msg, mid: "think:" + Date.now() + ":" + contentIndex }
     _push(sid, item)
     return item
   }
@@ -1353,6 +1355,7 @@ Item {
         if (!echo.settled && echo.delivery !== "failed") _echoDelivery(sid, echo.id, "failed")
       return
     }
+    if (t === "message_start" && m.message && m.message.role === "assistant") _msgSeq[sid] = (_msgSeq[sid] || 0) + 1
     if (sid === selectedSession) {
       if (t === "message_start" && m.message && m.message.role === "assistant") {
         _finishLiveText(sid)
