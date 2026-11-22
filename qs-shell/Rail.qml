@@ -67,7 +67,8 @@ Item {
   readonly property Item composerField: composerInput
   function cursorPoint(key) {
     const i = view === "chat" && key.startsWith("f:") ? _feedIndexOf(key.slice(2)) : -1
-    const it = i >= 0 ? feedView.itemAtIndex(i) : null
+    // The model holds only the newest rows; older ones load on scroll.
+    const it = i >= 0 ? feedView.itemAtIndex(i - _feedOffset) : null
     if (!it) return null
     // The current row's point is where it lands once the scroll that reveals it finishes.
     const p = it.restDot.mapToItem(rail, it.restDot.width / 2, it.restDot.height / 2)
