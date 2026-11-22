@@ -36,8 +36,8 @@ QtObject {
 
   function request(sid) {
     _want = sid
-    // Saved cards show at once; a fresh transcript that lands later is merged into them.
-    _ready = !(agentd && sid && agentd.select(sid)) || (agentd.feeds[sid] || []).length > 0
+    // Saved cards are current unless select() is fetching; then wait (capped) so it never lands after the fade-in.
+    _ready = !(agentd && sid && agentd.select(sid))
     if (!shown || !sid) { _stopAll(); target.opacity = 1; phase = "idle"; _doSwap(); return }
     if (_ready) _cap.stop(); else _cap.restart()
     phase = "out"

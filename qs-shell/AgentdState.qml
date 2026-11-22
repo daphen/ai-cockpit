@@ -478,10 +478,24 @@ Item {
   // first switch to it shows its cards at once instead of waiting on the fetch.
   property string _prefetching: ""
   property var _prefetched: ({})
+  // Sessions that finished a turn off screen, refetched one at a time so a switch reveals them current.
+  property var _refreshQueue: []
+  // Parsing a transcript can block the window for 100ms+, so background fetches wait for typing to pause.
+  property real typedAt: 0
   readonly property Timer prefetchNext: Timer {
     interval: 400
     onTriggered: {
+      if (Date.now() - root.typedAt < 1500) { restart(); return }
       var list = root.sessions || []
+      while (root._refreshQueue.length) {
+        var due = root._refreshQueue.shift()
+        if (due === root.selectedSession || !root._unseen[due]) continue
+        root._unseen[due] = "fetching"
+        root._prefetching = due
+        root.send({ type: "get_entries", session: due })
+        prefetchGiveUp.restart()
+        return
+      }
       for (var i = 0; i < list.length; i++) {
         var sid = list[i].name
         if (!sid || root._prefetched[sid] || root._activityRequested.has(sid) || (root.feeds[sid] || []).length) continue
@@ -1352,9 +1366,11 @@ Item {
       if (m.success && m.session) _noteActivity(_activityFromEntries(m.session, (m.data || {}).entries || []))
       var background = m.session === _prefetching
       if (background) { _prefetching = ""; prefetchNext.restart() }
+      if (!m.success && _unseen[m.session] === "fetching") _unseen[m.session] = true
       if (m.session === selectedSession || (m.success && !feedReady(m.session))) {
         onEntries(m, m.session !== selectedSession)
-        if (m.success && m.session === selectedSession) { var u = _unseen; delete u[m.session]; _unseen = u }
+        // "fetching" means no event arrived since the background refetch was sent.
+        if (m.success && (m.session === selectedSession || _unseen[m.session] === "fetching")) { var u = _unseen; delete u[m.session]; _unseen = u }
         entriesLoaded(m.session)
       }
       return
@@ -1375,7 +1391,13 @@ Item {
     }
     const sid = m.session
     if (!sid) return
-    if (sid !== selectedSession) _unseen[sid] = true
+    if (sid !== selectedSession) {
+      _unseen[sid] = true
+      if (t === "agent_end" && (feeds[sid] || []).length && _refreshQueue.indexOf(sid) < 0) {
+        _refreshQueue.push(sid)
+        if (!_prefetching && !prefetchNext.running) prefetchNext.restart()
+      }
+    }
     // pi died: its queue and any message it had not yet written are gone with it.
     if (t === "reconnecting") {
       _setFeedValue(sid, "pi-queue", null)

@@ -4520,7 +4520,10 @@ Item {
             color: chin.fg
             font.family: Theme.fontFamily; font.pixelSize: rail.fsBody
             onCursorRectangleChanged: composerFlick.ensureVisible(cursorRectangle)
-            onTextChanged: if (!text.length) feedDebounce.restart()
+            onTextChanged: {
+              if (rail.agentd) rail.agentd.typedAt = Date.now()
+              if (!text.length) feedDebounce.restart()
+            }
             // Orange blinking caret, matching the sibling apps (Theme.cursor).
             cursorDelegate: Rectangle { width: 2; radius: 1; color: Theme.cursor; opacity: composerInput.cursorVisible && !rail.caretHeld ? 1 : 0 }
             // TextArea has no onAccepted — plain Enter routes here from Keys below.
