@@ -14,6 +14,8 @@ end=text.rfind('\n  }\n}')
 assert end >= 0
 text=text[:end]+'''
     Timer {
+      id: test
+      property string want: ""
       property int stage: 0
       property var seen: []
       interval: 300; repeat: true; running: true
@@ -25,17 +27,21 @@ text=text[:end]+'''
           win.pane = "rail"; rail.activeRaw = "bravo-child"
         }
         else if (stage === 1) {
+          var order = rail.rosterList.map(r => r.rawName).join(), names = order.split(","), at = names.indexOf("bravo")
+          var want = [1, 2, 1].map(d => names[(at + d) % names.length]).join()
           cockpitIpc.step("next"); seen.push(rail.selectedRaw)
           cockpitIpc.step("next"); seen.push(rail.selectedRaw)
           cockpitIpc.step("prev"); seen.push(rail.selectedRaw)
-          if (seen.join() !== "charlie,alpha,charlie") throw new Error("rail stepped " + seen.join())
+          if (seen.join() !== want) throw new Error("rail stepped " + seen.join() + ", want " + want)
+          if (rail.rosterList.map(r => r.rawName).join() !== order) throw new Error("tabs re-sorted while stepping")
+          test.want = seen[2]
           seen = [viewTabs.current]
           win.pane = "nvim"
         } else if (stage === 2) {
           cockpitIpc.step("next")
         } else if (stage === 3) {
           if (viewTabs.current === seen[0]) throw new Error("left pane tab did not change")
-          if (rail.selectedRaw !== "charlie") throw new Error("left pane step changed session")
+          if (rail.selectedRaw !== test.want) throw new Error("left pane step changed session")
           cockpitIpc.step("prev")
         } else if (stage === 4) {
           if (viewTabs.current !== seen[0]) throw new Error("prev did not return to " + seen[0])

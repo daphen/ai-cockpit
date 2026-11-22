@@ -257,7 +257,8 @@ Item {
   readonly property var childScopeList: childScope
     ? [childScope].concat(liveSessions.filter(s => s.parent === childScope).map(s => s.name)) : []
   onRosterExpandedChanged: childScope = ""
-  function syncTabRecency() { if (!tabsFocused) tabRecency = recentSelections }
+  function syncTabRecency() { if (!tabsFocused && !stepHold.running) tabRecency = recentSelections }
+  Timer { id: stepHold; interval: 2000; onTriggered: rail.syncTabRecency() }
   // A switch re-sorts the tabs as the new cards fade in: building them mid-slide dropped frames.
   onRecentSelectionsChanged: if (shownRaw === selectedRaw && !sessionSwitch.busy) syncTabRecency()
   onTabsFocusedChanged: syncTabRecency()
@@ -2428,9 +2429,10 @@ Item {
   readonly property string changesCwd:
     (agentd && selectedRaw) ? agentd.changesCwdFor(selectedRaw) : ""
 
-  // Name order, not tab order: tabs re-sort by recency, so stepping them would bounce.
+  // Tabs keep their order until 2s after the last step, so each press moves one tab.
   function stepSession(by) {
-    var names = rosterList.map(r => r.rawName || r.name).sort()
+    stepHold.restart()
+    var names = rosterList.map(r => r.rawName || r.name)
     if (!names.length) return
     var s = liveSessions.find(x => x.name === selectedRaw)
     var at = names.indexOf(s && s.parent && names.indexOf(s.parent) >= 0 ? s.parent : selectedRaw)
