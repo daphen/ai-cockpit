@@ -26,7 +26,10 @@ FocusScope {
   }
   function reveal() { if (agentd) agentd.loadActivityHistory(); Qt.callLater(scroller.toEnd) }
   onVisibleChanged: if (visible) { reveal(); refreshGit(); jevAgain.restart() }
-  onSessionsChanged: if (visible && agentd) {
+  // The timeline needs only who works where. A string stays equal across status churn,
+  // so the timeline is not rebuilt each time any session starts or ends a turn.
+  readonly property string sessionDirs: sessions.map(s => s.name + "\t" + (s.cwd || "")).join("\n")
+  onSessionDirsChanged: if (visible && agentd) {
     agentd.loadActivityHistory()
     if (sessions.some(s => s.cwd && !_gitRead[s.cwd])) refreshGit()
   }
@@ -276,12 +279,13 @@ FocusScope {
                     files: [{ path: r.path, add: r.add || 0, del: r.del || 0, line: r.line || 1, whole: !!r.whole, diff: r.whole ? [] : (r.diff || []) }],
                     key: r.key })
     }
+    var dirs = sessionDirs ? sessionDirs.split("\n").map(line => line.split("\t")) : []
     var tops = {}
     for (var cwd in repos) {
       var repo = repos[cwd]
       if (tops[repo.top]) continue
       tops[repo.top] = true
-      var owners = sessions.filter(s => repos[s.cwd] && repos[s.cwd].top === repo.top).map(s => s.name)
+      var owners = dirs.filter(d => repos[d[1]] && repos[d[1]].top === repo.top).map(d => d[0])
       var commits = repo.commits.slice().sort((a, b) => a.at - b.at)
       for (var ci = 0; ci < commits.length; ci++) {
         var cm = commits[ci], since = ci ? commits[ci - 1].at : 0
