@@ -64,14 +64,16 @@ Item {
   function _rebuildSessions() {
     var out = [], owner = {}
     for (var i = 0; i < sockPaths.length; i++) {
-      var arr = _rosters[i] || [], sc = _scopeOf(sockPaths[i])
+      // agentd lists sessions in Go map order, which reshuffles on every push.
+      var arr = (_rosters[i] || []).slice().sort((x, y) => String(x.name) < String(y.name) ? -1 : String(x.name) > String(y.name) ? 1 : 0)
+      var sc = _scopeOf(sockPaths[i])
       var up = !!(_socks[i] && _socks[i].connected)
       for (var j = 0; j < arr.length; j++) {
         var s = arr[j]
         if (owner[s.name] !== undefined) continue   // earlier socket owns the name
         owner[s.name] = i
         var tagged = {}
-        for (var k in s) tagged[k] = s[k]
+        for (var k in s) if (k !== "currentTool") tagged[k] = s[k]
         tagged.scope = sc
         tagged.offline = !up
         if (!up) tagged.status = "offline"   // its daemon is gone; whatever it was
@@ -80,9 +82,27 @@ Item {
       }
     }
     _sockOf = owner
-    root.sessions = out
-    root.gen++
+    if (!_sameSessions(out, root.sessions)) {
+      root.sessions = out
+      root.gen++
+    }
     for (var k in _socks) _writePresence(k)
+  }
+  // Every consumer re-evaluates when sessions is reassigned, which blocked typing for
+  // ~100ms per push. Tool changes reach the UI via _curTool; cost only matters as > 0.
+  function _sameSessions(a, b) {
+    if (!b || a.length !== b.length) return false
+    for (var i = 0; i < a.length; i++) {
+      var x = a[i], y = b[i], keys = {}
+      for (var k in x) keys[k] = true
+      for (var k2 in y) keys[k2] = true
+      for (var key in keys) {
+        if (key === "costUsd") { if ((x.costUsd > 0) !== (y.costUsd > 0)) return false; continue }
+        var u = x[key], v = y[key]
+        if (u !== v && (typeof u !== "object" || typeof v !== "object" || JSON.stringify(u) !== JSON.stringify(v))) return false
+      }
+    }
+    return true
   }
   // True once every CONNECTED socket has pushed its first roster, so consumers can
   // wait before picking a landing session. Without this the rail latches onto
