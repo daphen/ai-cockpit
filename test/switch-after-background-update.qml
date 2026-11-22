@@ -90,7 +90,19 @@ ShellRoot {
         test.check(test.fetched.indexOf("beta") < 0, "a background transcript fetch ran while the user was typing")
       } else if (r === 14) {
         test.check(test.fetched.indexOf("beta") >= 0, "the background refresh never ran after typing paused")
-        if (!test.failed) console.log("PASS: a session updated in the background shows its new turn the moment a switch reveals it, and refreshes wait for typing to pause")
+      } else if (r === 15) {
+        test.turns++
+        var i = test.turns - 1
+        state.onLine(JSON.stringify({ type: "message_end", session: "beta", message: { role: "assistant", timestamp: i * 10 + 5, content: [{ type: "text", text: "beta answer " + i }] } }), 0)
+      } else if (r === 17) {
+        state.onLine(JSON.stringify({ type: "message_update", session: "beta", assistantMessageEvent: { type: "text_delta", delta: "still going" } }), 0)
+        test.fetched = []
+        test.swapped = ({})
+        rail.activeRaw = "beta"
+      } else if (r === 18) {
+        test.check(test.swapped.beta && test.swapped.beta.indexOf("beta answer 6") >= 0, "a step beta saved mid-turn was missing when the switch showed it: " + test.swapped.beta)
+        test.check(test.fetched.indexOf("beta") < 0, "switching to a running session still waited on a fetch although its background copy was current")
+        if (!test.failed) console.log("PASS: background sessions stay current through and between turns, so a switch shows them at once, and refreshes wait for typing to pause")
         Qt.quit()
       }
     }

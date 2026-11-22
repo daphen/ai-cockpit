@@ -480,6 +480,8 @@ Item {
   property var _prefetched: ({})
   // Sessions that finished a turn off screen, refetched one at a time so a switch reveals them current.
   property var _refreshQueue: []
+  readonly property var _unsaved: new Set(["message_start", "message_update", "tool_execution_start", "tool_execution_update",
+    "tool_execution_end", "turn_start", "turn_end", "agent_start"])
   // Parsing a transcript can block the window for 100ms+, so background fetches wait for typing to pause.
   property real typedAt: 0
   readonly property Timer prefetchNext: Timer {
@@ -487,9 +489,13 @@ Item {
     onTriggered: {
       if (Date.now() - root.typedAt < 1500) { restart(); return }
       var list = root.sessions || []
-      while (root._refreshQueue.length) {
-        var due = root._refreshQueue.shift()
-        if (due === root.selectedSession || !root._unseen[due]) continue
+      for (var q = 0; q < root._refreshQueue.length; q++) {
+        var due = root._refreshQueue[q]
+        if (due === root.selectedSession || !root._unseen[due]) { root._refreshQueue.splice(q--, 1); continue }
+        // A busy session saves a message every few seconds; a work transcript is megabytes over the tunnel.
+        if (Date.now() - (root._refreshedAt[due] || 0) < 4000) continue
+        root._refreshQueue.splice(q, 1)
+        root._refreshedAt[due] = Date.now()
         root._unseen[due] = "fetching"
         root._prefetching = due
         root.send({ type: "get_entries", session: due })
@@ -506,8 +512,10 @@ Item {
         prefetchGiveUp.restart()
         return
       }
+      if (root._refreshQueue.length) restart()
     }
   }
+  property var _refreshedAt: ({})
   readonly property Timer prefetchGiveUp: Timer {
     interval: 30000
     onTriggered: { root._prefetching = ""; root.prefetchNext.restart() }
@@ -1391,9 +1399,10 @@ Item {
     }
     const sid = m.session
     if (!sid) return
-    if (sid !== selectedSession) {
+    // Streaming and tool progress never reach the transcript, so they leave a background copy current.
+    if (sid !== selectedSession && !_unsaved.has(t)) {
       _unseen[sid] = true
-      if (t === "agent_end" && (feeds[sid] || []).length && _refreshQueue.indexOf(sid) < 0) {
+      if ((t === "message_end" || t === "agent_end") && (feeds[sid] || []).length && _refreshQueue.indexOf(sid) < 0) {
         _refreshQueue.push(sid)
         if (!_prefetching && !prefetchNext.running) prefetchNext.restart()
       }

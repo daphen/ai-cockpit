@@ -81,6 +81,7 @@ env -u WAYLAND_DISPLAY -u XDG_CACHE_HOME HOME="$tmp/home" QT_QPA_PLATFORM=offscr
 pid=$!
 checks=200
 [[ "${1:-}" != "test/delivery-confirmation.qml" ]] || checks=400
+[[ "${1:-}" != "test/switch-after-background-update.qml" ]] || checks=400
 for _ in $(seq 1 "$checks"); do
   grep -qE 'PASS:|ERROR|Error:' "$tmp/output" && break
   kill -0 "$pid" 2>/dev/null || break
