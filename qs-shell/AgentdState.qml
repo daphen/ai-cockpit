@@ -377,9 +377,9 @@ Item {
     // kept re-appending "interrupted by you" after every later message until
     // the 60s cap.
     var nmk = _marks; delete nmk[sid]; _marks = nmk
-    // agentd/pi expect `message`, not `text`.
+    // Pi stays busy after agent_end while it auto-compacts; followUp only applies then.
     var id = _sendId()
-    if (!send({ type: "prompt", session: sid, message: text, id: id })) {
+    if (!send({ type: "prompt", session: sid, message: text, id: id, streamingBehavior: "followUp" })) {
       _echoTrack(sid, text, id, "failed", false); _undelivered(sid, text); return
     }
     _echoTrack(sid, text, id, "pending", false)
