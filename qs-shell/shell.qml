@@ -262,6 +262,12 @@ ShellRoot {
       target: "cockpit"
       function focusLeft(): string  { return win.tryFocus("left") }
       function focusRight(): string { return win.tryFocus("right") }
+      function step(direction: string): string {
+        var by = direction === "prev" ? -1 : 1
+        if (win.pane === "rail" && !win.railCollapsed) rail.stepSession(by)
+        else viewTabs.cycle(by)
+        return win.pane
+      }
       function pane(): string {
         // Report reality, not the cached property: hot-reloads leave win.pane stale
         // ("rail" while the keyboard truly sits in the terminal), and Super+T's
